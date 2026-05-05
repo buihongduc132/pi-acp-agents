@@ -28,7 +28,7 @@ function createMockPi() {
 describe("Level 2 — Tool registration", () => {
   it("registers acp_session_load tool", async () => {
     const mock = createMockPi();
-    const mod = await import("../index.ts");
+    const mod = await import("../index.js");
     (mod.default as any)(mock);
     const names = mock.tools.map((t: any) => t.name);
     expect(names).toContain("acp_session_load");
@@ -36,7 +36,7 @@ describe("Level 2 — Tool registration", () => {
 
   it("registers acp_session_set_model tool", async () => {
     const mock = createMockPi();
-    const mod = await import("../index.ts");
+    const mod = await import("../index.js");
     (mod.default as any)(mock);
     const names = mock.tools.map((t: any) => t.name);
     expect(names).toContain("acp_session_set_model");
@@ -44,7 +44,7 @@ describe("Level 2 — Tool registration", () => {
 
   it("registers acp_session_set_mode tool", async () => {
     const mock = createMockPi();
-    const mod = await import("../index.ts");
+    const mod = await import("../index.js");
     (mod.default as any)(mock);
     const names = mock.tools.map((t: any) => t.name);
     expect(names).toContain("acp_session_set_mode");
@@ -52,7 +52,7 @@ describe("Level 2 — Tool registration", () => {
 
   it("registers acp_cancel tool", async () => {
     const mock = createMockPi();
-    const mod = await import("../index.ts");
+    const mod = await import("../index.js");
     (mod.default as any)(mock);
     const names = mock.tools.map((t: any) => t.name);
     expect(names).toContain("acp_cancel");
@@ -60,7 +60,7 @@ describe("Level 2 — Tool registration", () => {
 
   it("all Level 2 tools have session_id parameter", async () => {
     const mock = createMockPi();
-    const mod = await import("../index.ts");
+    const mod = await import("../index.js");
     (mod.default as any)(mock);
     const l2Tools = mock.tools.filter(
       (t: any) =>

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { AcpAgentAdapter, type AcpAdapterOptions } from "../../src/adapters/base.js";
-import type { AcpAgentConfig, AcpPromptResult } from "../../src/types.js";
+import type { AcpAgentConfig, AcpPromptResult } from "../../src/config/types.js";
 import { createMockAgent } from "../helpers/mock-acp-server.js";
 import { ndJsonStream, ClientSideConnection } from "@agentclientprotocol/sdk";
 import type { Logger } from "../../src/logger.js";

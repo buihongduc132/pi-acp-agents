@@ -11,24 +11,25 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { AgentToolResult } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { type AcpWidgetState, createAcpWidget } from "./src/acp-widget.js";
 import { createAdapter } from "./src/adapter-factory.js";
-import { AcpCircuitBreaker } from "./src/core/circuit-breaker.js";
 import { loadConfig } from "./src/config/config.js";
-import {
-	type AgentResult as _AgentResult,
-	type ComparisonResult as _ComparisonResult,
-	AgentCoordinator,
-} from "./src/coordination/coordinator.js";
-import { HealthMonitor } from "./src/core/health-monitor.js";
-import { createFileLogger } from "./src/logger.js";
-import { SessionManager } from "./src/core/session-manager.js";
 import type {
 	AcpConfig,
 	AcpPromptResult,
 	AcpSessionHandle,
 } from "./src/config/types.js";
+import {
+	type AgentResult as _AgentResult,
+	type ComparisonResult as _ComparisonResult,
+	AgentCoordinator,
+} from "./src/coordination/coordinator.js";
+import { AcpCircuitBreaker } from "./src/core/circuit-breaker.js";
+import { HealthMonitor } from "./src/core/health-monitor.js";
+import { SessionManager } from "./src/core/session-manager.js";
+import { createFileLogger } from "./src/logger.js";
 
 /** Details returned by acp_prompt */
 interface AcpPromptDetails {
@@ -231,25 +232,29 @@ export default function (pi: ExtensionAPI) {
 					if (!handle || handle.disposed) {
 						return {
 							content: [
-								textContent(`Session "${params.session_id}" not found or disposed.`),
+								textContent(
+									`Session "${params.session_id}" not found or disposed.`,
+								),
 							],
-							details: undefined,
+							details: {} as any,
 						};
 					}
 					// FIX-B8: Check if session is busy
 					if (busySessions.get(params.session_id)) {
 						return {
 							content: [
-								textContent(`Session "${params.session_id}" is busy. Try again later.`),
+								textContent(
+									`Session "${params.session_id}" is busy. Try again later.`,
+								),
 							],
-							details: undefined,
+							details: {} as any,
 						};
 					}
 					busySessions.set(params.session_id, true);
 					try {
 						const adapter = activeAdapters.get(params.session_id)!;
 						const promptResult = (await adapter.prompt(
-						params.message,
+							params.message,
 						)) as AcpPromptResult;
 
 						// Touch session activity
@@ -280,17 +285,22 @@ export default function (pi: ExtensionAPI) {
 						params.message,
 					)) as AcpPromptResult;
 
-					makeSessionHandle(sessionId, agentName, params.cwd ?? ctx.cwd, adapter);
+					makeSessionHandle(
+						sessionId,
+						agentName,
+						params.cwd ?? ctx.cwd,
+						adapter,
+					);
 
 					return { ...promptResult, sessionId };
 				} catch (err) {
-					await adapter.dispose().catch(() => {});
+					adapter.dispose();
 					throw err;
 				}
 			}, `acp_prompt(${agentName})`);
 
 			if (result.ok) {
-				const r = result.value;
+				const r = result.value as AcpPromptResult;
 				refreshWidget(ctx);
 				return {
 					content: [textContent(r.text || "(no response)")],
@@ -299,7 +309,7 @@ export default function (pi: ExtensionAPI) {
 						stopReason: r.stopReason,
 						agent: agentName,
 					} satisfies AcpPromptDetails,
-				};
+				} as AgentToolResult<AcpPromptDetails>;
 			}
 
 			const prefix = result.circuitOpen
@@ -446,11 +456,16 @@ export default function (pi: ExtensionAPI) {
 					await adapter.initialize();
 					const sessionId = await adapter.newSession(params.cwd ?? ctx.cwd);
 
-					makeSessionHandle(sessionId, agentName, params.cwd ?? ctx.cwd, adapter);
+					makeSessionHandle(
+						sessionId,
+						agentName,
+						params.cwd ?? ctx.cwd,
+						adapter,
+					);
 
 					return sessionId;
 				} catch (err) {
-					await adapter.dispose().catch(() => {});
+					adapter.dispose();
 					throw err;
 				}
 			}, `acp_session_new(${agentName})`);
@@ -548,7 +563,7 @@ export default function (pi: ExtensionAPI) {
 
 			return {
 				content: [textContent(`Failed to load session: ${result.error}`)],
-				details: undefined,
+				details: {} as any,
 			};
 		},
 	});
@@ -604,7 +619,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			return {
-				details: undefined,
+				details: {} as any,
 				content: [textContent(`Failed to set model: ${result.error}`)],
 			};
 		},
@@ -659,7 +674,7 @@ export default function (pi: ExtensionAPI) {
 
 			return {
 				content: [textContent(`Failed to set mode: ${result.error}`)],
-				details: undefined,
+				details: {} as any,
 			};
 		},
 	});
@@ -678,8 +693,12 @@ export default function (pi: ExtensionAPI) {
 			// FIX-B7: Check if session exists or disposed
 			if (!handle || handle.disposed) {
 				return {
-					content: [textContent(`Session "${params.session_id}" not found or disposed.`)],
-					details: undefined,
+					content: [
+						textContent(
+							`Session "${params.session_id}" not found or disposed.`,
+						),
+					],
+					details: {} as any,
 				};
 			}
 
@@ -704,7 +723,7 @@ export default function (pi: ExtensionAPI) {
 
 			return {
 				content: [textContent(`Failed to cancel: ${result.error}`)],
-				details: undefined,
+				details: {} as any,
 			};
 		},
 	});
@@ -742,15 +761,20 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd);
-			const result = await safeExecute(
-				() =>
-					coordinator.delegate(
-						agentName,
-						params.message,
-						params.cwd ?? ctx.cwd,
-					),
-				`acp_delegate(${agentName})`,
-			);
+			const result = await safeExecute(async () => {
+				const r = await coordinator.delegate(
+					agentName,
+					params.message,
+					params.cwd ?? ctx.cwd,
+				);
+				// Surface stopReason=error as text so user sees what happened
+				if (r.stopReason === "error" && !r.text) {
+					throw new Error(
+						`Agent returned stopReason=error with no text. Session: ${r.sessionId}`,
+					);
+				}
+				return r;
+			}, `acp_delegate(${agentName})`);
 
 			if (result.ok) {
 				const r = result.value;
@@ -766,9 +790,18 @@ export default function (pi: ExtensionAPI) {
 
 			return {
 				content: [
-					textContent(`Delegate failed (${agentName}): ${result.error}`),
+					textContent(
+						`Delegate failed (${agentName}):\n` +
+							`  Error: ${result.error}\n` +
+							`  Circuit open: ${result.circuitOpen ? "yes" : "no"}\n` +
+							`  Agent config: command=${config.agents[agentName]?.command} args=${(config.agents[agentName]?.args ?? []).join(" ")}`,
+					),
 				],
-				details: { agent: agentName, error: result.error },
+				details: {
+					agent: agentName,
+					error: result.error,
+					circuitOpen: result.circuitOpen,
+				},
 			};
 		},
 	});

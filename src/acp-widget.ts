@@ -8,7 +8,7 @@
 import type { Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
 import type { Component } from "@mariozechner/pi-tui";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import type { AcpSessionHandle } from "./types.js";
+import type { AcpSessionHandle } from "./config/types.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 

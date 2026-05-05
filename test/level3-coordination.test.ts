@@ -25,7 +25,7 @@ function createMockPi() {
 
 async function loadTools() {
   const mock = createMockPi();
-  const mod = await import("../index.ts");
+  const mod = await import("../index.js");
   (mod.default as any)(mock);
   return mock;
 }

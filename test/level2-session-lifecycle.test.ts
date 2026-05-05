@@ -23,7 +23,7 @@ describe("Level 2 — session lifecycle tools", () => {
 
       const conn = new ClientSideConnection(
         () => ({
-          sessionUpdate() {},
+          async sessionUpdate() { return Promise.resolve() },
           requestPermission() {
             return Promise.resolve({ outcome: "approved" } as unknown as RequestPermissionResponse);
           },
@@ -65,7 +65,7 @@ describe("Level 2 — session lifecycle tools", () => {
 
       const conn = new ClientSideConnection(
         () => ({
-          sessionUpdate() {},
+          async sessionUpdate() { return Promise.resolve() },
           requestPermission() {
             return Promise.resolve({ outcome: "approved" } as unknown as RequestPermissionResponse);
           },
@@ -105,7 +105,7 @@ describe("Level 2 — session lifecycle tools", () => {
 
       const conn = new ClientSideConnection(
         () => ({
-          sessionUpdate() {},
+          async sessionUpdate() { return Promise.resolve() },
           requestPermission() {
             return Promise.resolve({ outcome: "approved" } as unknown as RequestPermissionResponse);
           },
@@ -145,7 +145,7 @@ describe("Level 2 — session lifecycle tools", () => {
 
       const conn = new ClientSideConnection(
         () => ({
-          sessionUpdate() {},
+          async sessionUpdate() { return Promise.resolve() },
           requestPermission() {
             return Promise.resolve({ outcome: "approved" } as unknown as RequestPermissionResponse);
           },

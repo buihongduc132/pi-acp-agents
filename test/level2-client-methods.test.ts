@@ -23,7 +23,7 @@ describe("Level 2 — client methods", () => {
 
     const conn = new ClientSideConnection(
       () => ({
-        sessionUpdate(params: SessionNotification) {
+        async sessionUpdate(params: SessionNotification) {
           const update = params.update as Record<string, unknown>;
           if (update.sessionUpdate === "agent_message_chunk") {
             const content = update.content as Record<string, unknown>;

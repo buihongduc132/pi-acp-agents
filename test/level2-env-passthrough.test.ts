@@ -86,7 +86,7 @@ describe("Level 2 — env/args passthrough", () => {
 
       const conn = new ClientSideConnection(
         () => ({
-          sessionUpdate() {},
+          async sessionUpdate() { return Promise.resolve() },
           requestPermission() {
             return Promise.resolve({ outcome: "approved" } as unknown as RequestPermissionResponse);
           },

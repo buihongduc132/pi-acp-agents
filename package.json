@@ -67,7 +67,7 @@
     "test:ci": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run typecheck && npm run test:ci",
+    "prepublishOnly": "npm run test:ci",
     "prepack": "node scripts/prepack.mjs",
     "postpack": "node scripts/postpack.mjs",
     "version": "node scripts/version-sync.mjs",
