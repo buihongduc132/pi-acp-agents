@@ -1,9 +1,35 @@
 # @walodayeet/pi-acp-agents
 
-> ACP agent client for pi — spawn and control ACP-compatible agents (Gemini CLI, Claude, etc.) from within pi.
+> **Multi-agent orchestration for pi** — Spawn, control, and coordinate ACP-compatible agents (Gemini CLI, Claude, Codex, etc.) as first-class tools within the pi coding agent.
 
 [![npm version](https://img.shields.io/npm/v/@walodayeet/pi-acp-agents.svg)](https://www.npmjs.com/package/@walodayeet/pi-acp-agents)
+[![CI](https://github.com/buihongduc132/pi-acp-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/buihongduc132/pi-acp-agents/actions/workflows/ci.yml)
 [![license](https://img.shields.io/npm/l/@walodayeet/pi-acp-agents.svg)](https://github.com/buihongduc132/pi-acp-agents/blob/main/LICENSE)
+
+---
+
+## Purpose
+
+`pi-acp-agents` bridges the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) ecosystem with the [pi coding agent](https://pi.dev). It lets pi invoke external ACP-compatible agents as tools — enabling **multi-model collaboration**, **cross-agent delegation**, and **response comparison** from a single orchestrator.
+
+### Why this exists
+
+| Problem                                      | Solution                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------ |
+| pi can only use one LLM at a time            | ACP agents let pi call Gemini, Claude, or any ACP agent on demand                    |
+| No way to compare model outputs side-by-side | `acp_compare` runs the same prompt across agents and returns a structured comparison |
+| Subprocess spawning is fragile               | Built-in circuit breaker, health monitoring, and busy-session mutex                  |
+| Each agent tool integration is bespoke       | Adapter pattern: one config format for any ACP agent                                 |
+
+### What it does
+
+- Registers 10 pi tools for ACP agent management
+- Manages session lifecycle (create, load, set model/mode, cancel, dispose)
+- Provides multi-agent coordination (delegate, broadcast, compare)
+- Resilient by default: circuit breaker, stall timeout, health polling
+- TUI widget for real-time session status
+
+---
 
 ## Install
 
@@ -21,7 +47,7 @@ Or add to `~/.pi/agent/settings.json`:
 
 ## Quick Start
 
-1. Ensure Gemini CLI is installed and authenticated:
+1. Ensure an ACP agent is installed (e.g., Gemini CLI):
 
    ```bash
    gemini --version
@@ -51,40 +77,96 @@ Or add to `~/.pi/agent/settings.json`:
    Use the acp_prompt tool to ask gemini "What is the capital of France?"
    ```
 
+---
+
 ## Tools
 
-| Tool                    | Description                          |
-| ----------------------- | ------------------------------------ |
-| `acp_prompt`            | Send a prompt to an ACP agent        |
-| `acp_status`            | Check agent connection status        |
-| `acp_session_new`       | Create a new agent session           |
-| `acp_session_load`      | Load an existing session             |
-| `acp_session_set_model` | Change session model                 |
-| `acp_session_set_mode`  | Change session mode (thinking level) |
-| `acp_cancel`            | Cancel ongoing prompt                |
-| `acp_delegate`          | Delegate task (short-lived session)  |
-| `acp_broadcast`         | Broadcast to multiple agents         |
-| `acp_compare`           | Compare responses across agents      |
+### Session Management (Level 1)
+
+| Tool         | Description                                                    |
+| ------------ | -------------------------------------------------------------- |
+| `acp_prompt` | Send a prompt to an ACP agent, get the text response           |
+| `acp_status` | Show configured agents, active sessions, circuit breaker state |
+
+### Session Lifecycle (Level 2)
+
+| Tool                    | Description                                            |
+| ----------------------- | ------------------------------------------------------ |
+| `acp_session_new`       | Create a new isolated session with an agent            |
+| `acp_session_load`      | Load an existing session by ID                         |
+| `acp_session_set_model` | Change the model for an active session                 |
+| `acp_session_set_mode`  | Change the mode (thinking level) for an active session |
+| `acp_cancel`            | Cancel an ongoing prompt                               |
+
+### Multi-Agent Coordination (Level 3)
+
+| Tool            | Description                                          |
+| --------------- | ---------------------------------------------------- |
+| `acp_delegate`  | Delegate a task (short-lived session, auto-disposed) |
+| `acp_broadcast` | Send same prompt to multiple agents in parallel      |
+| `acp_compare`   | Get responses from multiple agents and compare them  |
+
+**Command:** `/acp-config` — show current agent configuration
+
+---
 
 ## Architecture
 
-Uses the **Adapter pattern** with OOP:
+```
+┌─────────────────────────────────────────────────┐
+│                    pi agent                      │
+│                                                  │
+│  acp_prompt ──┐                                  │
+│  acp_status ──┤                                  │
+│  acp_session ─┤──► AgentCoordinator ──┐          │
+│  acp_cancel ──┤                       │          │
+│  acp_compare ─┘                       ▼          │
+│                              AcpCircuitBreaker   │
+│                                       │          │
+│                              ┌────────┴────────┐ │
+│                              │  Adapter Factory │ │
+│                              └────┬───────┬────┘ │
+│                              GeminiAdapter  │      │
+│                                    CustomAdapter  │
+│                                       │          │
+│                              AcpClient (stdio)    │
+│                                       │          │
+│                              HealthMonitor ◄──────┤
+│                              SessionManager       │
+└─────────────────────────────────────────────────┘
+                                       │
+                              ┌────────┴────────┐
+                              │  ACP Agent (gemini│
+                              │  --acp, claude,  │
+                              │  codex, custom)  │
+                              └─────────────────┘
+```
 
-- `AcpAgentAdapter` — abstract base for all ACP agents
-- `GeminiAcpAdapter` — Gemini CLI specific defaults
-- `CustomAcpAdapter` — any user-defined ACP command
-- `AcpClient` — wraps `@agentclientprotocol/sdk` ClientSideConnection
-- `AcpCircuitBreaker` — resilience wrapping for all calls
-- `HealthMonitor` — background session health polling
-- `AgentCoordinator` — multi-agent delegate/broadcast/compare
+### Patterns
+
+| Pattern             | Implementation                                              |
+| ------------------- | ----------------------------------------------------------- |
+| **Adapter** (GoF)   | `AcpAgentAdapter` → `GeminiAcpAdapter` / `CustomAcpAdapter` |
+| **Factory**         | `createAdapter()` — string dispatch                         |
+| **Circuit Breaker** | Closed → Open → Half-Open with configurable thresholds      |
+| **Health Monitor**  | Background polling with stale session auto-dispose          |
+| **Coordinator**     | Multi-agent delegate/broadcast/compare                      |
+
+---
 
 ## Resilience
 
-- Circuit breaker: 3 failures → open, auto-recover after 60s
-- Stall timeout: configurable, default 5 min
-- Health polling: 30s interval background check
-- Busy mutex: prevents concurrent prompts on same session
-- Non-blocking: errors are tool error results, never unhandled throws
+| Feature         | Default           | Description                                                 |
+| --------------- | ----------------- | ----------------------------------------------------------- |
+| Circuit breaker | 3 failures → open | Auto-recovers after 60s in half-open state                  |
+| Stall timeout   | 5 min             | Per-operation timeout with SIGTERM→SIGKILL escalation       |
+| Health polling  | 30s               | Background monitor tracks session activity                  |
+| Busy mutex      | per-session       | Prevents concurrent prompts on the same session             |
+| Process safety  | SIGTERM→SIGKILL   | Graceful process shutdown with escalation                   |
+| EPIPE handling  | stdin/stdout      | Prevents crashes on broken pipes                            |
+| Non-blocking    | all paths         | Errors return as tool error results, never unhandled throws |
+
+---
 
 ## Configuration
 
@@ -112,7 +194,7 @@ Config file: `~/.pi/acp-agents/config.json`
 }
 ```
 
-### Fields
+### Global config
 
 | Field                       | Default                 | Description                               |
 | --------------------------- | ----------------------- | ----------------------------------------- |
@@ -135,21 +217,94 @@ Config file: `~/.pi/acp-agents/config.json`
 | `cwd`          | no       | Working directory override    |
 | `defaultModel` | no       | Default model ID              |
 
+---
+
 ## Logs
 
 Central logs: `~/.pi/acp-agents/logs/`
 
-- `main.log` — general log
-- `session-{id}/trace.jsonl` — per-session JSON-RPC traces
+- `main.log` — general structured JSON log
+- `session-{id}/trace.jsonl` — per-session ACP JSON-RPC traces
+
+---
+
+## Supported Agents
+
+| Agent           | Status                    | Config                               |
+| --------------- | ------------------------- | ------------------------------------ |
+| **Gemini CLI**  | ✅ Built-in adapter       | `command: "gemini", args: ["--acp"]` |
+| **Claude Code** | 🔜 Planned                | ACP mode pending upstream            |
+| **Codex**       | 🔜 Planned                | ACP mode pending upstream            |
+| **Custom**      | ✅ Via `CustomAcpAdapter` | Any command speaking ACP over stdio  |
+
+---
+
+## Roadmap
+
+### v0.2.x — Current (Foundation)
+
+- [x] ACP stdio JSON-RPC client
+- [x] Gemini CLI adapter with auto-auth
+- [x] Session lifecycle (new, load, set model/mode, cancel)
+- [x] Circuit breaker + health monitor
+- [x] Multi-agent: delegate, broadcast, compare
+- [x] TUI widget for session status
+- [x] 148 unit + integration tests
+- [x] CI/CD pipeline with provenance publishing
+
+### v0.3.x — Streaming & Auth
+
+- [ ] **Streaming responses** — forward `agent_message_chunk` events to pi in real-time
+- [ ] **Tool use forwarding** — expose ACP agent tool calls back to pi's tool registry
+- [ ] **OAuth/token auth** — support API key and OAuth flows per-agent
+- [ ] **Config hot-reload** — watch config file, reload without restart
+- [ ] **Retry with backoff** — exponential backoff for transient failures
+- [ ] Custom adapter smoke tests
+
+### v0.4.x — Persistence & Recovery
+
+- [ ] **Session persistence** — save/restore sessions across pi restarts
+- [ ] **Session sharing** — share ACP sessions between pi instances via file lock
+- [ ] **Checkpoint/resume** — save conversation state, resume later
+- [ ] **Metrics export** — Prometheus-compatible metrics (session count, latency, error rate)
+
+### v0.5.x — Advanced Orchestration
+
+- [ ] **Agent routing** — automatic agent selection based on task type
+- [ ] **Ensemble mode** — run same prompt across N agents, merge via configurable strategy (vote, rank, consensus)
+- [ ] **Chain-of-agents** — pipe output of one agent as input to next
+- [ ] **Cost tracking** — per-agent, per-session token usage and cost estimation
+- [ ] **Agent health dashboard** — web UI for monitoring all connected agents
+
+### v1.0.0 — Production
+
+- [ ] **Stable API** — no breaking changes without major version bump
+- [ ] **Full ACP spec compliance** — implement all optional ACP capabilities
+- [ ] **Multi-platform support** — OpenClaw, Claude Code plugin, standalone MCP server
+- [ ] **Comprehensive docs** — API reference, migration guides, examples
+
+---
 
 ## Development
 
 ```bash
 npm install
-npm test
-npm run test:ci      # with coverage
-npm run typecheck
+npm test              # run all tests
+npm run test:ci       # run with coverage
+npm run typecheck     # TypeScript validation
+npm run publish:dry   # verify package contents before publish
 ```
+
+### Release process
+
+```bash
+npm run release:patch    # 0.2.0 → 0.2.1
+npm run release:minor    # 0.2.0 → 0.3.0
+npm run release:beta     # 0.2.0 → 0.2.1-beta.0
+git push --follow-tags   # triggers CI → auto-publish with provenance
+```
+
+---
 
 ## License
 

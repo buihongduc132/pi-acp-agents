@@ -68,7 +68,16 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run typecheck && npm run test:ci",
-    "version": "node scripts/version-sync.mjs"
+    "prepack": "node scripts/prepack.mjs",
+    "postpack": "node scripts/postpack.mjs",
+    "version": "node scripts/version-sync.mjs",
+    "release:patch": "npm version patch -m 'release: v%s'",
+    "release:minor": "npm version minor -m 'release: v%s'",
+    "release:major": "npm version major -m 'release: v%s'",
+    "release:beta": "npm version prerelease --preid=beta -m 'release: v%s'",
+    "publish:beta": "npm publish --tag beta --access public",
+    "publish:next": "npm publish --tag next --access public",
+    "publish:dry": "npm publish --dry-run --access public"
   },
   "engines": {
     "node": ">=22.0.0"
