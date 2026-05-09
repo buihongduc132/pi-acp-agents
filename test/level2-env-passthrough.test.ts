@@ -26,16 +26,16 @@ describe("Level 2 — env/args passthrough", () => {
       expect(config.env).toEqual({ MY_VAR: "hello", ANOTHER: "world" });
     });
 
-    it("mcpServers are accessible in agent config", () => {
+    it("custom fields are accessible in agent config", () => {
       const config: AcpAgentConfig = {
         command: "gemini",
         args: ["--acp"],
-        mcpServers: [
+        custom_mcp_servers: [
           { name: "fs", command: "mcp-filesystem", args: ["--root", "/tmp"] },
         ],
       };
-      expect(config.mcpServers).toHaveLength(1);
-      expect(config.mcpServers![0].name).toBe("fs");
+      expect((config as any).custom_mcp_servers).toHaveLength(1);
+      expect((config as any).custom_mcp_servers[0].name).toBe("fs");
     });
   });
 

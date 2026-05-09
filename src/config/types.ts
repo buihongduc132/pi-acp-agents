@@ -1,36 +1,60 @@
 /**
  * pi-acp-agents — Shared types
+ *
+ * Config shape mirrors Zed's `agent_servers` pattern:
+ * flat map of name → server config. No provider-specific fields.
+ * All customization goes through args/env.
  */
 
-/** Per-agent configuration */
+/** Per-agent server configuration (matches Zed's agent_servers entry) */
 export interface AcpAgentConfig {
 	command: string;
 	args?: string[];
 	env?: Record<string, string>;
 	cwd?: string;
-	defaultModel?: string;
-	/** Level 2: Thinking level to set after session creation */
-	thinkingLevel?: string;
-	/** Level 2: Sandbox mode */
-	sandbox?: boolean;
-	/** Level 2: Skip trust prompt */
-	skipTrust?: boolean;
-	/** Level 2: MCP servers to pass to newSession */
-	mcpServers?: Array<{ name: string; command: string; args?: string[] }>;
+	/** Default model for sessions created with this agent */
+	default_model?: string;
+	/** Default mode for sessions created with this agent */
+	default_mode?: string;
+	/** Allow passthrough of unknown fields for forward compat */
 	[key: string]: unknown;
 }
 
 /** Top-level config stored at ~/.pi/acp-agents/config.json */
 export interface AcpConfig {
-	agents: Record<string, AcpAgentConfig>;
+	/** Agent server definitions. Key = alias name. Matches Zed's agent_servers. */
+	agent_servers: Record<string, AcpAgentConfig>;
 	defaultAgent?: string;
 	logsDir?: string;
 	staleTimeoutMs?: number;
 	healthCheckIntervalMs?: number;
 	circuitBreakerMaxFailures?: number;
 	circuitBreakerResetMs?: number;
-	/** Stall timeout in ms for prompt operations (default: 5 minutes) */
+	/** Stall timeout in milliseconds (default: 3_600_000 = 1 hour) */
 	stallTimeoutMs?: number;
+	/** Per-tool timeout overrides in milliseconds. Falls back to stallTimeoutMs. */
+	toolTimeouts?: {
+		prompt?: number;
+		delegate?: number;
+		broadcast?: number;
+		compare?: number;
+	};
+	runtimeDir?: string;
+	modelPolicy?: {
+		allowedModels?: string[];
+		blockedModels?: string[];
+		requireProviderPrefix?: boolean;
+	};
+}
+
+/**
+ * Back-compat: old configs may use `agents` instead of `agent_servers`.
+ * This legacy type is only used during migration.
+ */
+export interface LegacyAcpConfig {
+	agents?: Record<string, AcpAgentConfig>;
+	agent_servers?: Record<string, AcpAgentConfig>;
+	[key: string]: unknown;
 }
 
 /** Alias used by some tests */
@@ -47,22 +71,36 @@ export interface AcpPromptResult {
 /** Tracked session info */
 export interface AcpSessionInfo {
 	sessionId: string;
+	sessionName?: string;
 	agentName: string;
 	cwd: string;
 	model?: string;
+	mode?: string;
 	createdAt: Date;
 }
 
-/** Internal handle kept by SessionManager. Also satisfies HealthMonitorable. */
-export interface AcpSessionHandle {
+/** Archived runtime metadata used to reopen ACP sessions after auto-close. */
+export interface AcpArchivedSessionMetadata {
 	sessionId: string;
+	sessionName?: string;
 	agentName: string;
 	cwd: string;
-	model?: string;
 	createdAt: Date;
 	lastActivityAt: Date;
-	accumulatedText: string;
+	lastResponseAt?: Date;
+	completedAt?: Date;
 	disposed: boolean;
+	autoClosed?: boolean;
+	closeReason?: string;
+	model?: string;
+	mode?: string;
+}
+
+/** Internal handle kept by SessionManager. Also satisfies HealthMonitorable. */
+export interface AcpSessionHandle extends AcpArchivedSessionMetadata {
+	accumulatedText: string;
+	busy?: boolean;
+	planStatus?: "none" | "pending" | "approved" | "rejected";
 	dispose: () => Promise<void>;
 }
 

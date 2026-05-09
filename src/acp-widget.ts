@@ -16,6 +16,7 @@ export type AcpSessionStatus = "active" | "idle" | "stale" | "error";
 
 export interface AcpWidgetSession {
 	sessionId: string;
+	sessionName?: string;
 	agentName: string;
 	cwd: string;
 	status: AcpSessionStatus;
@@ -24,11 +25,19 @@ export interface AcpWidgetSession {
 	model?: string;
 }
 
+export interface AcpWidgetActivity {
+	activeDelegations: number;
+	activeBroadcasts: number;
+	activeCompares: number;
+	lastError?: string;
+}
+
 export interface AcpWidgetState {
 	sessions: AcpWidgetSession[];
 	circuitBreakerState: "closed" | "open" | "half-open";
 	configuredAgentNames: string[];
 	defaultAgent?: string;
+	activity: AcpWidgetActivity;
 }
 
 // ── Status styling ──────────────────────────────────────────────────
@@ -136,6 +145,33 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 					);
 				}
 
+				const totalTransient =
+					state.activity.activeDelegations +
+					state.activity.activeBroadcasts +
+					state.activity.activeCompares;
+				const activitySummary = state.activity.lastError
+					? `error: ${state.activity.lastError}`
+					: totalTransient > 1
+						? `busy (${totalTransient})`
+						: state.activity.activeDelegations > 0
+							? "delegating"
+							: state.activity.activeBroadcasts > 0
+								? "broadcasting"
+								: state.activity.activeCompares > 0
+									? "comparing"
+									: "idle";
+				const activityColor: ThemeColor = state.activity.lastError
+					? "error"
+					: totalTransient > 0
+						? "accent"
+						: "muted";
+				lines.push(
+					truncateToWidth(
+						` ${theme.fg(activityColor, `status: ${activitySummary}`)}`,
+						width,
+					),
+				);
+
 				// ── No sessions ──
 				if (state.sessions.length === 0) {
 					const agentList = state.configuredAgentNames.join(", ") || "none";
@@ -147,7 +183,7 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 					);
 					lines.push(
 						truncateToWidth(
-							theme.fg("dim", " /acp-config · acp_prompt <msg>"),
+							theme.fg("dim", " /acp · /acp-config · acp_prompt <msg>"),
 							width,
 						),
 					);
@@ -172,6 +208,9 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 						"dim",
 						shortId(session.sessionId).padEnd(idWidth),
 					);
+					const friendlyName = session.sessionName
+						? ` ${theme.fg("accent", session.sessionName)}`
+						: "";
 					const statusLabel = theme.fg(
 						STATUS_COLOR[session.status],
 						padRight(session.status, 7),
@@ -181,7 +220,7 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 						: "";
 					const activity = theme.fg("dim", timeAgo(session.lastActivityAt));
 
-					const row = ` ${icon} ${name} ${id} ${statusLabel}${modelLabel} · ${activity}`;
+					const row = ` ${icon} ${name}${friendlyName} ${id} ${statusLabel}${modelLabel} · ${activity}`;
 					lines.push(truncateToWidth(row, width));
 				}
 
@@ -226,7 +265,7 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 				// ── Hints ──
 				lines.push(
 					truncateToWidth(
-						theme.fg("dim", " /acp-config · acp_status · acp_prompt <msg>"),
+						theme.fg("dim", " /acp · /acp-config · acp_status · acp_prompt <msg>"),
 						width,
 					),
 				);

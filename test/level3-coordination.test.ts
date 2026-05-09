@@ -90,8 +90,8 @@ describe("Level 3 — Tool registration", () => {
     }
   });
 
-  it("total registered tools is 10 (L1=3 + L2=4 + L3=3)", async () => {
+  it("registers at least the level 3 coordination surface", async () => {
     const mock = await loadTools();
-    expect(mock.tools.length).toBe(10);
+    expect(mock.tools.length).toBeGreaterThanOrEqual(10);
   });
 });

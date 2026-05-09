@@ -69,6 +69,34 @@ describe("AcpCircuitBreaker", () => {
       expect(result.stalled).toBe(true);
     });
 
+    it("still resolves stalled when onCancel throws", async () => {
+      const cb = new AcpCircuitBreaker();
+      const result = await cb.executeWithStallTimeout(
+        async () => {
+          await new Promise((r) => setTimeout(r, 10_000));
+          return "late";
+        },
+        {
+          stallTimeoutMs: 20,
+          onCancel: async () => {
+            throw new Error("cancel failed");
+          },
+        },
+      );
+      expect(result.stalled).toBe(true);
+      expect(result.error).toBeUndefined();
+    });
+
+    it("marks execute as stalled when onCancel throws", async () => {
+      const cb = new AcpCircuitBreaker(3, 60_000, 20);
+      await expect(
+        cb.execute(async () => {
+          await new Promise((r) => setTimeout(r, 10_000));
+          return "late";
+        }),
+      ).rejects.toThrow("Operation stalled after 20ms");
+    });
+
     it("returns result when fn completes in time", async () => {
       const cb = new AcpCircuitBreaker();
       const result = await cb.executeWithStallTimeout(

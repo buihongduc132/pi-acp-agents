@@ -27,11 +27,11 @@ Config file: `~/.pi/acp-agents/config.json`
 
 ```json
 {
-  "agents": {
+  "agent_servers": {
     "gemini": {
       "command": "gemini",
       "args": ["--acp"],
-      "defaultModel": "gemini-2.5-pro"
+      "default_model": "gemini-2.5-pro"
     }
   },
   "defaultAgent": "gemini"
@@ -42,13 +42,13 @@ Config file: `~/.pi/acp-agents/config.json`
 
 | Field                       | Default             | Description                               |
 | --------------------------- | ------------------- | ----------------------------------------- |
-| `agents`                    | `{ gemini: {...} }` | Map of agent name → config                |
+| `agent_servers`             | `{ gemini: {...} }` | Map of agent name → config                |
 | `defaultAgent`              | `"gemini"`          | Agent used when not specified             |
-| `staleTimeoutMs`            | `900000` (15 min)   | Session staleness threshold               |
+| `staleTimeoutMs`            | `3600000` (1 hour)  | Session auto-close timeout for stalled-no-response and completed-idle |
 | `healthCheckIntervalMs`     | `30000` (30s)       | Background health polling interval        |
 | `circuitBreakerMaxFailures` | `3`                 | Consecutive failures before circuit opens |
 | `circuitBreakerResetMs`     | `60000` (60s)       | Time before circuit half-opens            |
-| `stallTimeoutMs`            | `300000` (5 min)    | Per-operation timeout                     |
+| `stallTimeoutMs`            | `3600000` (1 hour)  | Per-operation timeout                     |
 
 ### Per-agent config
 
@@ -58,13 +58,13 @@ Config file: `~/.pi/acp-agents/config.json`
 | `args`         | no       | Arguments (e.g., `["--acp"]`) |
 | `env`          | no       | Extra environment variables   |
 | `cwd`          | no       | Working directory override    |
-| `defaultModel` | no       | Default model ID              |
+| `default_model` | no      | Default model ID              |
 
 ## Resilience
 
 - **Circuit breaker**: Opens after N consecutive failures, auto-recovers after timeout
 - **Stall timeout**: Prompts that receive no activity are auto-cancelled
-- **Health polling**: Background monitor tracks `lastActivityAt` per session
+- **Health polling**: Background monitor enforces separate `lastResponseAt` and `completedAt` 1-hour auto-close policies
 - **Busy mutex**: Prevents concurrent prompts on same session
 - **Process safeguards**: SIGTERM → SIGKILL escalation, EPIPE error handlers
 - **Non-blocking**: All tool errors return as tool error results, never throw

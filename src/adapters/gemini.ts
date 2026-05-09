@@ -10,6 +10,7 @@ export interface GeminiAdapterOptions {
   config?: Partial<AcpAgentConfig>;
   clientInfo?: { name: string; version: string };
   logger?: Logger;
+  cwd?: string;
 }
 
 export class GeminiAcpAdapter extends AcpAgentAdapter {
@@ -22,6 +23,7 @@ export class GeminiAcpAdapter extends AcpAgentAdapter {
       } as AcpAgentConfig,
       clientInfo: opts.clientInfo,
       logger: opts.logger,
+      cwd: opts.cwd,
     });
   }
 

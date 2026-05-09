@@ -58,19 +58,24 @@ describe("Level 2 — Tool registration", () => {
     expect(names).toContain("acp_cancel");
   });
 
-  it("all Level 2 tools have session_id parameter", async () => {
+  it("all Level 2 tools have session_id and session_name parameters", async () => {
     const mock = createMockPi();
     const mod = await import("../index.js");
     (mod.default as any)(mock);
-    const l2Tools = mock.tools.filter(
-      (t: any) =>
-        t.name.startsWith("acp_session_") || t.name === "acp_cancel",
+    const l2Tools = mock.tools.filter((t: any) =>
+      [
+        "acp_session_load",
+        "acp_session_set_model",
+        "acp_session_set_mode",
+        "acp_cancel",
+      ].includes(t.name),
     );
     for (const tool of l2Tools) {
       if (tool.name === "acp_session_new") continue; // doesn't need session_id
       const props = (tool.parameters as any)?.properties;
       expect(props).toBeDefined();
       expect(props).toHaveProperty("session_id");
+      expect(props).toHaveProperty("session_name");
     }
   });
 });

@@ -60,11 +60,11 @@ Or add to `~/.pi/agent/settings.json`:
    mkdir -p ~/.pi/acp-agents
    cat > ~/.pi/acp-agents/config.json << 'EOF'
    {
-     "agents": {
+     "agent_servers": {
        "gemini": {
          "command": "gemini",
          "args": ["--acp"],
-         "defaultModel": "gemini-2.5-pro"
+         "default_model": "gemini-2.5-pro"
        }
      },
      "defaultAgent": "gemini"
@@ -83,6 +83,8 @@ Or add to `~/.pi/agent/settings.json`:
 
 ### Session Management (Level 1)
 
+Friendly session names are globally unique across ACP sessions, immutable once assigned, persisted in the runtime directory, and remain resolvable after reload for both live and archived sessions.
+
 | Tool         | Description                                                    |
 | ------------ | -------------------------------------------------------------- |
 | `acp_prompt` | Send a prompt to an ACP agent, get the text response           |
@@ -92,11 +94,11 @@ Or add to `~/.pi/agent/settings.json`:
 
 | Tool                    | Description                                            |
 | ----------------------- | ------------------------------------------------------ |
-| `acp_session_new`       | Create a new isolated session with an agent            |
-| `acp_session_load`      | Load an existing session by ID                         |
-| `acp_session_set_model` | Change the model for an active session                 |
-| `acp_session_set_mode`  | Change the mode (thinking level) for an active session |
-| `acp_cancel`            | Cancel an ongoing prompt                               |
+| `acp_session_new`       | Create a new isolated session with an agent; optional immutable `session_name`, caller cannot choose fresh session IDs |
+| `acp_session_load`      | Load/resume an existing session by ID or friendly name, including archived auto-closed sessions       |
+| `acp_session_set_model` | Change the model for an active session by ID or friendly name                 |
+| `acp_session_set_mode`  | Change the mode (thinking level) for an active session by ID or friendly name |
+| `acp_cancel`            | Cancel an ongoing prompt by ID or friendly name                               |
 
 ### Multi-Agent Coordination (Level 3)
 
@@ -106,7 +108,9 @@ Or add to `~/.pi/agent/settings.json`:
 | `acp_broadcast` | Send same prompt to multiple agents in parallel      |
 | `acp_compare`   | Get responses from multiple agents and compare them  |
 
-**Command:** `/acp-config` — show current agent configuration
+**Commands:** `/acp` — ACP root command with session, prompt, delegate, broadcast, compare, task, message, plan, runtime groups
+
+**Compatibility aliases:** `/acp-doctor`, `/acp-config`
 
 ---
 
@@ -149,7 +153,7 @@ Or add to `~/.pi/agent/settings.json`:
 | **Adapter** (GoF)   | `AcpAgentAdapter` → `GeminiAcpAdapter` / `CustomAcpAdapter` |
 | **Factory**         | `createAdapter()` — string dispatch                         |
 | **Circuit Breaker** | Closed → Open → Half-Open with configurable thresholds      |
-| **Health Monitor**  | Background polling with stale session auto-dispose          |
+| **Health Monitor**  | Background polling with distinct 1-hour no-response and completed-idle auto-close    |
 | **Coordinator**     | Multi-agent delegate/broadcast/compare                      |
 
 ---
@@ -159,8 +163,8 @@ Or add to `~/.pi/agent/settings.json`:
 | Feature         | Default           | Description                                                 |
 | --------------- | ----------------- | ----------------------------------------------------------- |
 | Circuit breaker | 3 failures → open | Auto-recovers after 60s in half-open state                  |
-| Stall timeout   | 5 min             | Per-operation timeout with SIGTERM→SIGKILL escalation       |
-| Health polling  | 30s               | Background monitor tracks session activity                  |
+| Stall timeout   | 1 hour            | Per-operation timeout with SIGTERM→SIGKILL escalation       |
+| Health polling  | 30s               | Background monitor enforces separate no-response and completed-idle timers |
 | Busy mutex      | per-session       | Prevents concurrent prompts on the same session             |
 | Process safety  | SIGTERM→SIGKILL   | Graceful process shutdown with escalation                   |
 | EPIPE handling  | stdin/stdout      | Prevents crashes on broken pipes                            |
@@ -174,11 +178,11 @@ Config file: `~/.pi/acp-agents/config.json`
 
 ```json
 {
-  "agents": {
+  "agent_servers": {
     "gemini": {
       "command": "gemini",
       "args": ["--acp"],
-      "defaultModel": "gemini-2.5-pro"
+      "default_model": "gemini-2.5-pro"
     },
     "custom": {
       "command": "/path/to/my-acp-agent",
@@ -186,11 +190,11 @@ Config file: `~/.pi/acp-agents/config.json`
     }
   },
   "defaultAgent": "gemini",
-  "staleTimeoutMs": 900000,
+  "staleTimeoutMs": 3600000,
   "healthCheckIntervalMs": 30000,
   "circuitBreakerMaxFailures": 3,
   "circuitBreakerResetMs": 60000,
-  "stallTimeoutMs": 300000
+  "stallTimeoutMs": 3600000
 }
 ```
 
@@ -198,13 +202,13 @@ Config file: `~/.pi/acp-agents/config.json`
 
 | Field                       | Default                 | Description                               |
 | --------------------------- | ----------------------- | ----------------------------------------- |
-| `agents`                    | `{ gemini: {...} }`     | Map of agent name → config                |
+| `agent_servers`             | `{ gemini: {...} }`     | Map of agent name → config                |
 | `defaultAgent`              | `"gemini"`              | Agent used when not specified             |
-| `staleTimeoutMs`            | `900000` (15 min)       | Session staleness threshold               |
+| `staleTimeoutMs`            | `3600000` (1 hour)      | Auto-close threshold for each separate lifecycle policy: stalled-no-response and completed-idle |
 | `healthCheckIntervalMs`     | `30000` (30s)           | Background health polling interval        |
 | `circuitBreakerMaxFailures` | `3`                     | Consecutive failures before circuit opens |
 | `circuitBreakerResetMs`     | `60000` (60s)           | Time before circuit half-opens            |
-| `stallTimeoutMs`            | `300000` (5 min)        | Per-operation timeout                     |
+| `stallTimeoutMs`            | `3600000` (1 hour)      | Per-operation timeout                     |
 | `logsDir`                   | `~/.pi/acp-agents/logs` | Log directory                             |
 
 ### Per-agent config
@@ -215,7 +219,7 @@ Config file: `~/.pi/acp-agents/config.json`
 | `args`         | no       | Arguments (e.g., `["--acp"]`) |
 | `env`          | no       | Extra environment variables   |
 | `cwd`          | no       | Working directory override    |
-| `defaultModel` | no       | Default model ID              |
+| `default_model` | no      | Default model ID              |
 
 ---
 
@@ -265,7 +269,7 @@ Central logs: `~/.pi/acp-agents/logs/`
 
 - [ ] **Session persistence** — save/restore sessions across pi restarts
 - [ ] **Session sharing** — share ACP sessions between pi instances via file lock
-- [ ] **Checkpoint/resume** — save conversation state, resume later
+- [x] **Checkpoint/resume** — archived runtime metadata reopens auto-closed ACP sessions by original session ID
 - [ ] **Metrics export** — Prometheus-compatible metrics (session count, latency, error rate)
 
 ### v0.5.x — Advanced Orchestration

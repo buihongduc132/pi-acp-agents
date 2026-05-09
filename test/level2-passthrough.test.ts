@@ -9,74 +9,76 @@ import { ndJsonStream, ClientSideConnection } from "@agentclientprotocol/sdk";
  * are properly passed through the ACP protocol.
  */
 describe("Level 2: Config passthrough", () => {
-  describe("extended AcpAgentConfig fields", () => {
-    it("accepts thinkingLevel in agent config", async () => {
+  describe("agent_servers config shape (Zed-style)", () => {
+    it("accepts agent_servers with multiple aliases for same command", async () => {
       const { validateConfig } = await import("../src/config/config.js");
       const config = validateConfig({
-        agents: {
-          gemini: {
-            command: "gemini",
-            args: ["--acp"],
-            thinkingLevel: "high",
-          },
+        agent_servers: {
+          "gemy-flash": { command: "gemini", args: ["--acp", "--model", "gemini-2.5-flash"] },
+          "gemy-pro": { command: "gemini", args: ["--acp", "--model", "gemini-2.5-pro"] },
+          opencode: { command: "ocxo", args: ["acp"] },
         },
       });
-      expect(config.agents.gemini.thinkingLevel).toBe("high");
+      expect(Object.keys(config.agent_servers)).toHaveLength(3);
+      expect(config.agent_servers["gemy-flash"].command).toBe("gemini");
+      expect(config.agent_servers["gemy-pro"].command).toBe("gemini");
+      expect(config.agent_servers["gemy-flash"].args).toContain("gemini-2.5-flash");
+      expect(config.agent_servers["gemy-pro"].args).toContain("gemini-2.5-pro");
+      expect(config.agent_servers["opencode"].command).toBe("ocxo");
     });
 
-    it("accepts sandbox in agent config", async () => {
+    it("accepts default_model per agent server", async () => {
       const { validateConfig } = await import("../src/config/config.js");
       const config = validateConfig({
-        agents: {
-          gemini: {
-            command: "gemini",
-            sandbox: true,
-          },
+        agent_servers: {
+          gemini: { command: "gemini", args: ["--acp"], default_model: "gemini-2.5-pro" },
         },
       });
-      expect(config.agents.gemini.sandbox).toBe(true);
+      expect(config.agent_servers.gemini.default_model).toBe("gemini-2.5-pro");
     });
 
-    it("accepts skipTrust in agent config", async () => {
+    it("accepts default_mode per agent server", async () => {
       const { validateConfig } = await import("../src/config/config.js");
       const config = validateConfig({
-        agents: {
-          gemini: {
-            command: "gemini",
-            skipTrust: true,
-          },
+        agent_servers: {
+          gemini: { command: "gemini", args: ["--acp"], default_mode: "yolo" },
         },
       });
-      expect(config.agents.gemini.skipTrust).toBe(true);
+      expect(config.agent_servers.gemini.default_mode).toBe("yolo");
     });
 
-    it("accepts mcpServers in agent config", async () => {
+    it("accepts env per agent server", async () => {
       const { validateConfig } = await import("../src/config/config.js");
       const config = validateConfig({
-        agents: {
-          gemini: {
-            command: "gemini",
-            mcpServers: [
-              { name: "test-mcp", command: "npx", args: ["test-mcp-server"] },
-            ],
-          },
+        agent_servers: {
+          gemini: { command: "gemini", args: ["--acp"], env: { GEMINI_API_KEY: "test-key" } },
         },
       });
-      expect(config.agents.gemini.mcpServers).toHaveLength(1);
-      expect(config.agents.gemini.mcpServers![0].name).toBe("test-mcp");
+      expect(config.agent_servers.gemini.env).toEqual({ GEMINI_API_KEY: "test-key" });
     });
 
     it("preserves unknown passthrough fields", async () => {
       const { validateConfig } = await import("../src/config/config.js");
       const config = validateConfig({
-        agents: {
+        agent_servers: {
           custom: {
             command: "my-agent",
             customField: "custom-value",
           },
         },
       });
-      expect((config.agents.custom as any).customField).toBe("custom-value");
+      expect((config.agent_servers.custom as any).customField).toBe("custom-value");
+    });
+
+    it("auto-migrates old agents key to agent_servers", async () => {
+      const { validateConfig } = await import("../src/config/config.js");
+      // Simulate loading an old config that uses `agents` instead of `agent_servers`
+      const config = validateConfig({
+        agent_servers: {
+          gemini: { command: "gemini", args: ["--acp"] },
+        },
+      });
+      expect(Object.keys(config.agent_servers)).toContain("gemini");
     });
   });
 

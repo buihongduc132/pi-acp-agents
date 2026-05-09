@@ -36,7 +36,7 @@ export class AgentCoordinator {
     message: string,
     cwd?: string,
   ): Promise<AcpPromptResult> {
-    const agentCfg = this.config.agents[agentName];
+    const agentCfg = this.config.agent_servers[agentName];
     if (!agentCfg) throw new Error(`Agent "${agentName}" not found`);
 
     const effectiveCwd = cwd ?? this.cwd;

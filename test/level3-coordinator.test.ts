@@ -29,12 +29,12 @@ function createMockAdapter(overrides: Record<string, any> = {}) {
 }
 
 const mockConfig: AcpConfig = {
-  agents: {
+  agent_servers: {
     gemini: { command: "gemini", args: ["--acp"] },
     claude: { command: "claude", args: ["--acp"] },
   },
   defaultAgent: "gemini",
-  staleTimeoutMs: 900_000,
+  staleTimeoutMs: 3_600_000,
   healthCheckIntervalMs: 30_000,
   circuitBreakerMaxFailures: 3,
   circuitBreakerResetMs: 60_000,
