@@ -1287,6 +1287,7 @@ export default function (pi: ExtensionAPI) {
     message: ["send", "list"],
     plan: ["request", "resolve"],
     runtime: ["status", "config", "env", "info", "event-log", "cleanup", "doctor"],
+    settings: [],
   } as const;
 
   function renderAcpCommandSurface(): string {
