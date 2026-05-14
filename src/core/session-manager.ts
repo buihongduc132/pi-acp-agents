@@ -4,6 +4,11 @@
  * Simple add/get/remove/list/disposeAll for AcpSessionHandle objects.
  */
 import type { AcpSessionHandle } from "../config/types.js";
+import { getSessionPruneReason } from "./session-lifecycle.js";
+
+export interface SessionPruneResult {
+  removedSessionIds: string[];
+}
 
 export class SessionManager {
   private sessions = new Map<string, AcpSessionHandle>();
@@ -18,6 +23,10 @@ export class SessionManager {
 
   list(): AcpSessionHandle[] {
     return Array.from(this.sessions.values());
+  }
+
+  listByAgent(agentName?: string): AcpSessionHandle[] {
+    return this.list().filter((session) => !agentName || session.agentName === agentName);
   }
 
   async remove(sessionId: string): Promise<void> {
@@ -37,6 +46,16 @@ export class SessionManager {
     for (const id of ids) {
       await this.remove(id);
     }
+  }
+
+  async pruneStale(maxIdleMs: number, now = Date.now()): Promise<SessionPruneResult> {
+    const removedSessionIds: string[] = [];
+    for (const session of this.list()) {
+      if (!getSessionPruneReason(session, maxIdleMs, now)) continue;
+      removedSessionIds.push(session.sessionId);
+      await this.remove(session.sessionId);
+    }
+    return { removedSessionIds };
   }
 
   get size(): number {

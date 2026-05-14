@@ -17,19 +17,22 @@ export function createAdapter(
 	agentConfig: AcpAgentConfig,
 	_globalConfig: AcpConfig,
 	cwd?: string,
+	adapterOpts?: { onActivity?: (sessionId: string) => void },
 ): AcpAgentAdapter {
+	const sharedOpts = { onActivity: adapterOpts?.onActivity };
 	switch (agentName) {
 		case "gemini":
-			return new GeminiAcpAdapter({ config: agentConfig, cwd });
+			return new GeminiAcpAdapter({ config: agentConfig, cwd, ...sharedOpts });
 		case "opencode":
-			return new OpenCodeAcpAdapter({ config: agentConfig, cwd });
+			return new OpenCodeAcpAdapter({ config: agentConfig, cwd, ...sharedOpts });
 		case "codex":
-			return new CodexAcpAdapter({ config: agentConfig, cwd });
+			return new CodexAcpAdapter({ config: agentConfig, cwd, ...sharedOpts });
 		default:
 			return new CustomAcpAdapter({
 				config: agentConfig,
 				agentName,
 				cwd,
+				...sharedOpts,
 			});
 	}
 }

@@ -27,14 +27,14 @@ export class AcpCircuitBreaker {
 	constructor(
 		private maxFailures = 3,
 		private resetTimeoutMs = 60_000,
-		private stallTimeoutMs = 300_000, // 5 minutes default
+		private stallTimeoutMs = 3_600_000, // 1 hour default
 	) {}
 
 	get state(): CircuitState {
 		return this._state;
 	}
 
-	async execute<T>(fn: () => Promise<T>): Promise<T> {
+	async execute<T>(fn: () => Promise<T>, opts?: { timeoutMs?: number }): Promise<T> {
 		// EC-46: prevent concurrent probes in half-open state
 		if (this._state === "half-open" && this.probing) {
 			throw new CircuitHalfOpenError(
@@ -53,11 +53,12 @@ export class AcpCircuitBreaker {
 
 		try {
 			// Wrap with stall timeout
+			const effectiveTimeout = opts?.timeoutMs ?? this.stallTimeoutMs;
 			const raceResult = await this.executeWithStallTimeout(fn, {
-				stallTimeoutMs: this.stallTimeoutMs,
+				stallTimeoutMs: effectiveTimeout,
 				onCancel: async () => {
 					// Cancel by throwing a timeout error
-					throw new Error(`Operation stalled after ${this.stallTimeoutMs}ms`);
+					throw new Error(`Operation stalled after ${effectiveTimeout}ms`);
 				},
 			});
 
@@ -65,7 +66,7 @@ export class AcpCircuitBreaker {
 			if (raceResult.stalled) {
 				this.onFailure();
 				this.probing = false; // Reset probing flag
-				throw new Error(`Operation stalled after ${this.stallTimeoutMs}ms`);
+				throw new Error(`Operation stalled after ${effectiveTimeout}ms`);
 			}
 
 			// Check if there was an error
@@ -103,11 +104,16 @@ export class AcpCircuitBreaker {
 			resolveRace = resolve;
 		});
 
-		const timeout = setTimeout(async () => {
+		const timeout = setTimeout(() => {
 			if (!settled) {
 				settled = true;
-				await opts.onCancel();
-				resolveRace!({ stalled: true });
+				Promise.resolve(opts.onCancel())
+					.catch(() => {
+						// Stall timeout must still resolve even when cancellation fails.
+					})
+					.finally(() => {
+						resolveRace!({ stalled: true });
+					});
 			}
 		}, opts.stallTimeoutMs);
 

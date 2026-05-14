@@ -6,6 +6,76 @@
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
+
+/**
+ * Creates a filtered ReadableStream that strips non-JSON lines from agent stdout.
+ *
+ * Gemini CLI (and other ACP agents) may write stack traces, MCP error messages,
+ * or other diagnostics to stdout. The ACP SDK's ndJsonStream tries JSON.parse on
+ * every line, producing noisy "Failed to parse JSON message" console.errors.
+ *
+ * This filter intercepts stdout before ndJsonStream sees it, dropping lines that
+ * don't start with '{' or '[' (valid JSON object/array starts).
+ */
+function createFilteredStdoutStream(rawStdout: ReadableStream<Uint8Array>, logger?: Logger): ReadableStream<Uint8Array> {
+	const textDecoder = new TextDecoder();
+	const textEncoder = new TextEncoder();
+	let buffer = "";
+
+	function isJsonLine(line: string): boolean {
+		const trimmed = line.trim();
+		if (!trimmed) return false;
+		if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+		try {
+			JSON.parse(trimmed);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	return new ReadableStream<Uint8Array>({
+		async start(controller) {
+			const reader = rawStdout.getReader();
+			try {
+				while (true) {
+					const { value, done } = await reader.read();
+					if (done) {
+						// flush remaining
+						if (buffer.trim()) {
+							const line = buffer.trim();
+							if (isJsonLine(line)) {
+								controller.enqueue(textEncoder.encode(line + "\n"));
+							} else {
+								logger?.debug("filtered non-JSON stdout (flush)", line.slice(0, 200));
+							}
+						}
+						break;
+					}
+					if (!value) continue;
+					buffer += textDecoder.decode(value, { stream: true });
+					const lines = buffer.split("\n");
+					buffer = lines.pop() || "";
+					for (const line of lines) {
+						const trimmed = line.trim();
+						if (!trimmed) continue;
+						if (isJsonLine(trimmed)) {
+							controller.enqueue(textEncoder.encode(line + "\n"));
+						} else {
+							logger?.debug("filtered non-JSON stdout", trimmed.slice(0, 200));
+						}
+					}
+				}
+			} catch (err) {
+				controller.error(err);
+				return;
+			} finally {
+				reader.releaseLock();
+			}
+			controller.close();
+		},
+	});
+}
 import type {
 	InitializeResponse,
 	NewSessionResponse,
@@ -23,6 +93,13 @@ import type { AcpAgentConfig, AcpPromptResult } from "../config/types.js";
 import type { Logger } from "../logger.js";
 import { createFileLogger } from "../logger.js";
 import { killWithEscalation } from "./circuit-breaker.js";
+import {
+	AcpProtocolError,
+	classifyConnectionError,
+	validateInitializeResponse,
+	validateNewSessionResponse,
+	validatePromptResponse,
+} from "./protocol-validator.js";
 
 export interface AcpClientOptions {
 	agentName: string;
@@ -31,6 +108,7 @@ export interface AcpClientOptions {
 	clientInfo?: { name: string; version: string };
 	logger?: Logger;
 	logsDir?: string;
+	onActivity?: (sessionId: string) => void;
 }
 
 /**
@@ -52,6 +130,7 @@ export class AcpClient {
 	private sessionLogger?: Logger;
 	private logsDir?: string;
 	private lastStderr = "";
+	private onActivity?: (sessionId: string) => void;
 
 	constructor(opts: AcpClientOptions) {
 		this.agentName = opts.agentName;
@@ -63,6 +142,7 @@ export class AcpClient {
 		};
 		this.logger = opts.logger;
 		this.logsDir = opts.logsDir;
+		this.onActivity = opts.onActivity;
 	}
 
 	get sessionId(): string | null {
@@ -82,14 +162,25 @@ export class AcpClient {
 		const cmd = this.config.command;
 		const args = this.config.args ?? [];
 
-		this.proc = spawn(cmd, args, {
-			cwd: this.cwd,
-			env: { ...process.env, ...this.config.env },
-			stdio: ["pipe", "pipe", "pipe"],
-		});
+		try {
+			this.proc = spawn(cmd, args, {
+				cwd: this.cwd,
+				env: { ...process.env, ...this.config.env },
+				stdio: ["pipe", "pipe", "pipe"],
+			});
+		} catch (err: unknown) {
+			throw classifyConnectionError(err, this.agentName, cmd);
+		}
 
 		if (!this.proc.stdin || !this.proc.stdout) {
-			throw new Error(`Failed to create stdio pipes for "${cmd}"`);
+			throw new AcpProtocolError({
+				agentName: this.agentName,
+				command: cmd,
+				phase: "spawn",
+				message: "Failed to create stdio pipes.",
+				cause: `The process was created but stdin/stdout are not available. ` +
+					`This can happen if the command is not a real process or doesn't support piped I/O.`,
+			});
 		}
 
 		// Prevent EPIPE crashes
@@ -110,13 +201,17 @@ export class AcpClient {
 			this.logger?.debug("stderr", text);
 		});
 
-		const webStdout = Readable.toWeb(
+		const rawStdout = Readable.toWeb(
 			this.proc.stdout,
 		) as ReadableStream<Uint8Array>;
 		const webStdin = Writable.toWeb(
 			this.proc.stdin,
 		) as WritableStream<Uint8Array>;
-		const stream = ndJsonStream(webStdin, webStdout);
+
+		// Filter non-JSON lines before passing to ndJsonStream to avoid
+		// "Failed to parse JSON message" noise from stack traces / MCP errors
+		const filteredStdout = createFilteredStdoutStream(rawStdout, this.logger);
+		const stream = ndJsonStream(webStdin, filteredStdout);
 
 		this.conn = new ClientSideConnection(
 			() => ({
@@ -131,15 +226,23 @@ export class AcpClient {
 		);
 	}
 
-	/** ACP initialize + auto-authenticate */
+	/** ACP initialize + auto-authenticate + protocol validation */
 	async initialize(): Promise<InitializeResponse> {
 		if (!this.conn) throw new Error("Not connected");
 
-		const resp = await this.conn.initialize({
-			protocolVersion: PROTOCOL_VERSION,
-			clientCapabilities: {},
-			clientInfo: this.clientInfo,
-		});
+		let resp: InitializeResponse;
+		try {
+			resp = await this.conn.initialize({
+				protocolVersion: PROTOCOL_VERSION,
+				clientCapabilities: {},
+				clientInfo: this.clientInfo,
+			});
+		} catch (err: unknown) {
+			throw classifyConnectionError(err, this.agentName, this.config.command, this.lastStderr);
+		}
+
+		// Behavior-based validation: does the response look like ACP?
+		validateInitializeResponse(resp, this.agentName, this.config.command);
 
 		this._agentInfo = resp;
 
@@ -159,41 +262,42 @@ export class AcpClient {
 	async newSession(): Promise<string> {
 		if (!this.conn) throw new Error("Not connected");
 
-		// Build mcpServers from config
-		const mcpServers = (this.config.mcpServers ?? []).map((s) => ({
-			name: s.name,
-			command: s.command,
-			args: s.args ?? [],
-		}));
+		let resp: NewSessionResponse;
+		try {
+			resp = await this.conn.newSession({
+				cwd: this.cwd,
+				mcpServers: [],
+			});
+		} catch (err: unknown) {
+			throw classifyConnectionError(err, this.agentName, this.config.command, this.lastStderr);
+		}
 
-		const resp: NewSessionResponse = await this.conn.newSession({
-			cwd: this.cwd,
-			mcpServers: mcpServers as any,
-		});
+		// Behavior-based validation
+		validateNewSessionResponse(resp, this.agentName, this.config.command);
 
 		this._sessionId = resp.sessionId;
 
 		// PH-15: Ensure session-specific log file exists for JSON-RPC traces
 		this.ensureSessionLog(resp.sessionId);
 
-		// Set model if configured (best-effort)
-		if (this.config.defaultModel) {
+		// Set default model if configured (best-effort, Zed-style default_model)
+		if (this.config.default_model) {
 			try {
 				await this.conn.unstable_setSessionModel({
 					sessionId: resp.sessionId,
-					modelId: this.config.defaultModel,
+					modelId: this.config.default_model,
 				});
 			} catch (err) {
 				this.logger?.debug("Set model failed (best-effort)", err);
 			}
 		}
 
-		// Set thinking level if configured (best-effort)
-		if (this.config.thinkingLevel) {
+		// Set default mode if configured (best-effort, Zed-style default_mode)
+		if (this.config.default_mode) {
 			try {
 				await this.conn.setSessionMode({
 					sessionId: resp.sessionId,
-					modeId: this.config.thinkingLevel,
+					modeId: this.config.default_mode,
 				});
 			} catch (err) {
 				this.logger?.debug("Set mode failed (best-effort)", err);
@@ -219,6 +323,8 @@ export class AcpClient {
 				prompt: [{ type: "text", text: message }],
 			});
 		} catch (err: unknown) {
+			const classified = classifyConnectionError(err, this.agentName, this.config.command, this.lastStderr);
+			if (classified instanceof AcpProtocolError) throw classified;
 			const msg = err instanceof Error ? err.message : String(err);
 			const stderrDelta = this.lastStderr.slice(stderrBefore.length).trim();
 			throw new Error(
@@ -226,6 +332,9 @@ export class AcpClient {
 					(stderrDelta ? `\nAgent stderr:\n${stderrDelta}` : ""),
 			);
 		}
+
+		// Behavior-based validation
+		validatePromptResponse(resp, this.agentName, this.config.command);
 
 		// Surface stopReason=error with stderr context
 		if ((resp.stopReason as string) === "error") {
@@ -323,7 +432,15 @@ export class AcpClient {
 		params: SessionNotification,
 	): Promise<void> {
 		const update = params.update as Record<string, unknown>;
-		if (update.sessionUpdate === "agent_message_chunk") {
+		const updateType = update.sessionUpdate;
+
+		// Log all updates for debugging
+		this.logger?.debug("session update", { updateType: String(updateType), keys: Object.keys(update) });
+
+		// Fire activity callback for ALL update types (stall detection)
+		if (this._sessionId) this.onActivity?.(this._sessionId);
+
+		if (updateType === "agent_message_chunk" || updateType === "agent_thought_chunk") {
 			const content = update.content as
 				| { type?: string; text?: string }
 				| undefined;

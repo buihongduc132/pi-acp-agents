@@ -6,6 +6,7 @@
  * instances that are disposed after use.
  */
 import { createAdapter } from "../adapter-factory.js";
+import { AliasResolver } from "./alias-resolver.js";
 import type { AcpConfig, AcpPromptResult } from "../config/types.js";
 
 /** Flat result from a single agent in a multi-agent operation */
@@ -30,8 +31,28 @@ export class AgentCoordinator {
     private cwd: string,
   ) {}
 
-  /** Delegate a task to a single agent. Creates a short-lived session. */
+  /** Delegate a task to a single agent or alias. Creates a short-lived session. */
   async delegate(
+    agentName: string,
+    message: string,
+    cwd?: string,
+  ): Promise<AcpPromptResult> {
+    // Check if it's an alias first
+    const aliasConfig = this.config.agent_aliases?.[agentName];
+    if (aliasConfig) {
+      const resolver = new AliasResolver(
+        { [agentName]: aliasConfig },
+        (name, msg, c) => this.delegateToAgent(name, msg, c),
+        () => true, // circuit breaker check — simplified for now
+      );
+      return resolver.resolve(agentName, message, cwd);
+    }
+
+    return this.delegateToAgent(agentName, message, cwd);
+  }
+
+  /** Delegate directly to a concrete agent. Creates a short-lived session. */
+  private async delegateToAgent(
     agentName: string,
     message: string,
     cwd?: string,

@@ -1,3 +1,8 @@
+---
+name: pi-acp-agents
+description: Use when working with the pi-acp-agents package, its ACP tool surface, ACP agent session lifecycle, or ACP configuration and runtime behavior inside pi.
+---
+
 # pi-acp-agents
 
 ACP agent client for pi — spawn and control ACP-compatible agents from within pi.

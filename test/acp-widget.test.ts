@@ -26,6 +26,12 @@ function makeState(overrides: Partial<AcpWidgetState> = {}): AcpWidgetState {
 		circuitBreakerState: "closed",
 		configuredAgentNames: ["gemini"],
 		defaultAgent: "gemini",
+		activity: {
+			activeDelegations: 0,
+			activeBroadcasts: 0,
+			activeCompares: 0,
+			lastError: undefined,
+		},
 		...overrides,
 	};
 }
@@ -54,7 +60,7 @@ describe("acp-widget", () => {
 		expect(lines).toEqual([]);
 	});
 
-	it("shows 'no active sessions' when agents configured but no sessions", () => {
+	it("shows idle summary when agents configured but no sessions", () => {
 		const state = makeState({
 			sessions: [],
 			configuredAgentNames: ["gemini", "claude"],
@@ -62,9 +68,11 @@ describe("acp-widget", () => {
 		const lines = render(makeDeps(state));
 		expect(lines.length).toBeGreaterThan(0);
 		const joined = lines.join("\n");
+		expect(joined).toContain("status: idle");
 		expect(joined).toContain("no active sessions");
 		expect(joined).toContain("gemini");
 		expect(joined).toContain("claude");
+		expect(joined).toContain("/acp · /acp-config · acp_prompt <msg>");
 	});
 
 	it("renders single session", () => {
@@ -72,6 +80,7 @@ describe("acp-widget", () => {
 			sessions: [
 				{
 					sessionId: "sess-abc12345",
+					sessionName: "alpha",
 					agentName: "gemini",
 					cwd: "/home/user",
 					status: "idle",
@@ -85,6 +94,7 @@ describe("acp-widget", () => {
 
 		const joined = lines.join("\n");
 		expect(joined).toContain("gemini");
+		expect(joined).toContain("alpha");
 		expect(joined).toContain("sess-abc");
 		expect(joined).toContain("idle");
 	});
@@ -238,6 +248,67 @@ describe("acp-widget", () => {
 		const lines = render(makeDeps(state));
 		const joined = lines.join("\n");
 		expect(joined).toContain("default: gemini");
+	});
+
+	it("renders delegating state without session rows", () => {
+		const state = makeState({
+			activity: {
+				activeDelegations: 1,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+			},
+		});
+		const joined = render(makeDeps(state)).join("\n");
+		expect(joined).toContain("status: delegating");
+	});
+
+	it("renders busy summary when multiple transient operations are active", () => {
+		const state = makeState({
+			activity: {
+				activeDelegations: 1,
+				activeBroadcasts: 1,
+				activeCompares: 0,
+			},
+		});
+		const joined = render(makeDeps(state)).join("\n");
+		expect(joined).toContain("status: busy (2)");
+	});
+
+	it("renders error summary without hiding widget", () => {
+		const state = makeState({
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				lastError: "spawn exploded",
+			},
+		});
+		const joined = render(makeDeps(state)).join("\n");
+		expect(joined).toContain("status: error: spawn exploded");
+	});
+
+	it("renders transient summary together with persistent session rows", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s1",
+					agentName: "gemini",
+					cwd: "/",
+					status: "active",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 1,
+				activeCompares: 0,
+			},
+		});
+		const joined = render(makeDeps(state)).join("\n");
+		expect(joined).toContain("status: broadcasting");
+		expect(joined).toContain("gemini");
+		expect(joined).toContain("/acp · /acp-config · acp_status · acp_prompt <msg>");
 	});
 
 	it("component dispose does not throw", () => {

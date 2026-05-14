@@ -146,16 +146,48 @@ export default function (pi: ExtensionAPI) {
   }
 
   const monitor = new HealthMonitor({
-    intervalMs: config.healthCheckIntervalMs ?? 30_000,
+    intervalMs: config.healthCheckIntervalMs ?? 5_000,
     staleTimeoutMs: config.staleTimeoutMs ?? 3_600_000,
+    needsAttentionMs: config.needsAttentionMs ?? 60_000,
+    autoInterruptMs: config.autoInterruptMs ?? 300_000,
+    interruptGraceMs: config.interruptGraceMs ?? 10_000,
+    async onNeedsAttention(sessionId: string) {
+      // UI notification only — don't interrupt
+      const handle = sessionMgr.get(sessionId);
+      if (handle) {
+        eventLog.append('session_needs_attention', { sessionId, agentName: handle.agentName });
+      }
+    },
     async onStale(sessionId: string) {
       const handle = sessionMgr.get(sessionId);
       if (!handle) return;
+
+      // Check if this is a prompt stall (activity-based) vs idle stale
+      const isPromptStall = handle.isPrompting === true;
       const closeReason = getSessionAutoCloseReason(handle, config.staleTimeoutMs ?? 3_600_000);
-      if (!closeReason) return;
-      logger.info("session stale, disposing", { sessionId, closeReason });
-      await closeSession(handle, closeReason, true);
-      eventLog.append("session_stale", { sessionId, closeReason });
+
+      if (isPromptStall) {
+        // Escalation: cancel → grace → kill
+        eventLog.append('session_stalled_prompt', { sessionId, agentName: handle.agentName });
+        try {
+          const adapter = activeAdapters.get(sessionId);
+          if (adapter) {
+            await adapter.cancel();
+            await new Promise(resolve => setTimeout(resolve, config.interruptGraceMs ?? 10_000));
+          }
+        } catch {
+          // cancel() can throw if process already dead — proceed to kill
+        }
+        handle.isPrompting = false;
+        monitor.markPromptEnd(sessionId);
+        await closeSession(handle, 'stalled-prompt-auto-interrupt', true);
+        eventLog.append('session_stalled_prompt_killed', { sessionId });
+      } else if (closeReason) {
+        // Existing idle/disposed handling
+        logger.info('session stale, disposing', { sessionId, closeReason });
+        await closeSession(handle, closeReason, true);
+        eventLog.append('session_stale', { sessionId, closeReason });
+      }
     },
   });
   monitor.start();
@@ -179,6 +211,7 @@ export default function (pi: ExtensionAPI) {
     })),
     circuitBreakerState: cb.state as "closed" | "open" | "half-open",
     configuredAgentNames: Object.keys(config.agent_servers),
+    configuredAliases: config.agent_aliases ? Object.keys(config.agent_aliases) : [],
     defaultAgent: config.defaultAgent,
     activity: { ...widgetActivity },
   });
@@ -289,7 +322,28 @@ export default function (pi: ExtensionAPI) {
     return requested ?? config.defaultAgent ?? Object.keys(config.agent_servers)[0] ?? "";
   }
 
+  /** Check if a name is an alias */
+  function isAlias(name: string): boolean {
+    return !!config.agent_aliases?.[name];
+  }
+
+  /** Get the first agent name from an alias chain */
+  function resolveAliasToAgent(aliasName: string): string {
+    const alias = config.agent_aliases?.[aliasName];
+    if (!alias?.agents?.length) return aliasName;
+    return alias.agents[0];
+  }
+
   function getAgentConfigOrThrow(agentName: string) {
+    // If it's an alias, resolve to first agent in chain
+    if (isAlias(agentName)) {
+      const resolved = resolveAliasToAgent(agentName);
+      const agentCfg = config.agent_servers[resolved];
+      if (!agentCfg) {
+        throw new Error(`Alias \"${agentName}\" resolves to agent \"${resolved}\" which is not found. Available: ${Object.keys(config.agent_servers).join(", ") || "none"}`);
+      }
+      return agentCfg;
+    }
     const agentCfg = config.agent_servers[agentName];
     if (!agentCfg) {
       throw new Error(`Agent \"${agentName}\" not found. Available: ${Object.keys(config.agent_servers).join(", ") || "none"}`);
@@ -351,6 +405,9 @@ export default function (pi: ExtensionAPI) {
           busySessions.set(target.sessionId, true);
           handle.busy = true;
           handle.lastActivityAt = new Date();
+          handle.isPrompting = true;
+          handle.promptStartedAt = new Date();
+          monitor.markPromptStart(target.sessionId);
           archiveSession(handle);
           try {
             const adapter = activeAdapters.get(target.sessionId)!;
@@ -361,6 +418,8 @@ export default function (pi: ExtensionAPI) {
           } finally {
             busySessions.delete(target.sessionId);
             handle.busy = false;
+            handle.isPrompting = false;
+            monitor.markPromptEnd(target.sessionId);
             archiveSession(handle);
           }
         }
@@ -369,7 +428,9 @@ export default function (pi: ExtensionAPI) {
           throw new Error(`Session name "${target.sessionName ?? params.session_name}" refers to archived session "${target.sessionId}". Load it first with acp_session_load or use the raw session_id of a live session.`);
         }
         const agentCfg = getAgentConfigOrThrow(agentName);
-        const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd);
+        const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
+          onActivity: (sid) => monitor.touch(sid),
+        });
         try {
           await adapter.spawn();
           await adapter.initialize();
@@ -381,6 +442,9 @@ export default function (pi: ExtensionAPI) {
           handle.busy = true;
           busySessions.set(sessionId, true);
           handle.lastActivityAt = new Date();
+          handle.isPrompting = true;
+          handle.promptStartedAt = new Date();
+          monitor.markPromptStart(sessionId);
           archiveSession(handle);
           try {
             const promptResult = (await adapter.prompt(params.message)) as AcpPromptResult;
@@ -390,6 +454,8 @@ export default function (pi: ExtensionAPI) {
           } finally {
             busySessions.delete(sessionId);
             handle.busy = false;
+            handle.isPrompting = false;
+            monitor.markPromptEnd(sessionId);
             archiveSession(handle);
           }
         } catch (err) {
@@ -462,7 +528,7 @@ export default function (pi: ExtensionAPI) {
       refreshWidget(ctx);
       return {
         content: [textContent(
-          `ACP Agent Servers Status\n─────────────────\nCircuit Breaker: ${cb.state}\nAgent Servers: ${Object.keys(config.agent_servers).length} configured\nDefault: ${config.defaultAgent ?? "none"}\n\nAgent Servers:\n${agentLines || "  (none)"}\n\nActive Sessions (${sessionMgr.size}):\n${sessionLines || "  (none)"}`,
+          `ACP Agent Servers Status\n─────────────────\nCircuit Breaker: ${cb.state}\nAgent Servers: ${Object.keys(config.agent_servers).length} configured\nAliases: ${config.agent_aliases ? Object.keys(config.agent_aliases).length : 0}\nDefault: ${config.defaultAgent ?? "none"}\n\nAgent Servers:\n${agentLines || "  (none)"}${config.agent_aliases ? `\n\nAliases:\n${Object.entries(config.agent_aliases).map(([name, cfg]) => `  ${name} → [${cfg.agents.join(", ")}] (${cfg.strategy})`).join("\n")}` : ""}\n\nActive Sessions (${sessionMgr.size}):\n${sessionLines || "  (none)"}`,
         )],
         details: { circuitBreaker: cb.state, agentCount: Object.keys(config.agent_servers).length, sessionCount: sessionMgr.size },
       };
@@ -697,8 +763,8 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const agentName = getAgentName(params.agent);
-      if (!config.agent_servers[agentName]) {
-        return { content: [textContent(`Agent \"${agentName}\" not found. Available: ${Object.keys(config.agent_servers).join(", ") || "none"}`)], details: { agent: agentName, error: "not found" } };
+      if (!config.agent_servers[agentName] && !config.agent_aliases?.[agentName]) {
+        return { content: [textContent(`Agent \"${agentName}\" not found. Available: ${Object.keys(config.agent_servers).join(", ") || "none"}${config.agent_aliases ? `. Aliases: ${Object.keys(config.agent_aliases).join(", ")}` : ""}`)], details: { agent: agentName, error: "not found" } };
       }
       const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd);
       beginWidgetActivity("delegate", ctx);

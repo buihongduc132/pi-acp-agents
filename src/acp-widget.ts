@@ -36,6 +36,7 @@ export interface AcpWidgetState {
 	sessions: AcpWidgetSession[];
 	circuitBreakerState: "closed" | "open" | "half-open";
 	configuredAgentNames: string[];
+	configuredAliases?: string[];
 	defaultAgent?: string;
 	activity: AcpWidgetActivity;
 }

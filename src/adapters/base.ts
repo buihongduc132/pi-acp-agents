@@ -17,12 +17,14 @@ export abstract class AcpAgentAdapter {
   protected logger: Logger;
   protected cwd: string;
   protected client: AcpClient | null = null;
+  protected onActivity?: (sessionId: string) => void;
 
   constructor(opts: AcpAdapterOptions) {
     this.config = this.applyDefaults(opts.config);
     this.clientInfo = opts.clientInfo ?? { name: "pi-acp-agents", version: "0.1.0" };
     this.logger = opts.logger ?? createNoopLogger();
     this.cwd = opts.cwd ?? process.cwd();
+    this.onActivity = opts.onActivity;
   }
 
   /** Subclasses override to provide agent-specific default config values */
@@ -40,6 +42,7 @@ export abstract class AcpAgentAdapter {
       config: this.config,
       cwd: this.cwd,
       clientInfo: this.clientInfo,
+      onActivity: this.onActivity,
     });
     await client.connect();
     // Only assign after successful connect

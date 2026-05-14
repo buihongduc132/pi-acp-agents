@@ -96,7 +96,7 @@ describe("ACP Extension Tools", () => {
 				getModelPolicy: vi.fn(() => ({ allowedModels: [], blockedModels: [] })), setModelPolicy: vi.fn(), checkModel: vi.fn(() => ({ ok: true, reason: "" })) },
 			el: { append: vi.fn() },
 			cb: { execute: vi.fn(async (fn: () => any) => fn()), state: "closed" },
-			hm: { start: vi.fn(), stop: vi.fn(), register: vi.fn() },
+			hm: { start: vi.fn(), stop: vi.fn(), register: vi.fn(), touch: vi.fn(), markPromptStart: vi.fn(), markPromptEnd: vi.fn() },
 			ad: { spawn: vi.fn(), initialize: vi.fn(), newSession: vi.fn(async () => "ses-1"), loadSession: vi.fn(async (sessionId?: string) => sessionId ?? "ses-l"),
 				prompt: vi.fn(async () => ({ text: "response", stopReason: "end_turn", sessionId: "ses-1" })), setModel: vi.fn(), setMode: vi.fn(), cancel: vi.fn(), dispose: vi.fn() },
 			co: { delegate: vi.fn(async () => ({ text: "delegated", stopReason: "end_turn", sessionId: "d1" })),

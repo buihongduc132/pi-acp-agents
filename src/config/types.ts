@@ -6,6 +6,12 @@
  * All customization goes through args/env.
  */
 
+/** Configuration for a single agent alias with fallback chain */
+export interface AcpAliasConfig {
+	agents: string[];
+	strategy: "failover" | "race";
+}
+
 /** Per-agent server configuration (matches Zed's agent_servers entry) */
 export interface AcpAgentConfig {
 	command: string;
@@ -39,6 +45,12 @@ export interface AcpConfig {
 		broadcast?: number;
 		compare?: number;
 	};
+	/** Activity-based stall detection for persistent sessions (ms) */
+	needsAttentionMs?: number;     // default: 60_000
+	autoInterruptMs?: number;      // default: 300_000, 0 = disabled
+	interruptGraceMs?: number;     // default: 10_000
+	/** Agent alias definitions for fallback chains */
+	agent_aliases?: Record<string, AcpAliasConfig>;
 	runtimeDir?: string;
 	modelPolicy?: {
 		allowedModels?: string[];
@@ -100,6 +112,10 @@ export interface AcpArchivedSessionMetadata {
 export interface AcpSessionHandle extends AcpArchivedSessionMetadata {
 	accumulatedText: string;
 	busy?: boolean;
+	/** True while a prompt() call is in-flight */
+	isPrompting?: boolean;
+	/** Timestamp when the current prompt started */
+	promptStartedAt?: Date;
 	planStatus?: "none" | "pending" | "approved" | "rejected";
 	dispose: () => Promise<void>;
 }
@@ -114,6 +130,8 @@ export interface AcpAdapterOptions {
 	logger?: Logger;
 	cwd?: string;
 	agentName?: string;
+	/** Activity callback — called on every session/update notification from the agent */
+	onActivity?: (sessionId: string) => void;
 }
 
 /** Logger interface */
