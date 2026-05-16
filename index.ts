@@ -1374,16 +1374,59 @@ export default function (pi: ExtensionAPI) {
     return lines.join("\n");
   }
 
+  /** Parse shell-like tokens respecting double/single quotes */
+  function shellParse(input: string): string[] {
+    const tokens: string[] = [];
+    let current = "";
+    let inSingle = false;
+    let inDouble = false;
+    let escaped = false;
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i]!;
+      if (escaped) {
+        current += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === "'" && !inDouble) {
+        inSingle = !inSingle;
+        continue;
+      }
+      if (ch === '"' && !inSingle) {
+        inDouble = !inDouble;
+        continue;
+      }
+      if (/\s/.test(ch) && !inSingle && !inDouble) {
+        if (current) {
+          tokens.push(current);
+          current = "";
+        }
+        continue;
+      }
+      current += ch;
+    }
+    if (current) tokens.push(current);
+    return tokens;
+  }
+
+  /** Groups that should be routed to tools via session.prompt() */
+  const toolRoutedGroups = new Set(["prompt", "delegate", "broadcast", "compare"]);
+
   pi.registerCommand("acp", {
     description: "ACP root command: session, prompt, delegate, broadcast, compare, task, message, plan, runtime",
     async handler(args, ctx) {
-      const tokens = args.trim().split(/\s+/).filter(Boolean);
-      if (tokens.length === 0) {
+      const raw = args.trim();
+      if (!raw) {
         ctx.ui.notify(renderAcpCommandSurface(), "info");
         refreshWidget(ctx);
         return;
       }
 
+      const tokens = shellParse(raw);
       const [group, subcommand] = tokens;
       const validGroup = Object.hasOwn(acpCommandGroups, group);
       if (!validGroup) {
@@ -1406,6 +1449,25 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      // Tool-routed groups: prompt, delegate, broadcast, compare
+      // Route to the LLM as a steer so it calls the right tool
+      if (toolRoutedGroups.has(group)) {
+        const toolName = `acp_${group}`;
+        // Reconstruct the remainder after the group token
+        const restRaw = raw.slice(raw.indexOf(group) + group.length).trim();
+        // Build a natural-language steer the LLM can act on
+        const instruction = restRaw
+          ? `Use the ${toolName} tool. Message: ${restRaw}`
+          : `Use the ${toolName} tool with an appropriate message.`;
+        pi.sendMessage({
+          customType: "user-message",
+          content: [{ type: "text", text: instruction }],
+          display: false,
+        }, { triggerTurn: true, deliverAs: "steer" });
+        return;
+      }
+
+      // Fallback: show help for the group
       const lines = [`Group: ${group}`];
       if (subcommand) lines.push(`Subcommand: ${subcommand}`);
       const supportedSubcommands = acpCommandGroups[group as keyof typeof acpCommandGroups];
