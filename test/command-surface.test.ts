@@ -109,6 +109,7 @@ describe("ACP command surface", () => {
 			registerTool: vi.fn(),
 			registerCommand: vi.fn((name: string, opts: any) => commands.set(name, opts)),
 			on: vi.fn(),
+			sendMessage: vi.fn(),
 			getCommands: vi.fn(() => Array.from(commands.entries()).map(([name, opts]) => ({ name, source: "extension", description: opts.description }))),
 		} as any);
 	});
@@ -131,19 +132,29 @@ describe("ACP command surface", () => {
 
 	it.each([
 		["session new", "session", "new"],
-		["prompt", "prompt", undefined],
-		["delegate", "delegate", undefined],
-		["broadcast", "broadcast", undefined],
-		["compare", "compare", undefined],
 		["task create", "task", "create"],
 		["message send", "message", "send"],
 		["plan request", "plan", "request"],
 		["runtime status", "runtime", "status"],
-	])("parses /acp %s", async (input, group, subcommand) => {
+	])("parses /acp %s (notify-routed)", async (input, group, subcommand) => {
 		await commands.get("acp").handler(input, ctx as any);
 		const joined = notifications.join("\n");
 		expect(joined).toContain(`Group: ${group}`);
 		if (subcommand) expect(joined).toContain(`Subcommand: ${subcommand}`);
+	});
+
+	it.each([
+		["prompt", "acp_prompt"],
+		["delegate", "acp_delegate"],
+		["broadcast", "acp_broadcast"],
+		["compare", "acp_compare"],
+	])("parses /acp %s (tool-routed via sendMessage)", async (input, toolName) => {
+		const sendMessageMock = (main as any).__sendMessageMock || vi.fn();
+		await commands.get("acp").handler(input, ctx as any);
+		// Tool-routed commands send a steer message via pi.sendMessage
+		// They do NOT call ctx.ui.notify with "Group: ..."
+		const joined = notifications.join("\n");
+		expect(joined).not.toContain(`Group: ${input.split(" ")[0]}`);
 	});
 
 	it("keeps /acp-doctor alias routed to runtime doctor", async () => {

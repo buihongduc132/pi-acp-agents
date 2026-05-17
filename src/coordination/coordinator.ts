@@ -9,6 +9,27 @@ import { createAdapter } from "../adapter-factory.js";
 import { AliasResolver } from "./alias-resolver.js";
 import type { AcpConfig, AcpPromptResult } from "../config/types.js";
 
+// ── Progress types ──────────────────────────────────────────────────
+
+export type AcpDelegatePhase =
+  | "spawning"     // Adapter process being spawned
+  | "initializing" // ACP handshake
+  | "session"      // Creating new session
+  | "prompting"    // Waiting for agent response
+  | "disposing"    // Cleaning up
+  | "done"         // Complete
+  | "error";       // Failed
+
+export interface AcpDelegateProgress {
+  agentName: string;
+  phase: AcpDelegatePhase;
+  durationMs: number;
+  lastActivityAt: number;
+  text?: string;        // Partial text accumulated during prompting
+}
+
+export type AcpDelegateProgressCallback = (progress: AcpDelegateProgress) => void;
+
 /** Flat result from a single agent in a multi-agent operation */
 export interface AgentResult {
   agent: string;
@@ -36,19 +57,21 @@ export class AgentCoordinator {
     agentName: string,
     message: string,
     cwd?: string,
+    onProgress?: AcpDelegateProgressCallback,
+    signal?: AbortSignal,
   ): Promise<AcpPromptResult> {
     // Check if it's an alias first
     const aliasConfig = this.config.agent_aliases?.[agentName];
     if (aliasConfig) {
       const resolver = new AliasResolver(
         { [agentName]: aliasConfig },
-        (name, msg, c) => this.delegateToAgent(name, msg, c),
+        (name, msg, c, prog) => this.delegateToAgent(name, msg, c, prog, signal),
         () => true, // circuit breaker check — simplified for now
       );
-      return resolver.resolve(agentName, message, cwd);
+      return resolver.resolve(agentName, message, cwd, onProgress);
     }
 
-    return this.delegateToAgent(agentName, message, cwd);
+    return this.delegateToAgent(agentName, message, cwd, onProgress, signal);
   }
 
   /** Delegate directly to a concrete agent. Creates a short-lived session. */
@@ -56,18 +79,68 @@ export class AgentCoordinator {
     agentName: string,
     message: string,
     cwd?: string,
+    onProgress?: AcpDelegateProgressCallback,
+    signal?: AbortSignal,
   ): Promise<AcpPromptResult> {
     const agentCfg = this.config.agent_servers[agentName];
     if (!agentCfg) throw new Error(`Agent "${agentName}" not found`);
 
+    const startTime = Date.now();
+    let aborted = false;
+    const emit = (phase: AcpDelegatePhase, extra?: Partial<AcpDelegateProgress>) => {
+      onProgress?.({
+        agentName,
+        phase,
+        durationMs: Date.now() - startTime,
+        lastActivityAt: Date.now(),
+        ...extra,
+      });
+    };
+
     const effectiveCwd = cwd ?? this.cwd;
     const adapter = createAdapter(agentName, agentCfg, this.config, effectiveCwd);
+
+    // Wire abort signal: cancel + dispose adapter on ESC
+    let onAbort: (() => void) | undefined;
+    if (signal) {
+      onAbort = () => {
+        aborted = true;
+        emit("error");
+        try { adapter.cancel(); } catch { /* cancel can throw if process dead */ }
+        adapter.dispose();
+      };
+      if (signal.aborted) {
+        onAbort();
+        throw new DOMException("Delegation aborted", "AbortError");
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     try {
+      emit("spawning");
       await adapter.spawn();
+      if (aborted) throw new DOMException("Delegation aborted", "AbortError");
+
+      emit("initializing");
       await adapter.initialize();
+      if (aborted) throw new DOMException("Delegation aborted", "AbortError");
+
+      emit("session");
       await adapter.newSession(effectiveCwd);
-      return await adapter.prompt(message);
+      if (aborted) throw new DOMException("Delegation aborted", "AbortError");
+
+      emit("prompting");
+      const result = await adapter.prompt(message);
+      if (aborted) throw new DOMException("Delegation aborted", "AbortError");
+
+      emit("done");
+      return result;
+    } catch (err) {
+      if (!aborted) emit("error");
+      throw err;
     } finally {
+      if (onAbort && signal) signal.removeEventListener("abort", onAbort);
+      emit("disposing");
       adapter.dispose();
     }
   }

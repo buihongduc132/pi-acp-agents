@@ -37,6 +37,8 @@ export type DelegateFn = (
 	agentName: string,
 	message: string,
 	cwd?: string,
+	onProgress?: import("./coordinator.js").AcpDelegateProgressCallback,
+	signal?: AbortSignal,
 ) => Promise<AcpPromptResult>;
 
 export type IsHealthyFn = (agentName: string) => boolean;
@@ -63,6 +65,7 @@ export class AliasResolver {
 		aliasName: string,
 		message: string,
 		cwd?: string,
+		onProgress?: import("./coordinator.js").AcpDelegateProgressCallback,
 	): Promise<AcpPromptResult> {
 		const alias = this.aliases[aliasName];
 		if (!alias) throw new Error(`Alias "${aliasName}" not found`);
@@ -75,9 +78,9 @@ export class AliasResolver {
 		);
 
 		if (alias.strategy === "race") {
-			return this.race(aliasName, healthyAgents, message, cwd);
+			return this.race(aliasName, healthyAgents, message, cwd, onProgress);
 		}
-		return this.failover(aliasName, healthyAgents, message, cwd);
+		return this.failover(aliasName, healthyAgents, message, cwd, onProgress);
 	}
 
 	// -------------------------------------------------------------------------
@@ -89,6 +92,7 @@ export class AliasResolver {
 		agents: string[],
 		message: string,
 		cwd?: string,
+		onProgress?: import("./coordinator.js").AcpDelegateProgressCallback,
 	): Promise<AcpPromptResult> {
 		if (agents.length === 0) throw new NoHealthyAgentsError(aliasName);
 
@@ -96,7 +100,7 @@ export class AliasResolver {
 
 		for (const agent of agents) {
 			try {
-				return await this.delegateFn(agent, message, cwd);
+				return await this.delegateFn(agent, message, cwd, onProgress);
 			} catch (err) {
 				attempts.push({
 					agent,
@@ -117,6 +121,7 @@ export class AliasResolver {
 		agents: string[],
 		message: string,
 		cwd?: string,
+		onProgress?: import("./coordinator.js").AcpDelegateProgressCallback,
 	): Promise<AcpPromptResult> {
 		if (agents.length === 0) throw new NoHealthyAgentsError(aliasName);
 
@@ -126,7 +131,7 @@ export class AliasResolver {
 			const attempts: Array<{ agent: string; error: Error }> = [];
 
 			for (const agent of agents) {
-				this.delegateFn(agent, message, cwd)
+				this.delegateFn(agent, message, cwd, onProgress)
 					.then((result) => {
 						if (!settled) {
 							settled = true;
