@@ -1,6 +1,6 @@
 # @walodayeet/pi-acp-agents
 
-> **Multi-agent orchestration for pi** — Spawn, control, and coordinate ACP-compatible agents (Gemini CLI, Claude, Codex, etc.) as first-class tools within the pi coding agent.
+> Multi-agent orchestration for pi — spawn, control, and coordinate ACP-compatible agents (Gemini CLI, Claude, Codex, etc.) as first-class tools within the pi coding agent.
 
 [![npm version](https://img.shields.io/npm/v/@walodayeet/pi-acp-agents.svg)](https://www.npmjs.com/package/@walodayeet/pi-acp-agents)
 [![CI](https://github.com/buihongduc132/pi-acp-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/buihongduc132/pi-acp-agents/actions/workflows/ci.yml)
@@ -8,40 +8,48 @@
 
 ---
 
-## Purpose
-
-`pi-acp-agents` bridges the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) ecosystem with the [pi coding agent](https://pi.dev). It lets pi invoke external ACP-compatible agents as tools — enabling **multi-model collaboration**, **cross-agent delegation**, and **response comparison** from a single orchestrator.
-
-### Why this exists
-
-| Problem                                      | Solution                                                                             |
-| -------------------------------------------- | ------------------------------------------------------------------------------------ |
-| pi can only use one LLM at a time            | ACP agents let pi call Gemini, Claude, or any ACP agent on demand                    |
-| No way to compare model outputs side-by-side | `acp_compare` runs the same prompt across agents and returns a structured comparison |
-| Subprocess spawning is fragile               | Built-in circuit breaker, health monitoring, and busy-session mutex                  |
-| Each agent tool integration is bespoke       | Adapter pattern: one config format for any ACP agent                                 |
-
-### What it does
+## Features
 
 - Registers 10 pi tools for ACP agent management
 - Manages session lifecycle (create, load, set model/mode, cancel, dispose)
 - Provides multi-agent coordination (delegate, broadcast, compare)
 - Resilient by default: circuit breaker, stall timeout, health polling
 - TUI widget for real-time session status
+- Adapter pattern: one config format for any ACP agent
 
 ---
 
-## Install
+## Installation
+
+### For Humans
+
+```bash
+npm install @walodayeet/pi-acp-agents
+```
+
+### For AI Agents
+
+Add to `~/.pi/agent/settings.json`:
+
+```json
+{
+  "packages": ["npm:@walodayeet/pi-acp-agents"]
+}
+```
+
+Or install via pi CLI:
 
 ```bash
 pi install npm:@walodayeet/pi-acp-agents
 ```
 
-Or add to `~/.pi/agent/settings.json`:
+### For pi git-sourced
 
 ```json
 {
-  "packages": ["npm:@walodayeet/pi-acp-agents"]
+  "gitPackages": [
+    { "url": "https://github.com/buihongduc132/pi-acp-agents.git" }
+  ]
 }
 ```
 
@@ -312,4 +320,8 @@ git push --follow-tags   # triggers CI → auto-publish with provenance
 
 ## License
 
-MIT © walodayeet
+MIT
+
+## Attribution
+
+This package is a fork of [walodayeet/pi-acp-agents](https://github.com/walodayeet/pi-acp-agents). Forked and maintained by [buihongduc132](https://github.com/buihongduc132).
