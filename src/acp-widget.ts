@@ -25,21 +25,11 @@ export interface AcpWidgetSession {
 	model?: string;
 }
 
-export interface AcpWidgetDelegation {
-	id: string;           // unique delegation id
-	agentName: string;
-	phase: string;        // spawning | initializing | session | prompting | disposing | done | error
-	startedAt: Date;
-	lastActivityAt: Date;
-	text?: string;        // partial text during prompting
-}
-
 export interface AcpWidgetActivity {
 	activeDelegations: number;
 	activeBroadcasts: number;
 	activeCompares: number;
 	lastError?: string;
-	delegations: AcpWidgetDelegation[]; // currently active delegations with detail
 }
 
 export interface AcpWidgetState {
@@ -182,33 +172,6 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 						width,
 					),
 				);
-
-				// ── Active delegations detail ──
-				if (state.activity.delegations.length > 0) {
-					for (const del of state.activity.delegations) {
-						const elapsed = Math.floor((Date.now() - del.startedAt.getTime()) / 1000);
-						const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m${elapsed % 60}s`;
-						const phaseIcon = del.phase === 'prompting' ? '⏳' : del.phase === 'error' ? '✕' : '⟳';
-						const phaseColor: ThemeColor = del.phase === 'error' ? 'error' : del.phase === 'prompting' ? 'accent' : 'muted';
-						lines.push(
-							truncateToWidth(
-								` ${theme.fg(phaseColor, phaseIcon)} ${theme.bold(del.agentName)} ${theme.fg("dim", del.phase)} · ${theme.fg("muted", elapsedStr)}`,
-								width,
-							),
-						);
-
-						// Text preview: last 80 chars on a separate indented line
-						if (del.text) {
-							const preview = del.text.length > 80 ? del.text.slice(-80) : del.text;
-							lines.push(
-								truncateToWidth(
-									`  ┆ ${preview}`,
-									width,
-								),
-							);
-						}
-					}
-				}
 
 				// ── No sessions ──
 				if (state.sessions.length === 0) {

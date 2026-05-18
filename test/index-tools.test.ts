@@ -1,5 +1,5 @@
 /**
- * Tests for all 34 MCP tools registered by index.ts
+ * Tests for all 33 MCP tools registered by index.ts
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { AcpSessionHandle } from "../src/config/types.js";
@@ -129,7 +129,7 @@ describe("ACP Extension Tools", () => {
 		return h;
 	}
 
-	it("registers 33 tools", () => { expect(tools.size).toBe(34); });
+	it("registers 33 tools", () => { expect(tools.size).toBe(33); });
 
 	it("acp_status overall", async () => { m.sm.size = 1; m.sm.list.mockReturnValue([mkSession("s1")]); const r = await exec("acp_status", {}); expect(r.content[0].text).toContain("Agent Servers: 2 configured"); });
 	it("acp_status specific", async () => { m.sm.get.mockReturnValue(mkSession("s1")); const r = await exec("acp_status", { session_id: "s1" }); expect(r.content[0].text).toContain("Session: s1"); });

@@ -30,7 +30,6 @@ function makeState(overrides: Partial<AcpWidgetState> = {}): AcpWidgetState {
 			activeDelegations: 0,
 			activeBroadcasts: 0,
 			activeCompares: 0,
-				delegations: [],
 			lastError: undefined,
 		},
 		...overrides,
@@ -257,7 +256,6 @@ describe("acp-widget", () => {
 				activeDelegations: 1,
 				activeBroadcasts: 0,
 				activeCompares: 0,
-				delegations: [],
 			},
 		});
 		const joined = render(makeDeps(state)).join("\n");
@@ -270,7 +268,6 @@ describe("acp-widget", () => {
 				activeDelegations: 1,
 				activeBroadcasts: 1,
 				activeCompares: 0,
-				delegations: [],
 			},
 		});
 		const joined = render(makeDeps(state)).join("\n");
@@ -283,7 +280,6 @@ describe("acp-widget", () => {
 				activeDelegations: 0,
 				activeBroadcasts: 0,
 				activeCompares: 0,
-				delegations: [],
 				lastError: "spawn exploded",
 			},
 		});
@@ -307,7 +303,6 @@ describe("acp-widget", () => {
 				activeDelegations: 0,
 				activeBroadcasts: 1,
 				activeCompares: 0,
-				delegations: [],
 			},
 		});
 		const joined = render(makeDeps(state)).join("\n");
@@ -321,171 +316,5 @@ describe("acp-widget", () => {
 		const factory = createAcpWidget(makeDeps(state));
 		const component = factory({}, createMockTheme());
 		expect(() => (component as any).dispose()).not.toThrow();
-	});
-
-	// ── Multi-Delegation Detail Rendering ──
-
-	it("renders multiple delegations as separate rows", () => {
-		const now = Date.now();
-		const state = makeState({
-			sessions: [],
-			activity: {
-				activeDelegations: 3,
-				activeBroadcasts: 0,
-				activeCompares: 0,
-				delegations: [
-					{ id: "d1", agentName: "gemini", phase: "prompting", startedAt: new Date(now - 5_000), lastActivityAt: new Date(now - 1_000) },
-					{ id: "d2", agentName: "claude", phase: "initializing", startedAt: new Date(now - 30_000), lastActivityAt: new Date(now - 5_000) },
-					{ id: "d3", agentName: "codex", phase: "spawning", startedAt: new Date(now - 90_000), lastActivityAt: new Date(now - 60_000) },
-				],
-			},
-		});
-		const lines = render(makeDeps(state));
-		const joined = lines.join("\n");
-
-		// Each agent name must appear in the output
-		expect(joined).toContain("gemini");
-		expect(joined).toContain("claude");
-		expect(joined).toContain("codex");
-
-		// Count delegation rows — each should have agent name + its phase
-		const delegationRows = lines.filter(
-			(l) =>
-				(l.includes("gemini") && l.includes("prompting")) ||
-				(l.includes("claude") && l.includes("initializing")) ||
-				(l.includes("codex") && l.includes("spawning")),
-		);
-		expect(delegationRows.length).toBe(3);
-	});
-
-	it("each delegation shows agent name + phase + elapsed", () => {
-		const now = Date.now();
-		const state = makeState({
-			sessions: [],
-			activity: {
-				activeDelegations: 1,
-				activeBroadcasts: 0,
-				activeCompares: 0,
-				delegations: [
-					{ id: "d1", agentName: "gemini", phase: "prompting", startedAt: new Date(now - 5_000), lastActivityAt: new Date(now) },
-				],
-			},
-		});
-		const lines = render(makeDeps(state));
-		const delegationLine = lines.find((l) => l.includes("gemini") && l.includes("prompting"));
-		expect(delegationLine).toBeDefined();
-		expect(delegationLine!).toContain("gemini");
-		expect(delegationLine!).toContain("prompting");
-		expect(delegationLine!).toContain("5s");
-	});
-
-	it("shows truncated text preview for delegation with text", () => {
-		const now = Date.now();
-		const longText = "A".repeat(500);
-		const state = makeState({
-			sessions: [],
-			activity: {
-				activeDelegations: 1,
-				activeBroadcasts: 0,
-				activeCompares: 0,
-				delegations: [
-					{
-						id: "d1",
-						agentName: "gemini",
-						phase: "prompting",
-						startedAt: new Date(now - 10_000),
-						lastActivityAt: new Date(now),
-						text: longText,
-					},
-				],
-			},
-		});
-		const lines = render(makeDeps(state));
-
-		// Find the line(s) containing the preview (should have ┆ prefix)
-		const previewLines = lines.filter((l) => l.includes("┆"));
-		expect(previewLines.length).toBeGreaterThanOrEqual(1);
-
-		// Preview should be truncated — at most 80 chars of original text visible
-		const previewLine = previewLines[0];
-		// Count 'A' characters in the line — should be <= 80
-		const aCount = (previewLine.match(/A/g) || []).length;
-		expect(aCount).toBeLessThanOrEqual(80);
-		expect(aCount).toBeGreaterThan(0);
-	});
-
-	it("delegation rows appear between status line and session rows", () => {
-		const now = Date.now();
-		const state = makeState({
-			sessions: [
-				{
-					sessionId: "sess-existing",
-					agentName: "codex",
-					cwd: "/",
-					status: "idle",
-					lastActivityAt: new Date(now - 60_000),
-					createdAt: new Date(now - 120_000),
-				},
-			],
-			activity: {
-				activeDelegations: 1,
-				activeBroadcasts: 0,
-				activeCompares: 0,
-				delegations: [
-					{ id: "d1", agentName: "gemini", phase: "prompting", startedAt: new Date(now - 5_000), lastActivityAt: new Date(now) },
-				],
-			},
-		});
-		const lines = render(makeDeps(state));
-
-		const statusIdx = lines.findIndex((l) => l.includes("status:"));
-		const delegationIdx = lines.findIndex((l) => l.includes("gemini") && l.includes("prompting"));
-		const sessionIdx = lines.findIndex((l) => l.includes("codex") && l.includes("sess-exi"));
-
-		expect(statusIdx).toBeGreaterThanOrEqual(0);
-		expect(delegationIdx).toBeGreaterThanOrEqual(0);
-		expect(sessionIdx).toBeGreaterThanOrEqual(0);
-		expect(delegationIdx).toBeGreaterThan(statusIdx);
-		expect(sessionIdx).toBeGreaterThan(delegationIdx);
-	});
-
-	it("formats elapsed time as 1m30s for 90 seconds", () => {
-		const now = Date.now();
-		const state = makeState({
-			sessions: [],
-			activity: {
-				activeDelegations: 1,
-				activeBroadcasts: 0,
-				activeCompares: 0,
-				delegations: [
-					{ id: "d1", agentName: "gemini", phase: "session", startedAt: new Date(now - 90_000), lastActivityAt: new Date(now) },
-				],
-			},
-		});
-		const lines = render(makeDeps(state));
-		const delegationLine = lines.find((l) => l.includes("gemini"));
-		expect(delegationLine).toBeDefined();
-		expect(delegationLine!).toContain("1m30s");
-	});
-
-	it("formats elapsed time as 5s for 5 seconds", () => {
-		const now = Date.now();
-		const state = makeState({
-			sessions: [],
-			activity: {
-				activeDelegations: 1,
-				activeBroadcasts: 0,
-				activeCompares: 0,
-				delegations: [
-					{ id: "d1", agentName: "gemini", phase: "spawning", startedAt: new Date(now - 5_000), lastActivityAt: new Date(now) },
-				],
-			},
-		});
-		const lines = render(makeDeps(state));
-		const delegationLine = lines.find((l) => l.includes("gemini"));
-		expect(delegationLine).toBeDefined();
-		expect(delegationLine!).toContain("5s");
-		// Should NOT contain "m" (no minutes)
-		expect(delegationLine!).not.toContain("1m");
 	});
 });

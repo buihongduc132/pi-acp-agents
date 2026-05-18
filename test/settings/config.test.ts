@@ -66,8 +66,8 @@ describe("ACP tool settings — config", () => {
 
 	// ── 1. Default config has all tools enabled ──────────
 
-	it("DEFAULT_SETTINGS has all 34 tools enabled", () => {
-		expect(ACP_TOOL_NAMES).toHaveLength(34);
+	it("DEFAULT_SETTINGS has all 33 tools enabled", () => {
+		expect(ACP_TOOL_NAMES).toHaveLength(33);
 		for (const name of ACP_TOOL_NAMES) {
 			expect(DEFAULT_SETTINGS.tools[name]).toBeDefined();
 			expect(DEFAULT_SETTINGS.tools[name].enabled).toBe(true);
@@ -79,7 +79,7 @@ describe("ACP tool settings — config", () => {
 			"acp_prompt", "acp_status", "acp_session_new", "acp_session_load",
 			"acp_session_set_model", "acp_session_set_mode", "acp_cancel",
 			"acp_session_list", "acp_session_shutdown", "acp_session_kill",
-			"acp_prune", "acp_delegate", "acp_delegate_parallel", "acp_broadcast", "acp_compare",
+			"acp_prune", "acp_delegate", "acp_broadcast", "acp_compare",
 			"acp_task_create", "acp_task_list", "acp_task_get", "acp_task_assign",
 			"acp_task_set_status", "acp_task_dependency_add", "acp_task_dependency_remove",
 			"acp_task_clear", "acp_message_send", "acp_message_list",

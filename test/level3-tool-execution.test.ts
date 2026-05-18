@@ -127,7 +127,7 @@ describe("Level 3+ — tool execute behavior", () => {
     });
     const { delegateTool } = await loadTools();
     const result = await delegateTool.execute("tc1", { message: "do work", agent: "gemini", cwd: "/tmp/run" }, undefined, undefined, createMockCtx());
-    expect(mockDelegate).toHaveBeenCalledWith("gemini", "do work", "/tmp/run", expect.any(Function), undefined);
+    expect(mockDelegate).toHaveBeenCalledWith("gemini", "do work", "/tmp/run");
     expect(result.content[0].text).toBe("delegate ok");
     expect(result.details).toEqual({ agent: "gemini", sessionId: "sid-1", stopReason: "end_turn" });
   });

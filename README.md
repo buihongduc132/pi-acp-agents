@@ -20,18 +20,14 @@
 | No way to compare model outputs side-by-side | `acp_compare` runs the same prompt across agents and returns a structured comparison |
 | Subprocess spawning is fragile               | Built-in circuit breaker, health monitoring, and busy-session mutex                  |
 | Each agent tool integration is bespoke       | Adapter pattern: one config format for any ACP agent                                 |
-| Can't see what's running or cancel it        | TUI widget shows live progress per agent; ESC cancels immediately                    |
-| Need multiple agents on same task            | `acp_delegate_parallel` runs N agents simultaneously with independent tracking       |
 
 ### What it does
 
-- Registers 34+ pi tools for ACP agent management
+- Registers 10 pi tools for ACP agent management
 - Manages session lifecycle (create, load, set model/mode, cancel, dispose)
-- Provides multi-agent coordination (delegate, delegate_parallel, broadcast, compare)
+- Provides multi-agent coordination (delegate, broadcast, compare)
 - Resilient by default: circuit breaker, stall timeout, health polling
-- TUI widget with live per-delegation progress (agent name, phase, elapsed, text preview)
-- ESC/abort support: cancel running delegations immediately via pi's AbortSignal
-- Parallel delegation: Promise.all to N agents with independent progress tracking
+- TUI widget for real-time session status
 
 ---
 
@@ -106,12 +102,11 @@ Friendly session names are globally unique across ACP sessions, immutable once a
 
 ### Multi-Agent Coordination (Level 3)
 
-| Tool                      | Description                                                          |
-| ------------------------- | -------------------------------------------------------------------- |
-| `acp_delegate`            | Delegate a task (short-lived session, auto-disposed, ESC to cancel)  |
-| `acp_delegate_parallel`   | Delegate to multiple agents simultaneously (Promise.all, per-agent progress) |
-| `acp_broadcast`           | Send same prompt to multiple agents in parallel                      |
-| `acp_compare`             | Get responses from multiple agents and compare them                  |
+| Tool            | Description                                          |
+| --------------- | ---------------------------------------------------- |
+| `acp_delegate`  | Delegate a task (short-lived session, auto-disposed) |
+| `acp_broadcast` | Send same prompt to multiple agents in parallel      |
+| `acp_compare`   | Get responses from multiple agents and compare them  |
 
 **Commands:** `/acp` — ACP root command with session, prompt, delegate, broadcast, compare, task, message, plan, runtime groups
 
@@ -174,9 +169,6 @@ Friendly session names are globally unique across ACP sessions, immutable once a
 | Process safety  | SIGTERM→SIGKILL   | Graceful process shutdown with escalation                   |
 | EPIPE handling  | stdin/stdout      | Prevents crashes on broken pipes                            |
 | Non-blocking    | all paths         | Errors return as tool error results, never unhandled throws |
-| Abort support   | all delegate tools | ESC triggers `adapter.cancel()` + `dispose()` immediately via AbortSignal |
-| Progress feedback | delegate tools  | `_onUpdate` + widget show phase (spawning→init→session→prompting→done), elapsed, text preview |
-| Parallel delegation | `acp_delegate_parallel` | Promise.allSettled to N agents with per-agent widget rows and independent cleanup |
 
 ---
 
@@ -263,10 +255,6 @@ Central logs: `~/.pi/acp-agents/logs/`
 - [x] TUI widget for session status
 - [x] 148 unit + integration tests
 - [x] CI/CD pipeline with provenance publishing
-- [x] **Live progress feedback** — widget shows phase, elapsed, text preview per delegation
-- [x] **ESC/abort support** — cancel running delegations immediately
-- [x] **Parallel delegation** (`acp_delegate_parallel`) — Promise.all for multiple agents
-- [x] 380 tests, 31 test files
 
 ### v0.3.x — Streaming & Auth
 

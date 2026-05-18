@@ -3,6 +3,15 @@ import { GeminiAcpAdapter } from "../../src/adapters/gemini.js";
 import type { AcpAgentConfig } from "../../src/config/types.js";
 import type { Logger } from "../../src/logger.js";
 
+// Mock child_process to prevent real gemini calls
+vi.mock("node:child_process", () => ({
+	execSync: vi.fn((cmd: string) => {
+		if (cmd.includes("which gemini")) throw new Error("not found");
+		if (cmd.includes("--version")) return "gemini v1.0.0";
+		return "";
+	}),
+}));
+
 function noopLogger(): Logger {
 	return {
 		info: vi.fn(),

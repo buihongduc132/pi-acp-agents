@@ -28,7 +28,6 @@ export const ACP_TOOL_NAMES = [
 	"acp_session_kill",
 	"acp_prune",
 	"acp_delegate",
-	"acp_delegate_parallel",
 	"acp_broadcast",
 	"acp_compare",
 	"acp_task_create",

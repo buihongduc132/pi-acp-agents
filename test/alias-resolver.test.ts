@@ -98,14 +98,14 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ smart: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("smart", "do something");
 			expect(result.text).toBe("response from gemy-pro");
 			expect(delegateFn).toHaveBeenCalledOnce();
-			expect(delegateFn).toHaveBeenCalledWith("gemy-pro", "do something", undefined, undefined);
+			expect(delegateFn).toHaveBeenCalledWith("gemy-pro", "do something", undefined);
 		});
 
 		it("falls back to second agent when first fails", async () => {
@@ -116,8 +116,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ smart: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("smart", "do something");
@@ -135,8 +135,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ deep: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("deep", "test");
@@ -153,8 +153,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ fail: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			await expect(resolver.resolve("fail", "test")).rejects.toThrow(AllAgentsFailedError);
@@ -183,15 +183,15 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ skip: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("skip", "test");
 			expect(result.text).toBe("response from c");
 			// delegateFn should NOT have been called for a or b
 			expect(delegateFn).toHaveBeenCalledOnce();
-			expect(delegateFn).toHaveBeenCalledWith("c", "test", undefined, undefined);
+			expect(delegateFn).toHaveBeenCalledWith("c", "test", undefined);
 		});
 
 		it("returns result from first healthy agent when earlier ones have open breakers", async () => {
@@ -205,8 +205,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ mixed: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("mixed", "test");
@@ -220,12 +220,12 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ cwdtest: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			await resolver.resolve("cwdtest", "test", "/custom/dir");
-			expect(delegateFn).toHaveBeenCalledWith("gemy-pro", "test", "/custom/dir", undefined);
+			expect(delegateFn).toHaveBeenCalledWith("gemy-pro", "test", "/custom/dir");
 		});
 	});
 
@@ -247,8 +247,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ race: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("race", "test");
@@ -275,8 +275,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ race: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("race", "test");
@@ -296,8 +296,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ race: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("race", "test");
@@ -312,8 +312,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ race: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			await expect(resolver.resolve("race", "test")).rejects.toThrow(AllAgentsFailedError);
@@ -329,14 +329,14 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ race: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("race", "test");
 			expect(result.text).toBe("response from healthy");
 			expect(delegateFn).toHaveBeenCalledOnce();
-			expect(delegateFn).toHaveBeenCalledWith("healthy", "test", undefined, undefined);
+			expect(delegateFn).toHaveBeenCalledWith("healthy", "test", undefined);
 		});
 
 		it("throws NoHealthyAgentsError when all agents have open breakers", async () => {
@@ -345,8 +345,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ race: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			await expect(resolver.resolve("race", "test")).rejects.toThrow(NoHealthyAgentsError);
@@ -359,7 +359,7 @@ describe("AliasResolver", () => {
 
 	describe("edge cases", () => {
 		it("throws for non-existent alias", async () => {
-			resolver = new AliasResolver({}, delegateFn as any, isHealthyFn as any);
+			resolver = new AliasResolver({}, delegateFn, isHealthyFn);
 			await expect(resolver.resolve("nonexistent", "test")).rejects.toThrow(
 				/not found|unknown|nonexistent/i,
 			);
@@ -369,8 +369,8 @@ describe("AliasResolver", () => {
 			const alias = makeAliasConfig([]);
 			resolver = new AliasResolver(
 				{ empty: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 			await expect(resolver.resolve("empty", "test")).rejects.toThrow();
 		});
@@ -384,8 +384,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ probe: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("probe", "test");
@@ -398,8 +398,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ myalias: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			try {
@@ -424,8 +424,8 @@ describe("AliasResolver", () => {
 
 			resolver = new AliasResolver(
 				{ skipchain: alias },
-				delegateFn as any,
-				isHealthyFn as any,
+				delegateFn,
+				isHealthyFn,
 			);
 
 			const result = await resolver.resolve("skipchain", "test");

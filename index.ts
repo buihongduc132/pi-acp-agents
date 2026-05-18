@@ -51,7 +51,6 @@ export default function (pi: ExtensionAPI) {
     activeBroadcasts: 0,
     activeCompares: 0,
     lastError: undefined as string | undefined,
-    delegations: [] as Array<import("./src/acp-widget.js").AcpWidgetDelegation>,
   };
 
   let config: AcpConfig = loadConfig();
@@ -241,40 +240,22 @@ export default function (pi: ExtensionAPI) {
     widgetActivity.lastError = error ? error.slice(0, 120) : undefined;
   }
 
-  function beginWidgetActivity(kind: "delegate" | "broadcast" | "compare", ctx: { ui: { setWidget: Function } }, extra?: { agentName: string }): () => void {
+  function beginWidgetActivity(kind: "delegate" | "broadcast" | "compare", ctx: { ui: { setWidget: Function } }): void {
     setWidgetError(undefined);
-    if (kind === "delegate") {
-      widgetActivity.activeDelegations += 1;
-      const delId = `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const delegation: import("./src/acp-widget.js").AcpWidgetDelegation = {
-        id: delId,
-        agentName: extra?.agentName ?? "unknown",
-        phase: "spawning",
-        startedAt: new Date(),
-        lastActivityAt: new Date(),
-      };
-      widgetActivity.delegations.push(delegation);
-      refreshWidget(ctx);
-      return () => {
-        widgetActivity.delegations = widgetActivity.delegations.filter((d) => d.id !== delId);
-      };
-    }
+    if (kind === "delegate") widgetActivity.activeDelegations += 1;
     if (kind === "broadcast") widgetActivity.activeBroadcasts += 1;
     if (kind === "compare") widgetActivity.activeCompares += 1;
     refreshWidget(ctx);
-    return () => {};
   }
 
   function endWidgetActivity(
     kind: "delegate" | "broadcast" | "compare",
     ctx: { ui: { setWidget: Function } },
     error?: string,
-    cleanup?: () => void,
   ): void {
     if (kind === "delegate") widgetActivity.activeDelegations = Math.max(0, widgetActivity.activeDelegations - 1);
     if (kind === "broadcast") widgetActivity.activeBroadcasts = Math.max(0, widgetActivity.activeBroadcasts - 1);
     if (kind === "compare") widgetActivity.activeCompares = Math.max(0, widgetActivity.activeCompares - 1);
-    cleanup?.();
     setWidgetError(error);
     refreshWidget(ctx);
   }
@@ -786,31 +767,9 @@ export default function (pi: ExtensionAPI) {
         return { content: [textContent(`Agent \"${agentName}\" not found. Available: ${Object.keys(config.agent_servers).join(", ") || "none"}${config.agent_aliases ? `. Aliases: ${Object.keys(config.agent_aliases).join(", ")}` : ""}`)], details: { agent: agentName, error: "not found" } };
       }
       const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd);
-      const cleanup = beginWidgetActivity("delegate", ctx, { agentName });
-
-      // Find this delegation in the widget state for live updates
-      const delegation = widgetActivity.delegations[widgetActivity.delegations.length - 1];
-
-      const onProgress = (progress: { agentName: string; phase: string; durationMs: number; lastActivityAt: number; text?: string }) => {
-        if (delegation) {
-          delegation.phase = progress.phase;
-          delegation.lastActivityAt = new Date(progress.lastActivityAt);
-          if (progress.text) delegation.text = progress.text;
-        }
-        // Forward to pi's onUpdate so TUI shows progress
-        if (_onUpdate) {
-          const phaseLabel = progress.phase === 'prompting' ? 'waiting for response' : progress.phase;
-          const elapsedSec = Math.floor(progress.durationMs / 1000);
-          _onUpdate({
-            content: [{ type: "text", text: `(delegating to ${progress.agentName}: ${phaseLabel} · ${elapsedSec}s)` }],
-            details: { agent: progress.agentName, phase: progress.phase, durationMs: progress.durationMs },
-          });
-        }
-        refreshWidget(ctx);
-      };
-
+      beginWidgetActivity("delegate", ctx);
       const result = await safeExecute(async () => {
-        const r = await coordinator.delegate(agentName, params.message, params.cwd ?? ctx.cwd, onProgress, _signal);
+        const r = await coordinator.delegate(agentName, params.message, params.cwd ?? ctx.cwd);
         if (r.stopReason === "error" && !r.text) {
           throw new Error(`Agent returned stopReason=error with no text. Session: ${r.sessionId}`);
         }
@@ -819,116 +778,13 @@ export default function (pi: ExtensionAPI) {
       }, `acp_delegate(${agentName})`, { timeoutMs: config.toolTimeouts?.delegate ?? config.stallTimeoutMs });
 
       if (result.ok) {
-        endWidgetActivity("delegate", ctx, undefined, cleanup);
+        endWidgetActivity("delegate", ctx);
         return { content: [textContent(result.value.text || "(no response)")], details: { agent: agentName, sessionId: result.value.sessionId, stopReason: result.value.stopReason } };
       }
-      endWidgetActivity("delegate", ctx, result.error, cleanup);
-      // Check if aborted by user (ESC)
-      if (result.error?.includes("Abort") || result.error?.includes("aborted")) {
-        return {
-          content: [textContent(`Delegation to ${agentName} was cancelled.`)],
-          details: { agent: agentName, error: "aborted", cancelled: true },
-        };
-      }
+      endWidgetActivity("delegate", ctx, result.error);
       return {
         content: [textContent(`Delegate failed (${agentName}):\n  Error: ${result.error}\n  Circuit open: ${result.circuitOpen ? "yes" : "no"}\n  Agent config: command=${config.agent_servers[agentName]?.command} args=${(config.agent_servers[agentName]?.args ?? []).join(" ")}`)],
         details: { agent: agentName, error: result.error, circuitOpen: result.circuitOpen },
-      };
-    },
-  });
-
-  if (isToolEnabled(toolSettings, "acp_delegate_parallel")) pi.registerTool({
-      name: "acp_delegate_parallel",
-    label: "ACP Delegate Parallel",
-    description: "Delegate a task to multiple ACP agents simultaneously (Promise.all). Each agent runs independently with its own progress tracking. Returns aggregated results.",
-    promptSnippet: "acp_delegate_parallel — delegate to multiple ACP agents in parallel",
-    parameters: Type.Object({
-      message: Type.String({ description: "Task to delegate to all agents" }),
-      agents: Type.Array(Type.String(), { description: "Agent names to delegate to" }),
-      cwd: Type.Optional(Type.String({ description: "Working directory" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (!params.agents || params.agents.length === 0) {
-        return { content: [textContent("No agents specified. Provide at least one agent name in the agents array.")], details: { results: [], error: "no_agents" } };
-      }
-
-      // Validate all agents exist
-      const invalidAgents = params.agents.filter((name: string) => !config.agent_servers[name] && !config.agent_aliases?.[name]);
-      if (invalidAgents.length > 0) {
-        return { content: [textContent(`Agents not found: ${invalidAgents.join(", ")}. Available: ${Object.keys(config.agent_servers).join(", ") || "none"}`)], details: { results: [], error: "not_found" } };
-      }
-
-      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd);
-
-      // Start a delegation entry per agent
-      const entries = params.agents.map((agentName: string) => {
-        const cleanup = beginWidgetActivity("delegate", ctx, { agentName });
-        const delegation = widgetActivity.delegations[widgetActivity.delegations.length - 1];
-        return { agentName, cleanup, delegation };
-      });
-
-      // Create per-agent onProgress callbacks
-      const makeOnProgress = (agentName: string, delegation: typeof entries[0]["delegation"]) => (progress: { agentName: string; phase: string; durationMs: number; lastActivityAt: number; text?: string }) => {
-        if (delegation) {
-          delegation.phase = progress.phase;
-          delegation.lastActivityAt = new Date(progress.lastActivityAt);
-          if (progress.text) delegation.text = progress.text;
-        }
-        if (_onUpdate) {
-          const phaseLabel = progress.phase === 'prompting' ? 'waiting for response' : progress.phase;
-          const elapsedSec = Math.floor(progress.durationMs / 1000);
-          _onUpdate({
-            content: [{ type: "text", text: `(delegating to ${progress.agentName}: ${phaseLabel} · ${elapsedSec}s)` }],
-            details: { agent: progress.agentName, phase: progress.phase, durationMs: progress.durationMs },
-          });
-        }
-        refreshWidget(ctx);
-      };
-
-      // Promise.allSettled — each agent runs independently
-      const results = await Promise.allSettled(
-        entries.map(({ agentName, cleanup, delegation }) =>
-          coordinator.delegate(agentName, params.message, params.cwd ?? ctx.cwd, makeOnProgress(agentName, delegation), _signal)
-            .then((r) => {
-              if (r.stopReason === "error" && !r.text) {
-                throw new Error(`Agent returned stopReason=error with no text. Session: ${r.sessionId}`);
-              }
-              eventLog.append("delegate_parallel", { agentName, cwd: params.cwd ?? ctx.cwd });
-              return { agent: agentName, text: r.text, sessionId: r.sessionId, stopReason: r.stopReason, error: undefined as string | undefined };
-            })
-            .catch((err) => ({
-              agent: agentName,
-              text: "",
-              sessionId: "",
-              stopReason: "error",
-              error: err instanceof Error ? err.message : String(err),
-            }))
-            .finally(() => {
-              endWidgetActivity("delegate", ctx, undefined, cleanup);
-            }),
-        ),
-      );
-
-      // Aggregate results
-      const aggregated = results.map((r) => (r.status === "fulfilled" ? r.value : { agent: "unknown", text: "", sessionId: "", stopReason: "error", error: String(r.reason) }));
-
-      // Format human-readable output
-      const succeeded = aggregated.filter((r) => !r.error);
-      const failed = aggregated.filter((r) => r.error);
-      const lines = aggregated.map((r) => {
-        if (r.error) return `── ${r.agent} ──\n(ERROR: ${r.error})`;
-        return `── ${r.agent} ──\n${r.text || "(no response)"}`;
-      });
-      const summary = `Parallel delegation results (${succeeded.length}/${aggregated.length} succeeded)\n${"═".repeat(40)}\n\n${lines.join("\n\n")}`;
-
-      return {
-        content: [textContent(summary)],
-        details: {
-          results: aggregated,
-          succeeded: succeeded.length,
-          failed: failed.length,
-          total: aggregated.length,
-        },
       };
     },
   });
@@ -1518,59 +1374,16 @@ export default function (pi: ExtensionAPI) {
     return lines.join("\n");
   }
 
-  /** Parse shell-like tokens respecting double/single quotes */
-  function shellParse(input: string): string[] {
-    const tokens: string[] = [];
-    let current = "";
-    let inSingle = false;
-    let inDouble = false;
-    let escaped = false;
-    for (let i = 0; i < input.length; i++) {
-      const ch = input[i]!;
-      if (escaped) {
-        current += ch;
-        escaped = false;
-        continue;
-      }
-      if (ch === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (ch === "'" && !inDouble) {
-        inSingle = !inSingle;
-        continue;
-      }
-      if (ch === '"' && !inSingle) {
-        inDouble = !inDouble;
-        continue;
-      }
-      if (/\s/.test(ch) && !inSingle && !inDouble) {
-        if (current) {
-          tokens.push(current);
-          current = "";
-        }
-        continue;
-      }
-      current += ch;
-    }
-    if (current) tokens.push(current);
-    return tokens;
-  }
-
-  /** Groups that should be routed to tools via session.prompt() */
-  const toolRoutedGroups = new Set(["prompt", "delegate", "broadcast", "compare"]);
-
   pi.registerCommand("acp", {
     description: "ACP root command: session, prompt, delegate, broadcast, compare, task, message, plan, runtime",
     async handler(args, ctx) {
-      const raw = args.trim();
-      if (!raw) {
+      const tokens = args.trim().split(/\s+/).filter(Boolean);
+      if (tokens.length === 0) {
         ctx.ui.notify(renderAcpCommandSurface(), "info");
         refreshWidget(ctx);
         return;
       }
 
-      const tokens = shellParse(raw);
       const [group, subcommand] = tokens;
       const validGroup = Object.hasOwn(acpCommandGroups, group);
       if (!validGroup) {
@@ -1593,25 +1406,6 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Tool-routed groups: prompt, delegate, broadcast, compare
-      // Route to the LLM as a steer so it calls the right tool
-      if (toolRoutedGroups.has(group)) {
-        const toolName = `acp_${group}`;
-        // Reconstruct the remainder after the group token
-        const restRaw = raw.slice(raw.indexOf(group) + group.length).trim();
-        // Build a natural-language steer the LLM can act on
-        const instruction = restRaw
-          ? `Use the ${toolName} tool. Message: ${restRaw}`
-          : `Use the ${toolName} tool with an appropriate message.`;
-        pi.sendMessage({
-          customType: "user-message",
-          content: [{ type: "text", text: instruction }],
-          display: false,
-        }, { triggerTurn: true, deliverAs: "steer" });
-        return;
-      }
-
-      // Fallback: show help for the group
       const lines = [`Group: ${group}`];
       if (subcommand) lines.push(`Subcommand: ${subcommand}`);
       const supportedSubcommands = acpCommandGroups[group as keyof typeof acpCommandGroups];

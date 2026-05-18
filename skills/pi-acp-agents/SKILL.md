@@ -23,7 +23,6 @@ This pi extension registers tools that let the pi LLM communicate with external 
 | `acp_session_set_mode`  | Change the mode (thinking level) for an active session         |
 | `acp_cancel`            | Cancel an ongoing prompt                                       |
 | `acp_delegate`          | Delegate a task (short-lived session, auto-disposed)           |
-| `acp_delegate_parallel` | Delegate to multiple agents simultaneously (Promise.all style)  |
 | `acp_broadcast`         | Send same prompt to multiple agents in parallel                |
 | `acp_compare`           | Get responses from multiple agents and compare them            |
 
@@ -74,8 +73,6 @@ Config file: `~/.pi/acp-agents/config.json`
 - **Busy mutex**: Prevents concurrent prompts on same session
 - **Process safeguards**: SIGTERM → SIGKILL escalation, EPIPE error handlers
 - **Non-blocking**: All tool errors return as tool error results, never throw
-- **Abort support**: ESC in pi TUI triggers `adapter.cancel()` + `dispose()` immediately via AbortSignal
-- **Progress feedback**: `_onUpdate` + widget show live phase, elapsed time, text preview per delegation
 
 ## Architecture
 

@@ -71,6 +71,6 @@ describe("Level 3+ — ACP management tool registration", () => {
       "acp_session_set_mode",
       "acp_cancel",
     ]));
-    expect(registeredTools.length).toBe(34);
+    expect(registeredTools.length).toBe(33);
   });
 });
