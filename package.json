@@ -1,7 +1,7 @@
 {
   "name": "@walodayeet/pi-acp-agents",
   "version": "0.2.0",
-  "description": "Pi extension: ACP agent client — spawn and control ACP-compatible agents (Gemini CLI, etc.) from within pi",
+  "description": "Pi extension: ACP agent client \u2014 spawn and control ACP-compatible agents (Gemini CLI, etc.) from within pi",
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -9,7 +9,9 @@
     "agent-client-protocol",
     "gemini",
     "ai-agent",
-    "multi-agent"
+    "multi-agent",
+    "pi",
+    "pi-coding-agent"
   ],
   "type": "module",
   "license": "MIT",
