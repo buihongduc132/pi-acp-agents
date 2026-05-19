@@ -1,5 +1,5 @@
 {
-  "name": "@walodayeet/pi-acp-agents",
+  "name": "pi-acp-agents",
   "version": "0.2.1",
   "description": "Pi extension: ACP agent client \u2014 spawn and control ACP-compatible agents (Gemini CLI, etc.) from within pi",
   "keywords": [
