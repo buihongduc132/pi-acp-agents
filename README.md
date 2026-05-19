@@ -39,11 +39,27 @@ Add to `~/.pi/agent/settings.json`:
 
 Or install via pi CLI:
 
+### Humans
+
 ```bash
 pi install npm:@walodayeet/pi-acp-agents
 ```
 
-### For pi git-sourced
+Or with npm directly:
+
+```bash
+npm install @walodayeet/pi-acp-agents
+```
+
+### AI Agents (pip install)
+
+```
+pi install npm:@walodayeet/pi-acp-agents
+```
+
+### Git-sourced for pi
+
+Add to `~/.pi/agent/settings.json`:
 
 ```json
 {
@@ -51,6 +67,22 @@ pi install npm:@walodayeet/pi-acp-agents
     { "url": "https://github.com/buihongduc132/pi-acp-agents.git" }
   ]
 }
+```
+
+Or clone and link locally:
+
+```bash
+git clone https://github.com/buihongduc132/pi-acp-agents.git
+cd pi-acp-agents && npm install
+```
+
+Then reference the local path in `settings.json`:
+
+```json
+{
+  "packages": ["/path/to/pi-acp-agents"]
+}
+```
 ```
 
 ## Quick Start

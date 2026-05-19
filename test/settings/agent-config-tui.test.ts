@@ -169,7 +169,7 @@ describe("agent-config-tui", () => {
 			const agentItem = items.find((i) => i.id === "agent:gemini");
 			let finishValue: string | undefined = "NOT_CALLED";
 			const submenu = agentItem!.submenu!("Edit", (v) => { finishValue = v; });
-			submenu.handleInput("\x1b");
+			submenu.handleInput!("\x1b");
 			expect(finishValue).toBeUndefined();
 		});
 
@@ -179,7 +179,7 @@ describe("agent-config-tui", () => {
 			const agentItem = items.find((i) => i.id === "agent:gemini");
 			let finishValue: string | undefined;
 			const submenu = agentItem!.submenu!("Edit", (v) => { finishValue = v; });
-			submenu.handleInput("r");
+			submenu.handleInput!("r");
 			expect(finishValue).toBeDefined();
 			const parsed = JSON.parse(finishValue!);
 			expect(parsed.action).toBe("remove");
@@ -191,7 +191,7 @@ describe("agent-config-tui", () => {
 			const items = buildSettingItems(config, []);
 			const agentItem = items.find((i) => i.id === "agent:gemini");
 			const submenu = agentItem!.submenu!("Edit", (v) => {});
-			submenu.handleInput("e");
+			submenu.handleInput!("e");
 			const lines = submenu.render(80);
 			const joined = lines.join("\n");
 			expect(joined).toContain("Edit agent");
@@ -205,7 +205,7 @@ describe("agent-config-tui", () => {
 			const agentItem = items.find((i) => i.id === "agent:gemini");
 			let finishValue: string | undefined;
 			const submenu = agentItem!.submenu!("Edit", (v) => { finishValue = v; });
-			submenu.handleInput("d");
+			submenu.handleInput!("d");
 			expect(finishValue).toBeDefined();
 			const parsed = JSON.parse(finishValue!);
 			expect(parsed.action).toBe("setDefault");
@@ -217,17 +217,17 @@ describe("agent-config-tui", () => {
 			const items = buildSettingItems(config, []);
 			const agentItem = items.find((i) => i.id === "agent:gemini");
 			const submenu = agentItem!.submenu!("Edit", (v) => {});
-			submenu.handleInput("e");
+			submenu.handleInput!("e");
 			// Cycle from command → args
-			submenu.handleInput("\t");
+			submenu.handleInput!("\t");
 			const lines1 = submenu.render(80);
 			expect(lines1.some((l: string) => l.includes("▸ Args"))).toBe(true);
 			// Cycle from args → model
-			submenu.handleInput("\t");
+			submenu.handleInput!("\t");
 			const lines2 = submenu.render(80);
 			expect(lines2.some((l: string) => l.includes("▸ Default model"))).toBe(true);
 			// Cycle from model → command
-			submenu.handleInput("\t");
+			submenu.handleInput!("\t");
 			const lines3 = submenu.render(80);
 			expect(lines3.some((l: string) => l.includes("▸ Command"))).toBe(true);
 		});
@@ -238,8 +238,8 @@ describe("agent-config-tui", () => {
 			const agentItem = items.find((i) => i.id === "agent:gemini");
 			let finishValue: string | undefined;
 			const submenu = agentItem!.submenu!("Edit", (v) => { finishValue = v; });
-			submenu.handleInput("e");
-			submenu.handleInput("\r");
+			submenu.handleInput!("e");
+			submenu.handleInput!("\r");
 			expect(finishValue).toBeDefined();
 			const parsed = JSON.parse(finishValue!);
 			expect(parsed.action).toBe("edit");
@@ -253,8 +253,8 @@ describe("agent-config-tui", () => {
 			const agentItem = items.find((i) => i.id === "agent:gemini");
 			let finishValue: string | undefined;
 			const submenu = agentItem!.submenu!("Edit", (v) => { finishValue = v; });
-			submenu.handleInput("e");
-			submenu.handleInput("\r");
+			submenu.handleInput!("e");
+			submenu.handleInput!("\r");
 			expect(finishValue).toBeDefined();
 			const parsed = JSON.parse(finishValue!);
 			expect(parsed.action).toBe("edit");
@@ -268,8 +268,8 @@ describe("agent-config-tui", () => {
 			const agentItem = items.find((i) => i.id === "agent:gemini");
 			let finishValue: string | undefined = "NOT_CALLED";
 			const submenu = agentItem!.submenu!("Edit", (v) => { finishValue = v; });
-			submenu.handleInput("e");
-			submenu.handleInput("\x1b");
+			submenu.handleInput!("e");
+			submenu.handleInput!("\x1b");
 			expect(finishValue).toBeUndefined();
 		});
 
@@ -278,7 +278,7 @@ describe("agent-config-tui", () => {
 			const items = buildSettingItems(config, []);
 			const agentItem = items.find((i) => i.id === "agent:gemini");
 			const submenu = agentItem!.submenu!("Edit", (v) => {});
-			submenu.handleInput("e");
+			submenu.handleInput!("e");
 			expect(() => submenu.invalidate()).not.toThrow();
 		});
 	});
@@ -317,13 +317,13 @@ describe("agent-config-tui", () => {
 			// Default: name active
 			let lines = submenu.render(80);
 			expect(lines.some((l: string) => l.includes("▸ Name"))).toBe(true);
-			submenu.handleInput("\t");
+			submenu.handleInput!("\t");
 			lines = submenu.render(80);
 			expect(lines.some((l: string) => l.includes("▸ Command"))).toBe(true);
-			submenu.handleInput("\t");
+			submenu.handleInput!("\t");
 			lines = submenu.render(80);
 			expect(lines.some((l: string) => l.includes("▸ Args"))).toBe(true);
-			submenu.handleInput("\t");
+			submenu.handleInput!("\t");
 			lines = submenu.render(80);
 			expect(lines.some((l: string) => l.includes("▸ Name"))).toBe(true);
 		});
@@ -334,7 +334,7 @@ describe("agent-config-tui", () => {
 			const addItem = items.find((i) => i.id === "preset:add");
 			let finishValue: string | undefined = "NOT_CALLED";
 			const submenu = addItem!.submenu!("manual", (v) => { finishValue = v; });
-			submenu.handleInput("\r");
+			submenu.handleInput!("\r");
 			expect(finishValue).toBeUndefined();
 		});
 
@@ -346,16 +346,16 @@ describe("agent-config-tui", () => {
 			const submenu = addItem!.submenu!("manual", (v) => { finishValue = v; });
 			// Type a name
 			for (const ch of "testagent") {
-				submenu.handleInput(ch);
+				submenu.handleInput!(ch);
 			}
 			// Tab to command
-			submenu.handleInput("\t");
+			submenu.handleInput!("\t");
 			// Type a command
 			for (const ch of "test-cmd") {
-				submenu.handleInput(ch);
+				submenu.handleInput!(ch);
 			}
 			// Enter
-			submenu.handleInput("\r");
+			submenu.handleInput!("\r");
 			expect(finishValue).toBeDefined();
 			const parsed = JSON.parse(finishValue!);
 			expect(parsed.action).toBe("add");
@@ -370,7 +370,7 @@ describe("agent-config-tui", () => {
 			const addItem = items.find((i) => i.id === "preset:add");
 			let finishValue: string | undefined = "NOT_CALLED";
 			const submenu = addItem!.submenu!("manual", (v) => { finishValue = v; });
-			submenu.handleInput("\x1b");
+			submenu.handleInput!("\x1b");
 			expect(finishValue).toBeUndefined();
 		});
 
@@ -388,7 +388,7 @@ describe("agent-config-tui", () => {
 			const addItem = items.find((i) => i.id === "preset:add");
 			const submenu = addItem!.submenu!("manual", (v) => {});
 			// Type into name field (default active)
-			submenu.handleInput("a");
+			submenu.handleInput!("a");
 			const lines = submenu.render(80);
 			// The input should have "a" in the name field
 			expect(lines.some((l: string) => l.includes("a"))).toBe(true);

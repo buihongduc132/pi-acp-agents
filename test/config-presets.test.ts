@@ -38,7 +38,7 @@ describe("AGENT_PRESETS", () => {
 	});
 
 	it("gemini preset returns config when binary found", async () => {
-		const { AGENT_PRESETS } = await import("../../src/config/config.js");
+		const { AGENT_PRESETS } = await import("../src/config/config.js");
 		mockExecSync.mockImplementation((cmd: string) => {
 			if (cmd.includes("which gemini")) return "";
 			throw new Error("not found");
@@ -48,14 +48,14 @@ describe("AGENT_PRESETS", () => {
 	});
 
 	it("gemini preset returns null when not found", async () => {
-		const { AGENT_PRESETS } = await import("../../src/config/config.js");
+		const { AGENT_PRESETS } = await import("../src/config/config.js");
 		mockExecSync.mockImplementation(() => { throw new Error("not found"); });
 		const result = AGENT_PRESETS.gemini?.();
 		expect(result).toBeNull();
 	});
 
 	it("opencode preset returns config for 'opencode' binary", async () => {
-		const { AGENT_PRESETS } = await import("../../src/config/config.js");
+		const { AGENT_PRESETS } = await import("../src/config/config.js");
 		mockExecSync.mockImplementation((cmd: string) => {
 			if (cmd.includes("which opencode")) return "";
 			throw new Error("not found");
@@ -65,7 +65,7 @@ describe("AGENT_PRESETS", () => {
 	});
 
 	it("opencode preset returns config for 'ocxo' binary", async () => {
-		const { AGENT_PRESETS } = await import("../../src/config/config.js");
+		const { AGENT_PRESETS } = await import("../src/config/config.js");
 		mockExecSync.mockImplementation((cmd: string) => {
 			if (cmd.includes("which opencode")) throw new Error("not found");
 			if (cmd.includes("which ocxo")) return "";
@@ -76,14 +76,14 @@ describe("AGENT_PRESETS", () => {
 	});
 
 	it("opencode preset returns null when neither found", async () => {
-		const { AGENT_PRESETS } = await import("../../src/config/config.js");
+		const { AGENT_PRESETS } = await import("../src/config/config.js");
 		mockExecSync.mockImplementation(() => { throw new Error("not found"); });
 		const result = AGENT_PRESETS.opencode?.();
 		expect(result).toBeNull();
 	});
 
 	it("codex preset returns config when binary found", async () => {
-		const { AGENT_PRESETS } = await import("../../src/config/config.js");
+		const { AGENT_PRESETS } = await import("../src/config/config.js");
 		mockExecSync.mockImplementation((cmd: string) => {
 			if (cmd.includes("which codex-acp")) return "";
 			throw new Error("not found");
@@ -93,7 +93,7 @@ describe("AGENT_PRESETS", () => {
 	});
 
 	it("codex preset returns null when not found", async () => {
-		const { AGENT_PRESETS } = await import("../../src/config/config.js");
+		const { AGENT_PRESETS } = await import("../src/config/config.js");
 		mockExecSync.mockImplementation(() => { throw new Error("not found"); });
 		const result = AGENT_PRESETS.codex?.();
 		expect(result).toBeNull();

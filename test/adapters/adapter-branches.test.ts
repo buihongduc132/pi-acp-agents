@@ -44,7 +44,7 @@ describe("adapters — catch branches", () => {
 	describe("CodexAcpAdapter", () => {
 		it("applyDefaults fills command when empty", () => {
 			const adapter = new CodexAcpAdapter({});
-			const defaults = adapter.applyDefaults({ command: "", args: undefined } as any);
+			const defaults = (adapter as any).applyDefaults({ command: "", args: undefined } as any);
 			expect(defaults.command).toBe("codex-acp");
 			expect(defaults.args).toEqual([]);
 		});

@@ -136,9 +136,9 @@ describe("config (extended)", () => {
 		it("accepts toolTimeouts config", () => {
 			const config = validateConfig({
 				agent_servers: { a: { command: "c" } },
-				toolTimeouts: { acp_prompt: 60_000 },
+				toolTimeouts: { prompt: 60_000 },
 			});
-			expect(config.toolTimeouts).toEqual({ acp_prompt: 60_000 });
+			expect(config.toolTimeouts).toEqual({ prompt: 60_000 });
 		});
 
 		it("sets toolTimeouts to undefined when not provided", () => {

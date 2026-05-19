@@ -9,6 +9,8 @@ import {
 	AliasResolver,
 	AllAgentsFailedError,
 	NoHealthyAgentsError,
+	type DelegateFn,
+	type IsHealthyFn,
 } from "../src/coordination/alias-resolver.js";
 import { AgentCoordinator } from "../src/coordination/coordinator.js";
 import type { AcpConfig, AcpAliasConfig, AcpPromptResult } from "../src/config/types.js";
@@ -87,6 +89,15 @@ describe("AliasResolver", () => {
 		isHealthyFn = vi.fn().mockReturnValue(true); // default: all healthy
 	});
 
+	/** Helper to create AliasResolver with properly-typed mocks */
+	function makeResolver(aliases: Record<string, AcpAliasConfig>): AliasResolver {
+		return new AliasResolver(
+			aliases,
+			delegateFn as unknown as DelegateFn,
+			isHealthyFn as unknown as IsHealthyFn,
+		);
+	}
+
 	// =========================================================================
 	// FAILOVER STRATEGY
 	// =========================================================================
@@ -96,11 +107,7 @@ describe("AliasResolver", () => {
 			const alias = makeAliasConfig(["gemy-pro", "claude-sonnet", "gemini"]);
 			delegateFn.mockResolvedValue(makeSuccessResult("gemy-pro"));
 
-			resolver = new AliasResolver(
-				{ smart: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ smart: alias });
 
 			const result = await resolver.resolve("smart", "do something");
 			expect(result.text).toBe("response from gemy-pro");
@@ -114,11 +121,7 @@ describe("AliasResolver", () => {
 				.mockRejectedValueOnce(new Error("gemy-pro auth failed"))
 				.mockResolvedValueOnce(makeSuccessResult("claude-sonnet"));
 
-			resolver = new AliasResolver(
-				{ smart: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ smart: alias });
 
 			const result = await resolver.resolve("smart", "do something");
 			expect(result.text).toBe("response from claude-sonnet");
@@ -133,11 +136,7 @@ describe("AliasResolver", () => {
 				.mockRejectedValueOnce(new Error("c failed"))
 				.mockResolvedValueOnce(makeSuccessResult("d"));
 
-			resolver = new AliasResolver(
-				{ deep: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ deep: alias });
 
 			const result = await resolver.resolve("deep", "test");
 			expect(result.text).toBe("response from d");
@@ -151,11 +150,7 @@ describe("AliasResolver", () => {
 				.mockRejectedValueOnce(new Error("b failed"))
 				.mockRejectedValueOnce(new Error("c failed"));
 
-			resolver = new AliasResolver(
-				{ fail: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ fail: alias });
 
 			await expect(resolver.resolve("fail", "test")).rejects.toThrow(AllAgentsFailedError);
 
@@ -181,11 +176,7 @@ describe("AliasResolver", () => {
 
 			delegateFn.mockResolvedValue(makeSuccessResult("c"));
 
-			resolver = new AliasResolver(
-				{ skip: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ skip: alias });
 
 			const result = await resolver.resolve("skip", "test");
 			expect(result.text).toBe("response from c");
@@ -203,11 +194,7 @@ describe("AliasResolver", () => {
 
 			delegateFn.mockResolvedValue(makeSuccessResult("healthy"));
 
-			resolver = new AliasResolver(
-				{ mixed: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ mixed: alias });
 
 			const result = await resolver.resolve("mixed", "test");
 			expect(result.text).toBe("response from healthy");
@@ -218,11 +205,7 @@ describe("AliasResolver", () => {
 			const alias = makeAliasConfig(["gemy-pro"]);
 			delegateFn.mockResolvedValue(makeSuccessResult("gemy-pro"));
 
-			resolver = new AliasResolver(
-				{ cwdtest: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ cwdtest: alias });
 
 			await resolver.resolve("cwdtest", "test", "/custom/dir");
 			expect(delegateFn).toHaveBeenCalledWith("gemy-pro", "test", "/custom/dir");
@@ -245,11 +228,7 @@ describe("AliasResolver", () => {
 					return makeSuccessResult("fast");
 				});
 
-			resolver = new AliasResolver(
-				{ race: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ race: alias });
 
 			const result = await resolver.resolve("race", "test");
 			expect(result.text).toBe("response from fast");
@@ -273,11 +252,7 @@ describe("AliasResolver", () => {
 					return makeSuccessResult("b");
 				});
 
-			resolver = new AliasResolver(
-				{ race: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ race: alias });
 
 			const result = await resolver.resolve("race", "test");
 			// The fast agent wins — we just check it returns quickly
@@ -294,11 +269,7 @@ describe("AliasResolver", () => {
 					return makeSuccessResult("succeed");
 				});
 
-			resolver = new AliasResolver(
-				{ race: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ race: alias });
 
 			const result = await resolver.resolve("race", "test");
 			expect(result.text).toBe("response from succeed");
@@ -310,11 +281,7 @@ describe("AliasResolver", () => {
 				.mockRejectedValueOnce(new Error("a failed"))
 				.mockRejectedValueOnce(new Error("b failed"));
 
-			resolver = new AliasResolver(
-				{ race: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ race: alias });
 
 			await expect(resolver.resolve("race", "test")).rejects.toThrow(AllAgentsFailedError);
 		});
@@ -327,11 +294,7 @@ describe("AliasResolver", () => {
 
 			delegateFn.mockResolvedValue(makeSuccessResult("healthy"));
 
-			resolver = new AliasResolver(
-				{ race: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ race: alias });
 
 			const result = await resolver.resolve("race", "test");
 			expect(result.text).toBe("response from healthy");
@@ -343,11 +306,7 @@ describe("AliasResolver", () => {
 			const alias = makeAliasConfig(["a", "b"], "race");
 			isHealthyFn.mockReturnValue(false); // all unhealthy
 
-			resolver = new AliasResolver(
-				{ race: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ race: alias });
 
 			await expect(resolver.resolve("race", "test")).rejects.toThrow(NoHealthyAgentsError);
 		});
@@ -359,7 +318,7 @@ describe("AliasResolver", () => {
 
 	describe("edge cases", () => {
 		it("throws for non-existent alias", async () => {
-			resolver = new AliasResolver({}, delegateFn, isHealthyFn);
+			resolver = makeResolver({});
 			await expect(resolver.resolve("nonexistent", "test")).rejects.toThrow(
 				/not found|unknown|nonexistent/i,
 			);
@@ -367,11 +326,7 @@ describe("AliasResolver", () => {
 
 		it("throws for alias with empty agents array", async () => {
 			const alias = makeAliasConfig([]);
-			resolver = new AliasResolver(
-				{ empty: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ empty: alias });
 			await expect(resolver.resolve("empty", "test")).rejects.toThrow();
 		});
 
@@ -382,11 +337,7 @@ describe("AliasResolver", () => {
 			isHealthyFn.mockReturnValue(true);
 			delegateFn.mockResolvedValue(makeSuccessResult("probing-agent"));
 
-			resolver = new AliasResolver(
-				{ probe: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ probe: alias });
 
 			const result = await resolver.resolve("probe", "test");
 			expect(result.text).toBe("response from probing-agent");
@@ -396,11 +347,7 @@ describe("AliasResolver", () => {
 			const alias = makeAliasConfig(["a"]);
 			delegateFn.mockRejectedValue(new Error("a failed"));
 
-			resolver = new AliasResolver(
-				{ myalias: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ myalias: alias });
 
 			try {
 				await resolver.resolve("myalias", "test");
@@ -422,11 +369,7 @@ describe("AliasResolver", () => {
 				.mockRejectedValueOnce(new Error("b failed"))
 				.mockResolvedValueOnce(makeSuccessResult("c"));
 
-			resolver = new AliasResolver(
-				{ skipchain: alias },
-				delegateFn,
-				isHealthyFn,
-			);
+			resolver = makeResolver({ skipchain: alias });
 
 			const result = await resolver.resolve("skipchain", "test");
 			expect(result.text).toBe("response from c");

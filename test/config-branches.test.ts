@@ -18,7 +18,7 @@ vi.mock("node:os", async (importOriginal) => {
 	};
 });
 
-import { validateConfig, getAgentConfig, loadConfig, resolveConfigPath } from "../../src/config/config.js";
+import { validateConfig, getAgentConfig, loadConfig, resolveConfigPath } from "../src/config/config.js";
 
 describe("config.ts — branch coverage", () => {
 	beforeEach(() => {
@@ -185,12 +185,9 @@ describe("config.ts — branch coverage", () => {
 	});
 
 	describe("validateConfig — empty agent_servers", () => {
-		it("throws when agent_servers is empty object", () => {
-			expect(() =>
-				validateConfig({
-					agent_servers: {},
-				} as any),
-			).toThrow("at least one agent");
+		it("accepts empty agent_servers", () => {
+			const result = validateConfig({ agent_servers: {} });
+			expect(result.agent_servers).toEqual({});
 		});
 
 		it("throws when agent_servers is null", () => {

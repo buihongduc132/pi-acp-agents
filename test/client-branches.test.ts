@@ -51,7 +51,7 @@ function createMockProc() {
 	proc.stdin = new Writable() as any;
 	proc.stdout = new Readable({ read() {} }) as any;
 	proc.stderr = new EventEmitter() as any;
-	proc.stderr.on = vi.fn((event: string, cb: Function) => {
+	proc.stderr.on = vi.fn((event: string, cb: (...args: any[]) => void) => {
 		EventEmitter.prototype.on.call(proc.stderr, event, cb);
 		return proc.stderr;
 	});
