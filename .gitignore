@@ -9,3 +9,12 @@ coverage/
 .claude/
 AGENTS.md
 CLAUDE.md
+.fusion/
+.sg-rules/
+.sg-sha
+.sgignore
+sgconfig.yml
+.hindsight.json
+.gitnexus/
+.gitnexusignore
+.bug-hunter/
