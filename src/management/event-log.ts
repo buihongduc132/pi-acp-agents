@@ -16,8 +16,12 @@ export class AcpEventLog {
       type,
       ...(data ? { data } : {}),
     };
-    const paths = ensureRuntimeDir(this.rootDir);
-    appendFileSync(paths.eventLogFile, JSON.stringify(entry) + "\n", "utf-8");
+    try {
+      const paths = ensureRuntimeDir(this.rootDir);
+      appendFileSync(paths.eventLogFile, JSON.stringify(entry) + "\n", "utf-8");
+    } catch {
+      // EACCES or other FS error — silently degrade. Event log is non-critical.
+    }
     return entry;
   }
 }

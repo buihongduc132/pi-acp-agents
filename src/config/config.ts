@@ -195,11 +195,15 @@ export function loadConfig(configPath?: string): AcpConfig {
 export function saveConfig(config: AcpConfig, configPath?: string): void {
 	const path = configPath ?? CONFIG_PATH;
 	const dir = dirname(path);
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
+	try {
+		if (!existsSync(dir)) {
+			mkdirSync(dir, { recursive: true });
+		}
+		const data = JSON.stringify(config, null, 2) + "\n";
+		writeFileSync(path, data, "utf-8");
+	} catch {
+		// EACCES or other FS error — silently degrade. Config changes are non-critical.
 	}
-	const data = JSON.stringify(config, null, 2) + "\n";
-	writeFileSync(path, data, "utf-8");
 }
 
 /** Add or update an agent server entry. Returns a new config (does not mutate original). */

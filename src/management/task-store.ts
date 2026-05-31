@@ -224,11 +224,11 @@ export class AcpTaskStore {
   }
 
   private read(): AcpTaskStorePayload {
-    const paths = ensureRuntimeDir(this.rootDir);
-    if (!existsSync(paths.tasksFile)) {
-      return structuredClone(DEFAULT_PAYLOAD);
-    }
     try {
+      const paths = ensureRuntimeDir(this.rootDir);
+      if (!existsSync(paths.tasksFile)) {
+        return structuredClone(DEFAULT_PAYLOAD);
+      }
       const parsed = JSON.parse(readFileSync(paths.tasksFile, "utf-8")) as AcpTaskStorePayload;
       // Migration: add defaults for legacy records
       for (const task of parsed.tasks) {
@@ -243,7 +243,11 @@ export class AcpTaskStore {
   }
 
   private write(payload: AcpTaskStorePayload): void {
-    const paths = ensureRuntimeDir(this.rootDir);
-    writeFileSync(paths.tasksFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    try {
+      const paths = ensureRuntimeDir(this.rootDir);
+      writeFileSync(paths.tasksFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    } catch {
+      // EACCES or other FS error — silently degrade. Tasks are non-critical runtime state.
+    }
   }
 }

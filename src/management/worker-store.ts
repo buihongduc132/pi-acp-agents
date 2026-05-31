@@ -104,9 +104,9 @@ export class WorkerStore {
   }
 
   private read(): WorkerPayload {
-    const paths = ensureRuntimeDir(this.rootDir);
-    if (!existsSync(paths.workersFile)) return structuredClone(DEFAULT_PAYLOAD);
     try {
+      const paths = ensureRuntimeDir(this.rootDir);
+      if (!existsSync(paths.workersFile)) return structuredClone(DEFAULT_PAYLOAD);
       return JSON.parse(readFileSync(paths.workersFile, "utf-8")) as WorkerPayload;
     } catch {
       return structuredClone(DEFAULT_PAYLOAD);
@@ -114,7 +114,11 @@ export class WorkerStore {
   }
 
   private write(payload: WorkerPayload): void {
-    const paths = ensureRuntimeDir(this.rootDir);
-    writeFileSync(paths.workersFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    try {
+      const paths = ensureRuntimeDir(this.rootDir);
+      writeFileSync(paths.workersFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    } catch {
+      // EACCES or other FS error — silently degrade. Workers are non-critical runtime state.
+    }
   }
 }

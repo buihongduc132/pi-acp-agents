@@ -118,7 +118,11 @@ export class AsyncExecutor {
   }
 
   private writeAll(payload: AsyncStorePayload): void {
-    writeFileSync(this.runsFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    try {
+      writeFileSync(this.runsFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    } catch {
+      // EACCES or other FS error — silently degrade.
+    }
   }
 
   private writeRun(record: AcpAsyncRunRecord): void {

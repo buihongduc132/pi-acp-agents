@@ -72,7 +72,11 @@ export class SessionArchiveStore {
   }
 
   private writeRaw(payload: ArchivePayload): void {
-    writeFileSync(this.filePath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    try {
+      writeFileSync(this.filePath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    } catch {
+      // EACCES or other FS error — silently degrade.
+    }
   }
 
   private toRecord(session: AcpSessionHandle | AcpArchivedSessionMetadata): AcpArchivedSessionMetadataRecord {

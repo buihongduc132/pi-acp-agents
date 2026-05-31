@@ -66,11 +66,11 @@ export class MailboxManager {
   }
 
   private read(): MailboxPayload {
-    const paths = ensureRuntimeDir(this.rootDir);
-    if (!existsSync(paths.mailboxesFile)) {
-      return structuredClone(DEFAULT_PAYLOAD);
-    }
     try {
+      const paths = ensureRuntimeDir(this.rootDir);
+      if (!existsSync(paths.mailboxesFile)) {
+        return structuredClone(DEFAULT_PAYLOAD);
+      }
       return JSON.parse(readFileSync(paths.mailboxesFile, "utf-8")) as MailboxPayload;
     } catch {
       return structuredClone(DEFAULT_PAYLOAD);
@@ -78,7 +78,11 @@ export class MailboxManager {
   }
 
   private write(payload: MailboxPayload): void {
-    const paths = ensureRuntimeDir(this.rootDir);
-    writeFileSync(paths.mailboxesFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    try {
+      const paths = ensureRuntimeDir(this.rootDir);
+      writeFileSync(paths.mailboxesFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    } catch {
+      // EACCES or other FS error — silently degrade. Mailboxes are non-critical runtime state.
+    }
   }
 }

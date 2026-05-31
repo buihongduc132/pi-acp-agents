@@ -88,9 +88,9 @@ describe("Config CRUD", () => {
 			expect(existsSync(configPath)).toBe(true);
 		});
 
-		it("throws on write failure", () => {
+		it("gracefully handles write failure (no throw)", () => {
 			const config = makeConfig();
-			expect(() => saveConfig(config, "/nonexistent/path/that/cannot/be/created/because/permissions/config.json")).toThrow();
+			expect(() => saveConfig(config, "/nonexistent/path/that/cannot/be/created/because/permissions/config.json")).not.toThrow();
 		});
 	});
 

@@ -95,19 +95,24 @@ export class GovernanceStore {
   }
 
   private read(): GovernancePayload {
-    const paths = ensureRuntimeDir(this.rootDir);
-    if (!existsSync(paths.governanceFile)) {
-      return structuredClone(DEFAULT_PAYLOAD);
-    }
     try {
+      const paths = ensureRuntimeDir(this.rootDir);
+      if (!existsSync(paths.governanceFile)) {
+        return structuredClone(DEFAULT_PAYLOAD);
+      }
       return JSON.parse(readFileSync(paths.governanceFile, "utf-8")) as GovernancePayload;
     } catch {
+      // EACCES, corrupt file, etc — degrade gracefully, don't crash the extension
       return structuredClone(DEFAULT_PAYLOAD);
     }
   }
 
   private write(payload: GovernancePayload): void {
-    const paths = ensureRuntimeDir(this.rootDir);
-    writeFileSync(paths.governanceFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    try {
+      const paths = ensureRuntimeDir(this.rootDir);
+      writeFileSync(paths.governanceFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+    } catch {
+      // EACCES or other FS error — silently degrade. Governance is non-critical state.
+    }
   }
 }

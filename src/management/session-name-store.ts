@@ -72,6 +72,10 @@ export class SessionNameStore {
   }
 
   private write(payload: SessionNameRegistryPayload): void {
-    writeFileSync(this.filePath, JSON.stringify(payload, null, 2) + "\n", "utf8");
+    try {
+      writeFileSync(this.filePath, JSON.stringify(payload, null, 2) + "\n", "utf8");
+    } catch {
+      // EACCES or other FS error — silently degrade.
+    }
   }
 }
