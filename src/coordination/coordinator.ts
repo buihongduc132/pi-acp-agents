@@ -9,6 +9,15 @@ import { createAdapter } from "../adapter-factory.js";
 import { AliasResolver } from "./alias-resolver.js";
 import type { AcpConfig, AcpPromptResult } from "../config/types.js";
 
+/** Progress update during delegation */
+export interface AcpDelegateProgress {
+  agentName: string;
+  phase: "spawning" | "initializing" | "prompting" | "done" | "error";
+  durationMs?: number;
+  lastActivityAt?: number;
+  text?: string;
+}
+
 /** Flat result from a single agent in a multi-agent operation */
 export interface AgentResult {
   agent: string;
@@ -36,19 +45,41 @@ export class AgentCoordinator {
     agentName: string,
     message: string,
     cwd?: string,
+    onProgress?: (progress: AcpDelegateProgress) => void,
+    signal?: AbortSignal,
   ): Promise<AcpPromptResult> {
+    // Pre-aborted check
+    if (signal?.aborted) {
+      const adapter = this.createAdapterForAgent(agentName, cwd);
+      try {
+        adapter.cancel();
+      } catch { /* best-effort */ }
+      adapter.dispose();
+      const err = new DOMException("Operation cancelled", "AbortError");
+      onProgress?.({ agentName, phase: "error" });
+      throw err;
+    }
+
     // Check if it's an alias first
     const aliasConfig = this.config.agent_aliases?.[agentName];
     if (aliasConfig) {
       const resolver = new AliasResolver(
         { [agentName]: aliasConfig },
-        (name, msg, c) => this.delegateToAgent(name, msg, c),
+        (name, msg, c) => this.delegateToAgent(name, msg, c, onProgress, signal),
         () => true, // circuit breaker check — simplified for now
       );
       return resolver.resolve(agentName, message, cwd);
     }
 
-    return this.delegateToAgent(agentName, message, cwd);
+    return this.delegateToAgent(agentName, message, cwd, onProgress, signal);
+  }
+
+  /** Create an adapter for a concrete agent. */
+  private createAdapterForAgent(agentName: string, cwd?: string) {
+    const agentCfg = this.config.agent_servers[agentName];
+    if (!agentCfg) throw new Error(`Agent "${agentName}" not found`);
+    const effectiveCwd = cwd ?? this.cwd;
+    return createAdapter(agentName, agentCfg, this.config, effectiveCwd);
   }
 
   /** Delegate directly to a concrete agent. Creates a short-lived session. */
@@ -56,18 +87,44 @@ export class AgentCoordinator {
     agentName: string,
     message: string,
     cwd?: string,
+    onProgress?: (progress: AcpDelegateProgress) => void,
+    signal?: AbortSignal,
   ): Promise<AcpPromptResult> {
     const agentCfg = this.config.agent_servers[agentName];
     if (!agentCfg) throw new Error(`Agent "${agentName}" not found`);
 
     const effectiveCwd = cwd ?? this.cwd;
     const adapter = createAdapter(agentName, agentCfg, this.config, effectiveCwd);
+    const startTime = Date.now();
+
+    const emitProgress = (phase: AcpDelegateProgress["phase"]) => {
+      onProgress?.({
+        agentName,
+        phase,
+        durationMs: Date.now() - startTime,
+        lastActivityAt: Date.now(),
+      });
+    };
+
+    // Abort handler: cancel + dispose
+    const onAbort = () => {
+      try { adapter.cancel(); } catch { /* best-effort */ }
+      adapter.dispose();
+      emitProgress("error");
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     try {
+      emitProgress("spawning");
       await adapter.spawn();
+      emitProgress("initializing");
       await adapter.initialize();
       await adapter.newSession(effectiveCwd);
+      emitProgress("prompting");
       return await adapter.prompt(message);
     } finally {
+      signal?.removeEventListener("abort", onAbort);
       adapter.dispose();
     }
   }

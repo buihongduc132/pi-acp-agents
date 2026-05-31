@@ -50,6 +50,7 @@ export default function (pi: ExtensionAPI) {
     activeDelegations: 0,
     activeBroadcasts: 0,
     activeCompares: 0,
+    delegations: [] as Array<{ id: string; agentName: string; phase: string; startedAt: Date; lastActivityAt: Date; text?: string }>,
     lastError: undefined as string | undefined,
   };
 
@@ -371,6 +372,11 @@ export default function (pi: ExtensionAPI) {
   // Load tool visibility settings
   const toolSettings: AcpToolSettings = loadSettings(process.cwd());
 
+  // Consolidation mode: when acp_task_update and acp_message are EXPLICITLY
+  // listed in settings (not just default-enabled), we're in consolidated mode (7 tools instead of 33).
+  const consolidated = (toolSettings.tools as Record<string, { enabled: boolean }>)['acp_task_update'] !== undefined
+    && (toolSettings.tools as Record<string, { enabled: boolean }>)['acp_message'] !== undefined;
+
   // Core tools
   if (isToolEnabled(toolSettings, "acp_prompt")) pi.registerTool({
     name: "acp_prompt",
@@ -383,6 +389,9 @@ export default function (pi: ExtensionAPI) {
       session_id: Type.Optional(Type.String({ description: "Existing session ID to reuse" })),
       session_name: Type.Optional(Type.String({ description: "Friendly session name to reuse or assign when creating" })),
       cwd: Type.Optional(Type.String({ description: "Working directory for the agent" })),
+      dispose: Type.Optional(Type.Boolean({ description: "Create ephemeral session and dispose after response" })),
+      model: Type.Optional(Type.String({ description: "Model to set on the session" })),
+      mode: Type.Optional(Type.String({ description: "Mode/thinking level to set on the session" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const agentName = getAgentName(params.agent);
@@ -425,6 +434,52 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (target.sessionId && target.metadata) {
+          // Consolidation mode: auto-reload archived session
+          if (consolidated) {
+            const archived = target.metadata;
+            const agentCfg = getAgentConfigOrThrow(agentName);
+            const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
+              onActivity: (sid) => monitor.touch(sid),
+            });
+            try {
+              await adapter.spawn();
+              await adapter.initialize();
+              try {
+                await adapter.loadSession(target.sessionId);
+              } catch (loadErr) {
+                // Archived session cannot be reloaded — fall back to fresh
+                adapter.dispose();
+                const freshAdapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
+                  onActivity: (sid) => monitor.touch(sid),
+                });
+                try {
+                  await freshAdapter.spawn();
+                  await freshAdapter.initialize();
+                  const freshSessionId = await freshAdapter.newSession(params.cwd ?? ctx.cwd);
+                  if (target.sessionName) sessionNameStore.register(target.sessionName, freshSessionId);
+                  const handle = makeSessionHandle(freshSessionId, agentName, params.cwd ?? ctx.cwd, freshAdapter, undefined, target.sessionName);
+                  handle.busy = true; busySessions.set(freshSessionId, true);
+                  try {
+                    const pr = (await freshAdapter.prompt(params.message)) as AcpPromptResult;
+                    markPromptLifecycle(handle, pr);
+                    pr.text = `[warning: archived session could not be reloaded: ${(loadErr as Error).message}]\n${pr.text}`;
+                    return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
+                  } finally {
+                    busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
+                  }
+                } catch (freshErr) { freshAdapter.dispose(); throw freshErr; }
+              }
+              const handle = makeSessionHandle(target.sessionId, agentName, archived.cwd ?? params.cwd ?? ctx.cwd, adapter, undefined, target.sessionName);
+              handle.busy = true; busySessions.set(target.sessionId, true);
+              try {
+                const pr = (await adapter.prompt(params.message)) as AcpPromptResult;
+                markPromptLifecycle(handle, pr);
+                return { ...pr, sessionId: target.sessionId, sessionName: handle.sessionName };
+              } finally {
+                busySessions.delete(target.sessionId); handle.busy = false; archiveSession(handle);
+              }
+            } catch (err) { adapter.dispose(); throw err; }
+          }
           throw new Error(`Session name "${target.sessionName ?? params.session_name}" refers to archived session "${target.sessionId}". Load it first with acp_session_load or use the raw session_id of a live session.`);
         }
         const agentCfg = getAgentConfigOrThrow(agentName);
@@ -435,10 +490,12 @@ export default function (pi: ExtensionAPI) {
           await adapter.spawn();
           await adapter.initialize();
           const sessionId = await adapter.newSession(params.cwd ?? ctx.cwd);
-          if (target.sessionName) {
+          if (params.model) await adapter.setModel(params.model);
+          if (params.mode) await adapter.setMode(params.mode);
+          if (target.sessionName && !params.dispose) {
             sessionNameStore.register(target.sessionName, sessionId);
           }
-          const handle = makeSessionHandle(sessionId, agentName, params.cwd ?? ctx.cwd, adapter, undefined, target.sessionName);
+          const handle = makeSessionHandle(sessionId, agentName, params.cwd ?? ctx.cwd, adapter, undefined, params.dispose ? undefined : target.sessionName);
           handle.busy = true;
           busySessions.set(sessionId, true);
           handle.lastActivityAt = new Date();
@@ -457,6 +514,7 @@ export default function (pi: ExtensionAPI) {
             handle.isPrompting = false;
             monitor.markPromptEnd(sessionId);
             archiveSession(handle);
+            if (params.dispose) adapter.dispose();
           }
         } catch (err) {
           adapter.dispose();
@@ -535,7 +593,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_session_new")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_session_new")) pi.registerTool({
       name: "acp_session_new",
     label: "ACP New Session",
     description: "Create a new ACP agent session. Returns session ID for use with acp_prompt.",
@@ -584,7 +642,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_session_load")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_session_load")) pi.registerTool({
       name: "acp_session_load",
     label: "ACP Load Session",
     description: "Load an existing ACP agent session by ID to resume a conversation.",
@@ -653,7 +711,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_session_set_model")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_session_set_model")) pi.registerTool({
       name: "acp_session_set_model",
     label: "ACP Set Model",
     description: "Change the model for an active ACP agent session.",
@@ -686,7 +744,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_session_set_mode")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_session_set_mode")) pi.registerTool({
       name: "acp_session_set_mode",
     label: "ACP Set Mode",
     description: "Change the agent session mode for an active ACP agent session.",
@@ -751,7 +809,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Level 3 tools
-  if (isToolEnabled(toolSettings, "acp_delegate")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_delegate")) pi.registerTool({
       name: "acp_delegate",
     label: "ACP Delegate",
     description: "Delegate a task to a specific ACP agent and get its response. Creates a short-lived session that is disposed after use.",
@@ -821,7 +879,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_compare")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_compare")) pi.registerTool({
       name: "acp_compare",
     label: "ACP Compare",
     description: "Get responses from multiple ACP agents and compare them. Returns a structured comparison of all responses.",
@@ -854,8 +912,196 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Lifecycle / management tools
-  if (isToolEnabled(toolSettings, "acp_session_list")) pi.registerTool({
+  // Parallel delegation tool
+  if (!consolidated && isToolEnabled(toolSettings, "acp_delegate_parallel")) pi.registerTool({
+      name: "acp_delegate_parallel",
+    label: "ACP Delegate Parallel",
+    description: "Delegate a task to multiple ACP agents in parallel. Each agent gets its own short-lived session. Returns all results.",
+    promptSnippet: "acp_delegate_parallel — delegate to multiple agents in parallel",
+    parameters: Type.Object({
+      message: Type.String({ description: "Prompt to send to all agents" }),
+      agents: Type.Optional(Type.Array(Type.String(), { description: "Agent names to delegate to" })),
+      cwd: Type.Optional(Type.String({ description: "Working directory" })),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const agentNames = params.agents ?? Object.keys(config.agent_servers);
+      if (agentNames.length === 0) {
+        return { content: [textContent("No agents specified or configured.")], details: { results: [], error: "no_agents" } };
+      }
+      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd);
+      const results: Array<{ agent: string; text: string; sessionId: string; stopReason: string; error?: string }> = [];
+
+      // Track each delegation in widget
+      const delegations: Array<{ id: string; agentName: string; phase: string }> = [];
+      for (const agent of agentNames) {
+        const delId = `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        delegations.push({ id: delId, agentName: agent, phase: "spawning" });
+      }
+
+      // Add delegations to widget state
+      if (widgetActivity) {
+        for (const del of delegations) {
+          widgetActivity.delegations.push({
+            id: del.id,
+            agentName: del.agentName,
+            phase: del.phase,
+            startedAt: new Date(),
+            lastActivityAt: new Date(),
+          });
+        }
+        widgetActivity.activeDelegations += delegations.length;
+        refreshWidget(ctx);
+      }
+
+      const delegatePromises = agentNames.map(async (agent, idx) => {
+        const del = delegations[idx]!;
+        const onProgress = (progress: any) => {
+          if (widgetActivity) {
+            const entry = widgetActivity.delegations.find(d => d.id === del.id);
+            if (entry) {
+              entry.phase = progress.phase;
+              entry.lastActivityAt = new Date();
+              if (progress.text) entry.text = progress.text;
+            }
+            refreshWidget(ctx);
+          }
+          if (_onUpdate) _onUpdate(progress);
+        };
+
+        try {
+          const result = await coordinator.delegate(agent, params.message, params.cwd ?? ctx.cwd, onProgress, signal);
+          return {
+            agent,
+            text: result.text,
+            sessionId: result.sessionId,
+            stopReason: result.stopReason,
+          } as const;
+        } catch (err: unknown) {
+          return {
+            agent,
+            text: "",
+            sessionId: "",
+            stopReason: "error",
+            error: err instanceof Error ? err.message : String(err),
+          } as const;
+        } finally {
+          if (widgetActivity) {
+            widgetActivity.delegations = widgetActivity.delegations.filter(d => d.id !== del.id);
+            widgetActivity.activeDelegations = Math.max(0, widgetActivity.activeDelegations - 1);
+            refreshWidget(ctx);
+          }
+        }
+      });
+
+      const settled = await Promise.allSettled(delegatePromises);
+      for (const r of settled) {
+        if (r.status === "fulfilled") results.push(r.value);
+        else results.push({ agent: "unknown", text: "", sessionId: "", stopReason: "error", error: String(r.reason) });
+      }
+
+      const contentLines = results.map(r =>
+        r.error ? `── ${r.agent} ──\n(ERROR: ${r.error})` : `── ${r.agent} ──\n${r.text}`
+      );
+
+      return {
+        content: [textContent(`Parallel delegation results:\n\n${contentLines.join("\n\n")}`)],
+        details: { results },
+      };
+    },
+  });
+
+  // ── Consolidated tools (33→7 mode) ──
+  if (consolidated && isToolEnabled(toolSettings, "acp_task_update")) pi.registerTool({
+      name: "acp_task_update",
+    label: "ACP Task Update",
+    description: "Update task status, assignee, dependencies, or result. Consolidates acp_task_assign, acp_task_set_status, acp_task_dep_add/rm, acp_task_clear. Supports bulk ops with task_id='*'.",
+    promptSnippet: "acp_task_update — update task properties",
+    parameters: Type.Object({
+      task_id: Type.String({ description: "Task ID, or '*' for bulk operations" }),
+      status: Type.Optional(Type.String({ description: "New status: pending, in_progress, completed, deleted" })),
+      assignee: Type.Optional(Type.String({ description: "Assign to agent, or empty string to unassign" })),
+      deps_add: Type.Optional(Type.Array(Type.String(), { description: "Add these task IDs as dependencies" })),
+      deps_remove: Type.Optional(Type.Array(Type.String(), { description: "Remove these task IDs from dependencies" })),
+      result: Type.Optional(Type.String({ description: "Store result text on the task" })),
+      filter: Type.Optional(Type.String({ description: "Filter for bulk ops: 'completed', 'pending', 'in_progress'" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      // Bulk operation
+      if (params.task_id === "*") {
+        const filter = params.filter ?? "";
+        const updated = taskStore.updateWhere(filter, (t: any) => {
+          if (params.status) t.status = params.status;
+          if (params.assignee !== undefined) t.assignee = params.assignee || null;
+          if (params.result) t.result = params.result;
+          t.updatedAt = new Date().toISOString();
+        });
+        return { content: [textContent(`Bulk updated ${updated.length} tasks matching '${filter}'.`)], details: { updated: updated.length } };
+      }
+
+      // Single task
+      const updated = taskStore.update(params.task_id, (t: any) => {
+        if (params.status) t.status = params.status;
+        if (params.assignee !== undefined) t.assignee = params.assignee || null;
+        if (params.result) t.result = params.result;
+        if (params.deps_add) {
+          for (const dep of params.deps_add) {
+            if (!t.blockedBy.includes(dep)) t.blockedBy.push(dep);
+          }
+        }
+        if (params.deps_remove) {
+          t.blockedBy = t.blockedBy.filter((d: string) => !params.deps_remove!.includes(d));
+        }
+        t.updatedAt = new Date().toISOString();
+      });
+      if (!updated) {
+        return { content: [textContent(`Task ${params.task_id} not found.`)], details: { error: "not_found" } };
+      }
+      return { content: [textContent(`Task ${params.task_id} updated.`)], details: { task: updated } };
+    },
+  });
+
+  if (consolidated && isToolEnabled(toolSettings, "acp_message")) pi.registerTool({
+      name: "acp_message",
+    label: "ACP Message",
+    description: "Send or list messages. Consolidates acp_message_send and acp_message_list. Use action:'send' with kind:'dm'/'steer'/'broadcast', or action:'list'.",
+    promptSnippet: "acp_message — send or list messages",
+    parameters: Type.Object({
+      action: Type.String({ description: "'send' or 'list'" }),
+      to: Type.Optional(Type.String({ description: "Recipient agent name, or '*' for broadcast" })),
+      message: Type.Optional(Type.String({ description: "Message text (for send)" })),
+      kind: Type.Optional(Type.String({ description: "'dm', 'steer', 'broadcast'" })),
+      from: Type.Optional(Type.String({ description: "Sender name" })),
+      recipient: Type.Optional(Type.String({ description: "Recipient for list action" })),
+      filter: Type.Optional(Type.String({ description: "Filter for list: 'unread'" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.action === "send") {
+        const kind: "dm" | "steer" | "broadcast" = params.to === "*" ? "broadcast" : (params.kind as any ?? "dm");
+        const result = mailboxManager.send({
+          from: params.from ?? "user",
+          to: params.to ?? "",
+          message: params.message ?? "",
+          kind,
+        });
+        return { content: [textContent(`Message sent to ${params.to} (${kind}).`)], details: { messageId: result.id } };
+      }
+
+      if (params.action === "list") {
+        if (params.recipient) {
+          const messages = mailboxManager.listFor(params.recipient);
+          return { content: [textContent(`${messages.length} messages for ${params.recipient}.`)], details: { messages } };
+        }
+        // List all
+        const messages = mailboxManager.listAll?.() ?? [];
+        return { content: [textContent(`${messages.length} total messages.`)], details: { messages } };
+      }
+
+      return { content: [textContent(`Unknown action: ${params.action}. Use 'send' or 'list'.`)], details: { error: "unknown_action" } };
+    },
+  });
+
+  // Lifecycle / management tools (only in non-consolidated mode)
+  if (!consolidated && isToolEnabled(toolSettings, "acp_session_list")) pi.registerTool({
       name: "acp_session_list",
     label: "ACP Session List",
     description: "List active ACP sessions with agent, cwd, busy state, and plan state.",
@@ -879,7 +1125,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_session_shutdown")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_session_shutdown")) pi.registerTool({
       name: "acp_session_shutdown",
     label: "ACP Session Shutdown",
     description: "Gracefully dispose a specific ACP session, or all sessions for an agent.",
@@ -917,7 +1163,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_session_kill")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_session_kill")) pi.registerTool({
       name: "acp_session_kill",
     label: "ACP Session Kill",
     description: "Force-kill a specific ACP session and remove it from runtime state.",
@@ -944,7 +1190,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_prune")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_prune")) pi.registerTool({
       name: "acp_prune",
     label: "ACP Prune",
     description: "Prune stale or disposed ACP sessions from runtime state.",
@@ -971,7 +1217,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_runtime_info")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_runtime_info")) pi.registerTool({
       name: "acp_runtime_info",
     label: "ACP Runtime Info",
     description: "Show ACP runtime id/path information, configured agents, and runtime storage files.",
@@ -993,7 +1239,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_env")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_env")) pi.registerTool({
       name: "acp_env",
     label: "ACP Env",
     description: "Show environment and command details for manually spawning a configured ACP agent.",
@@ -1029,15 +1275,16 @@ export default function (pi: ExtensionAPI) {
       subject: Type.String({ description: "Short task subject" }),
       description: Type.Optional(Type.String({ description: "Longer task details" })),
       assignee: Type.Optional(Type.String({ description: "Optional agent assignee" })),
+      deps: Type.Optional(Type.Array(Type.String(), { description: "Task IDs this task depends on" })),
     }),
     async execute(_toolCallId, params) {
-      const task = taskStore.create({ subject: params.subject, description: params.description, assignee: params.assignee });
+      const task = taskStore.create({ subject: params.subject, description: params.description, assignee: params.assignee, deps: params.deps });
       eventLog.append("task_create", { taskId: task.id, assignee: task.assignee });
       return { content: [textContent(formatJson(task))], details: task };
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_task_list")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_task_list")) pi.registerTool({
       name: "acp_task_list",
     label: "ACP Task List",
     description: "List ACP tasks, optionally filtered by status.",
@@ -1052,7 +1299,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_task_get")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_task_get")) pi.registerTool({
       name: "acp_task_get",
     label: "ACP Task Get",
     description: "Show one ACP task including dependency state.",
@@ -1060,12 +1307,12 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({ task_id: Type.String({ description: "Task ID" }) }),
     async execute(_toolCallId, params) {
       const task = taskStore.get(params.task_id);
-      if (!task) return { content: [textContent(`Task \"${params.task_id}\" not found`)], details: { id: params.task_id, subject: "", status: "pending" as AcpTaskStatus, blockedBy: [], createdAt: "", updatedAt: "" } };
+      if (!task) return { content: [textContent(`Task \"${params.task_id}\" not found`)], details: { id: params.task_id, subject: "", status: "pending" as AcpTaskStatus, blockedBy: [], blocks: [], priority: "normal" as const, metadata: {}, createdAt: "", updatedAt: "" } };
       return { content: [textContent(formatJson(task))], details: task };
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_task_assign")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_task_assign")) pi.registerTool({
       name: "acp_task_assign",
     label: "ACP Task Assign",
     description: "Assign or unassign an ACP task.",
@@ -1083,7 +1330,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_task_set_status")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_task_set_status")) pi.registerTool({
       name: "acp_task_set_status",
     label: "ACP Task Set Status",
     description: "Set ACP task status transitions (pending, in_progress, completed, deleted).",
@@ -1103,7 +1350,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_task_dependency_add")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_task_dependency_add")) pi.registerTool({
       name: "acp_task_dependency_add",
     label: "ACP Task Dependency Add",
     description: "Add a blocking dependency to an ACP task.",
@@ -1121,7 +1368,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_task_dependency_remove")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_task_dependency_remove")) pi.registerTool({
       name: "acp_task_dependency_remove",
     label: "ACP Task Dependency Remove",
     description: "Remove a blocking dependency from an ACP task.",
@@ -1139,7 +1386,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_task_clear")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_task_clear")) pi.registerTool({
       name: "acp_task_clear",
     label: "ACP Task Clear",
     description: "Clear completed tasks or wipe the entire ACP task store.",
@@ -1155,7 +1402,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Messaging + governance + diagnostics
-  if (isToolEnabled(toolSettings, "acp_message_send")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_message_send")) pi.registerTool({
       name: "acp_message_send",
     label: "ACP Message Send",
     description: "Send a persistent mailbox message or steer message to an ACP agent.",
@@ -1178,7 +1425,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_message_list")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_message_list")) pi.registerTool({
       name: "acp_message_list",
     label: "ACP Message List",
     description: "List mailbox messages for an ACP agent.",
@@ -1190,7 +1437,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_plan_request")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_plan_request")) pi.registerTool({
       name: "acp_plan_request",
     label: "ACP Plan Request",
     description: "Mark an ACP agent as waiting for plan approval.",
@@ -1204,7 +1451,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_plan_resolve")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_plan_resolve")) pi.registerTool({
       name: "acp_plan_resolve",
     label: "ACP Plan Resolve",
     description: "Approve or reject a pending ACP plan request.",
@@ -1226,7 +1473,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_model_policy_get")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_model_policy_get")) pi.registerTool({
       name: "acp_model_policy_get",
     label: "ACP Model Policy Get",
     description: "Inspect ACP model policy constraints and current default behavior.",
@@ -1238,7 +1485,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_model_policy_check")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_model_policy_check")) pi.registerTool({
       name: "acp_model_policy_check",
     label: "ACP Model Policy Check",
     description: "Validate a model override against ACP governance rules.",
@@ -1252,7 +1499,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_doctor")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_doctor")) pi.registerTool({
       name: "acp_doctor",
     label: "ACP Doctor",
     description: "Run ACP diagnostics covering config, runtime paths, sessions, and policy state.",
@@ -1273,7 +1520,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_event_log")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_event_log")) pi.registerTool({
       name: "acp_event_log",
     label: "ACP Event Log",
     description: "Return the ACP structured event log file path for inspection.",
@@ -1284,7 +1531,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_cleanup")) pi.registerTool({
+  if (!consolidated && isToolEnabled(toolSettings, "acp_cleanup")) pi.registerTool({
       name: "acp_cleanup",
     label: "ACP Cleanup",
     description: "Clean up ACP runtime state: sessions, tasks, or mailbox contents.",

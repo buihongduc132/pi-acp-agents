@@ -10,6 +10,7 @@ export interface AcpRuntimePaths {
   eventLogFile: string;
   sessionArchiveFile: string;
   sessionNameRegistryFile: string;
+  workersFile: string;
 }
 
 export function getRuntimePaths(rootDir?: string): AcpRuntimePaths {
@@ -22,6 +23,7 @@ export function getRuntimePaths(rootDir?: string): AcpRuntimePaths {
     eventLogFile: join(base, "events.jsonl"),
     sessionArchiveFile: join(base, "session-archive.json"),
     sessionNameRegistryFile: join(base, "session-name-registry.json"),
+    workersFile: join(base, "workers.json"),
   };
 }
 

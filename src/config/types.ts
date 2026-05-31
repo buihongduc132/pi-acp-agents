@@ -134,6 +134,43 @@ export interface AcpAdapterOptions {
 	onActivity?: (sessionId: string) => void;
 }
 
+// --- Worker types (M6) ---
+
+export type AcpWorkerStatus = "online" | "idle" | "streaming" | "offline";
+
+export interface AcpWorkerRecord {
+	name: string;
+	sessionId: string;
+	agentName: string;
+	status: AcpWorkerStatus;
+	currentTaskId?: string;
+	spawnedAt: string;
+	lastActivityAt: string;
+	metadata: Record<string, unknown>;
+}
+
+// --- Task priority (M3, M5) ---
+
+export type AcpTaskPriority = "urgent" | "high" | "normal" | "low";
+
+// --- Async run types (M1) ---
+
+export type AcpAsyncRunState = "pending" | "running" | "completed" | "failed";
+
+export interface AcpAsyncRunRecord {
+	runId: string;
+	agentName: string;
+	message: string;
+	cwd?: string;
+	state: AcpAsyncRunState;
+	sessionId?: string;
+	result?: string;
+	error?: string;
+	createdAt: string;
+	startedAt?: string;
+	completedAt?: string;
+}
+
 /** Logger interface */
 export interface Logger {
 	info(msg: string, data?: unknown): void;

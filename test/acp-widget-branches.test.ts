@@ -30,6 +30,7 @@ function makeState(overrides: Partial<AcpWidgetState> = {}): AcpWidgetState {
 			activeDelegations: 0,
 			activeBroadcasts: 0,
 			activeCompares: 0,
+			delegations: [],
 		},
 		...overrides,
 	};
@@ -97,7 +98,7 @@ describe("acp-widget — branch coverage", () => {
 	it("activity: broadcasting", () => {
 		const lines = renderWidget(makeState({
 			sessions: [makeSession()],
-			activity: { activeDelegations: 0, activeBroadcasts: 1, activeCompares: 0 },
+			activity: { activeDelegations: 0, activeBroadcasts: 1, activeCompares: 0, delegations: [] },
 		}));
 		expect(lines.join("\n")).toContain("broadcasting");
 	});
@@ -105,7 +106,7 @@ describe("acp-widget — branch coverage", () => {
 	it("activity: comparing", () => {
 		const lines = renderWidget(makeState({
 			sessions: [makeSession()],
-			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 1 },
+			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 1, delegations: [] },
 		}));
 		expect(lines.join("\n")).toContain("comparing");
 	});
@@ -113,7 +114,7 @@ describe("acp-widget — branch coverage", () => {
 	it("activity: delegating", () => {
 		const lines = renderWidget(makeState({
 			sessions: [makeSession()],
-			activity: { activeDelegations: 1, activeBroadcasts: 0, activeCompares: 0 },
+			activity: { activeDelegations: 1, activeBroadcasts: 0, activeCompares: 0, delegations: [] },
 		}));
 		expect(lines.join("\n")).toContain("delegating");
 	});
@@ -121,7 +122,7 @@ describe("acp-widget — branch coverage", () => {
 	it("activity: busy (multiple)", () => {
 		const lines = renderWidget(makeState({
 			sessions: [makeSession()],
-			activity: { activeDelegations: 2, activeBroadcasts: 1, activeCompares: 0 },
+			activity: { activeDelegations: 2, activeBroadcasts: 1, activeCompares: 0, delegations: [] },
 		}));
 		expect(lines.join("\n")).toContain("busy (3)");
 	});
@@ -129,7 +130,7 @@ describe("acp-widget — branch coverage", () => {
 	it("activity: error state", () => {
 		const lines = renderWidget(makeState({
 			sessions: [makeSession()],
-			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, lastError: "timeout" },
+			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, lastError: "timeout", delegations: [] },
 		}));
 		expect(lines.join("\n")).toContain("error: timeout");
 	});

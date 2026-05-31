@@ -60,6 +60,11 @@ export class MailboxManager {
     return before - payload.messages.length;
   }
 
+  /** List all messages across all recipients. */
+  listAll(): MailMessage[] {
+    return this.read().messages;
+  }
+
   private read(): MailboxPayload {
     const paths = ensureRuntimeDir(this.rootDir);
     if (!existsSync(paths.mailboxesFile)) {

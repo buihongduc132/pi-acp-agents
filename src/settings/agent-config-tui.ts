@@ -343,6 +343,7 @@ function handleSubmenuResult(payload: string, configRef: { config: AcpConfig }):
 	switch (parsed.action) {
 		case "edit": {
 			if (!parsed.agent) return false;
+			if (!parsed.command) return false;
 			configRef.config = upsertAgentServer(configRef.config, parsed.agent, {
 				command: parsed.command,
 				args: parsed.args,

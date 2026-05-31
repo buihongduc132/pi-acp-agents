@@ -25,10 +25,20 @@ export interface AcpWidgetSession {
 	model?: string;
 }
 
+export interface AcpWidgetDelegation {
+	id: string;
+	agentName: string;
+	phase: string;
+	startedAt: Date;
+	lastActivityAt: Date;
+	text?: string;
+}
+
 export interface AcpWidgetActivity {
 	activeDelegations: number;
 	activeBroadcasts: number;
 	activeCompares: number;
+	delegations: AcpWidgetDelegation[];
 	lastError?: string;
 }
 
@@ -172,6 +182,16 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 						width,
 					),
 				);
+
+				// ── Delegation rows (when active) ──
+				if (state.activity.delegations && state.activity.delegations.length > 0) {
+					for (const del of state.activity.delegations) {
+						const phaseIcon = del.phase === "prompting" ? "\u27F3" : del.phase === "done" ? "\u2713" : "\u23F3";
+						const delLine = ` ${theme.fg("accent", `${phaseIcon} ${del.agentName}`)} ${theme.fg("dim", del.phase)}`;
+						const delText = del.text ? ` ${theme.fg("dim", truncateToWidth(del.text, 40))}` : "";
+						lines.push(truncateToWidth(`${delLine}${delText}`, width));
+					}
+				}
 
 				// ── No sessions ──
 				if (state.sessions.length === 0) {

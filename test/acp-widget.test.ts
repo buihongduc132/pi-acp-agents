@@ -30,6 +30,7 @@ function makeState(overrides: Partial<AcpWidgetState> = {}): AcpWidgetState {
 			activeDelegations: 0,
 			activeBroadcasts: 0,
 			activeCompares: 0,
+			delegations: [],
 			lastError: undefined,
 		},
 		...overrides,
@@ -256,6 +257,7 @@ describe("acp-widget", () => {
 				activeDelegations: 1,
 				activeBroadcasts: 0,
 				activeCompares: 0,
+				delegations: [],
 			},
 		});
 		const joined = render(makeDeps(state)).join("\n");
@@ -268,6 +270,7 @@ describe("acp-widget", () => {
 				activeDelegations: 1,
 				activeBroadcasts: 1,
 				activeCompares: 0,
+				delegations: [],
 			},
 		});
 		const joined = render(makeDeps(state)).join("\n");
@@ -280,6 +283,7 @@ describe("acp-widget", () => {
 				activeDelegations: 0,
 				activeBroadcasts: 0,
 				activeCompares: 0,
+				delegations: [],
 				lastError: "spawn exploded",
 			},
 		});
@@ -303,6 +307,7 @@ describe("acp-widget", () => {
 				activeDelegations: 0,
 				activeBroadcasts: 1,
 				activeCompares: 0,
+				delegations: [],
 			},
 		});
 		const joined = render(makeDeps(state)).join("\n");

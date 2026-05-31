@@ -33,8 +33,9 @@ describe("config", () => {
       expect(config.agent_servers.gemini.command).toBe("gemini");
     });
 
-    it("throws if agents is empty", () => {
-      expect(() => validateConfig({ agent_servers: {} })).toThrow(/at least one agent/i);
+    it("accepts empty agent_servers", () => {
+      const result = validateConfig({ agent_servers: {} });
+      expect(result.agent_servers).toEqual({});
     });
 
     it("throws if agent command is missing", () => {

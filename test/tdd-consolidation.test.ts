@@ -56,6 +56,16 @@ vi.mock("../src/management/session-archive-store.js", () => ({
 		});
 	},
 }));
+vi.mock("../src/management/session-name-store.js", () => ({
+	SessionNameStore: class MockSessionNameStore {
+		getSessionId = vi.fn((sessionName: string) => sessionNameMappings.get(sessionName));
+		getName = vi.fn((sessionId: string) => Array.from(sessionNameMappings.entries()).find(([, id]) => id === sessionId)?.[0]);
+		register = vi.fn((sessionName: string, sessionId: string) => {
+			sessionNameMappings.set(sessionName, sessionId);
+			return { sessionName, sessionId };
+		});
+	},
+}));
 vi.mock("../src/settings/config.js", () => ({
 	// Default: all tools enabled — consolidation code will only register the 7 tools
 	loadSettings: vi.fn(() => ({

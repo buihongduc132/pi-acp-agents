@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { ensureRuntimeDir } from "./runtime-paths.js";
+import type { AcpTaskPriority } from "../config/types.js";
 
 export type AcpTaskStatus = "pending" | "in_progress" | "completed" | "deleted";
 
@@ -11,6 +12,9 @@ export interface AcpTaskRecord {
   assignee?: string;
   result?: string;
   blockedBy: string[];
+  blocks: string[];
+  priority: AcpTaskPriority;
+  metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,7 +45,7 @@ export class AcpTaskStore {
     return this.read().tasks.find((task) => task.id === id);
   }
 
-  create(input: { subject: string; description?: string; assignee?: string }): AcpTaskRecord {
+  create(input: { subject: string; description?: string; assignee?: string; deps?: string[] }): AcpTaskRecord {
     const payload = this.read();
     const now = new Date().toISOString();
     const task: AcpTaskRecord = {
@@ -50,7 +54,10 @@ export class AcpTaskStore {
       description: input.description,
       assignee: input.assignee,
       status: "pending",
-      blockedBy: [],
+      blockedBy: input.deps ?? [],
+      blocks: [],
+      priority: "normal",
+      metadata: {},
       createdAt: now,
       updatedAt: now,
     };
@@ -82,13 +89,154 @@ export class AcpTaskStore {
     return { removed, remaining: payload.tasks.length };
   }
 
+  /** Bulk update tasks matching a filter. Returns updated tasks. */
+  updateWhere(filter: string, mutate: (task: AcpTaskRecord) => void): AcpTaskRecord[] {
+    const payload = this.read();
+    const updated: AcpTaskRecord[] = [];
+    for (const task of payload.tasks) {
+      let matches = false;
+      if (filter === "completed" && task.status === "completed") matches = true;
+      else if (filter === "pending" && task.status === "pending") matches = true;
+      else if (filter === "in_progress" && task.status === "in_progress") matches = true;
+      else if (filter === "" || filter === "all") matches = true;
+      if (matches) {
+        mutate(task);
+        task.updatedAt = new Date().toISOString();
+        updated.push(task);
+      }
+    }
+    if (updated.length > 0) this.write(payload);
+    return updated;
+  }
+
+  /** List tasks with full dependency graph details. */
+  listWithDetails(): AcpTaskRecord[] {
+    return this.list({ includeDeleted: true });
+  }
+
+  /** Create task with priority + metadata support (M3, M5) */
+  createWithPriority(input: { subject: string; description?: string; assignee?: string; priority?: AcpTaskPriority; blockedBy?: string[] }): AcpTaskRecord {
+    const payload = this.read();
+    const now = new Date().toISOString();
+    const task: AcpTaskRecord = {
+      id: String(payload.nextId++),
+      subject: input.subject,
+      description: input.description,
+      assignee: input.assignee,
+      status: "pending",
+      blockedBy: input.blockedBy ?? [],
+      blocks: [],
+      priority: input.priority ?? "normal",
+      metadata: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    // Maintain reverse edges
+    for (const depId of task.blockedBy) {
+      const dep = payload.tasks.find((t) => t.id === depId);
+      if (dep && !dep.blocks.includes(task.id)) dep.blocks.push(task.id);
+    }
+    payload.tasks.push(task);
+    this.write(payload);
+    return task;
+  }
+
+  /** DFS cycle detection — returns path if cycle found, null otherwise (M5) */
+  findDependencyPath(fromId: string, toId: string): string[] | null {
+    const tasks = this.read().tasks;
+    const visited = new Set<string>();
+    const path: string[] = [];
+
+    function dfs(currentId: string): boolean {
+      if (currentId === toId) {
+        path.push(currentId);
+        return true;
+      }
+      if (visited.has(currentId)) return false;
+      visited.add(currentId);
+      path.push(currentId);
+      const task = tasks.find((t) => t.id === currentId);
+      if (task) {
+        for (const depId of task.blockedBy) {
+          if (dfs(depId)) return true;
+        }
+      }
+      path.pop();
+      return false;
+    }
+
+    return dfs(fromId) ? path : null;
+  }
+
+  /** Check if a task is blocked by incomplete dependencies (M5, M3) */
+  isTaskBlocked(taskId: string): { blocked: boolean; blockedBy: string[] } {
+    const tasks = this.read().tasks;
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task || task.blockedBy.length === 0) return { blocked: false, blockedBy: [] };
+    const incompleteDeps = task.blockedBy.filter((depId) => {
+      const dep = tasks.find((t) => t.id === depId);
+      return !dep || dep.status !== "completed";
+    });
+    return { blocked: incompleteDeps.length > 0, blockedBy: incompleteDeps };
+  }
+
+  /** Auto-claim next available task for a worker (M3) */
+  claimNextAvailable(workerName: string, options?: { excludeTaskIds?: string[] }): AcpTaskRecord | null {
+    const PRIORITY_ORDER: AcpTaskPriority[] = ["urgent", "high", "normal", "low"];
+    const payload = this.read();
+
+    const sorted = [...payload.tasks].sort((a, b) => {
+      const pi = PRIORITY_ORDER.indexOf(a.priority);
+      const bi = PRIORITY_ORDER.indexOf(b.priority);
+      if (pi !== bi) return pi - bi;
+      return parseInt(a.id) - parseInt(b.id);
+    });
+
+    const exclude = new Set(options?.excludeTaskIds ?? []);
+
+    for (const task of sorted) {
+      if (task.status !== "pending") continue;
+      if (task.assignee) continue;
+      if (exclude.has(task.id)) continue;
+      // Check blocked
+      const incompleteDeps = task.blockedBy.filter((depId) => {
+        const dep = payload.tasks.find((t) => t.id === depId);
+        return !dep || dep.status !== "completed";
+      });
+      if (incompleteDeps.length > 0) continue;
+      // Check retry exhausted
+      if (task.metadata?.retryExhausted === true) continue;
+      // Check cooldown
+      if (
+        task.metadata?.cooldownUntil &&
+        new Date(task.metadata.cooldownUntil as string) > new Date()
+      )
+        continue;
+      // Claim
+      task.assignee = workerName;
+      task.status = "in_progress";
+      task.metadata.claimedAt = new Date().toISOString();
+      task.updatedAt = new Date().toISOString();
+      this.write(payload);
+      return task;
+    }
+    return null;
+  }
+
   private read(): AcpTaskStorePayload {
     const paths = ensureRuntimeDir(this.rootDir);
     if (!existsSync(paths.tasksFile)) {
       return structuredClone(DEFAULT_PAYLOAD);
     }
     try {
-      return JSON.parse(readFileSync(paths.tasksFile, "utf-8")) as AcpTaskStorePayload;
+      const parsed = JSON.parse(readFileSync(paths.tasksFile, "utf-8")) as AcpTaskStorePayload;
+      // Migration: add defaults for legacy records
+      for (const task of parsed.tasks) {
+        if (!(task as any).blocks) (task as any).blocks = [];
+        if (!(task as any).priority) (task as any).priority = "normal";
+        if (!(task as any).metadata) (task as any).metadata = {};
+      }
+      return parsed;
     } catch {
       return structuredClone(DEFAULT_PAYLOAD);
     }

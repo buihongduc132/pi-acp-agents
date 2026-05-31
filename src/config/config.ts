@@ -5,9 +5,9 @@
  * Back-compat: auto-migrates old `agents` key to `agent_servers`.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { execSync } from "node:child_process";
 import type { AcpAgentConfig, AcpConfig, LegacyAcpConfig } from "./types.js";
 
@@ -75,9 +75,8 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 	}
 
 	const entries = Object.entries(partial.agent_servers);
-	if (entries.length === 0) {
-		throw new Error("Config must have at least one agent_server");
-	}
+	// Allow empty agent_servers (relaxed validation for CRUD operations)
+	// Still validate individual entries if present
 
 	const agent_servers: Record<string, AcpAgentConfig> = {};
 	for (const [name, agent] of entries) {
@@ -190,6 +189,68 @@ export function loadConfig(configPath?: string): AcpConfig {
 	} catch {
 		return structuredClone(DEFAULT_CONFIG);
 	}
+}
+
+/** Save config to disk at the given path (or default path) */
+export function saveConfig(config: AcpConfig, configPath?: string): void {
+	const path = configPath ?? CONFIG_PATH;
+	const dir = dirname(path);
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true });
+	}
+	const data = JSON.stringify(config, null, 2) + "\n";
+	writeFileSync(path, data, "utf-8");
+}
+
+/** Add or update an agent server entry. Returns a new config (does not mutate original). */
+export function upsertAgentServer(config: AcpConfig, name: string, agent: Partial<AcpAgentConfig> & { command: string }): AcpConfig {
+	if (!name || name.trim() === "") {
+		throw new Error("Agent name must be a non-empty string");
+	}
+	if (!agent.command || agent.command.trim() === "") {
+		throw new Error('Agent "command" is required');
+	}
+	const cloned = structuredClone(config);
+	cloned.agent_servers[name] = {
+		command: agent.command,
+		args: agent.args ?? [],
+		env: agent.env ?? {},
+		...(agent.default_model ? { default_model: agent.default_model } : {}),
+		...(agent.default_mode ? { default_mode: agent.default_mode } : {}),
+	};
+	return cloned;
+}
+
+/** Remove an agent server entry. Returns a new config (does not mutate original). Clears defaultAgent if it was the removed agent. */
+export function removeAgentServer(config: AcpConfig, name: string): AcpConfig {
+	const cloned = structuredClone(config);
+	delete cloned.agent_servers[name];
+	if (cloned.defaultAgent === name) {
+		delete cloned.defaultAgent;
+	}
+	return cloned;
+}
+
+/** Set the default agent. Returns a new config (does not mutate original). Throws if agent not found. */
+export function setDefaultAgent(config: AcpConfig, name: string): AcpConfig {
+	if (!config.agent_servers[name]) {
+		throw new Error(`Agent "${name}" not found`);
+	}
+	const cloned = structuredClone(config);
+	cloned.defaultAgent = name;
+	return cloned;
+}
+
+/** Detect available agent presets from the system PATH. */
+export function detectAvailablePresets(): Array<{ name: string; config: AcpAgentConfig }> {
+	const results: Array<{ name: string; config: AcpAgentConfig }> = [];
+	for (const [name, factory] of Object.entries(AGENT_PRESETS)) {
+		const config = factory();
+		if (config) {
+			results.push({ name, config });
+		}
+	}
+	return results;
 }
 
 /** Get a specific agent config, throwing if not found */
