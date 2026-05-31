@@ -1,4 +1,4 @@
-import { mkdirSync, chmodSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -30,11 +30,19 @@ export function getRuntimePaths(rootDir?: string): AcpRuntimePaths {
 export function ensureRuntimeDir(rootDir?: string): AcpRuntimePaths {
   const paths = getRuntimePaths(rootDir);
   mkdirSync(paths.rootDir, { recursive: true, mode: 0o755 });
-  // Ensure writable even if previously created by root (e.g. via sudo test run)
+  // Detect root-owned dir (e.g. from sudo test run) — we can't chown from userspace,
+  // but we can warn clearly instead of silently failing later with EACCES.
   try {
-    chmodSync(paths.rootDir, 0o755);
+    const stat = statSync(paths.rootDir);
+    const { uid: currentUid } = process;
+    if (stat.uid !== currentUid) {
+      console.warn(
+        `[pi-acp-agents] WARNING: Runtime dir ${paths.rootDir} is owned by uid ${stat.uid}, but pi runs as uid ${currentUid}. ` +
+        `Fix: sudo chown -R $(whoami) ${paths.rootDir}`
+      );
+    }
   } catch {
-    // EPERM — not owner, but still usable if permissions already allow
+    // stat failed — dir may not exist yet, harmless
   }
   return paths;
 }

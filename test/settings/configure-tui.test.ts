@@ -115,10 +115,8 @@ describe("configureToolSettings", () => {
 	});
 
 	it("enables a disabled tool", async () => {
-		const { homedir } = require("node:os");
 		const { join } = require("node:path");
-		const settingsPath = join(homedir(), ".pi", "acp-agents", "settings.json");
-		mkdirSync(join(homedir(), ".pi", "acp-agents"), { recursive: true });
+		const settingsPath = join(tmpDir, "settings.json");
 		writeFileSync(settingsPath, JSON.stringify({
 			tools: { acp_prompt: { enabled: false } },
 		}));
