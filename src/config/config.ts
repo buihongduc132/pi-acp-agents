@@ -88,13 +88,16 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 		if (!agent || typeof agent !== "object") {
 			throw new Error(`Invalid agent config for "${name}": must be an object`);
 		}
+		// Command is required unless mode is 'acpx' (acpx derives command from its own binary)
+		const isAcpxMode = (agent as Record<string, unknown>).mode === "acpx";
 		if (
-			!("command" in agent) ||
-			typeof agent.command !== "string" ||
-			!agent.command
+			!isAcpxMode &&
+			(!("command" in agent) ||
+				typeof agent.command !== "string" ||
+				!agent.command)
 		) {
 			throw new Error(
-				`Invalid agent config for "${name}": "command" is required`,
+				`Invalid agent config for "${name}": "command" is required (or set mode: "acpx")`,
 			);
 		}
 		agent_servers[name] = {

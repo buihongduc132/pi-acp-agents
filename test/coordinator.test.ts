@@ -12,7 +12,10 @@ import { AgentCoordinator, type AcpDelegateProgress } from "../src/coordination/
 import type { AcpConfig } from "../src/config/types.js";
 import { createAdapter } from "../src/adapter-factory.js";
 
-vi.mock("../src/adapter-factory.js");
+vi.mock("../src/adapter-factory.js", () => ({
+	createAdapter: vi.fn(),
+	isKnownAdapter: vi.fn(),
+}));
 
 /**
  * Create a mock adapter where cancel() rejects any hanging in-flight promise.

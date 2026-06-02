@@ -17,7 +17,10 @@ import type { AcpConfig, AcpAliasConfig, AcpPromptResult } from "../src/config/t
 import { createAdapter } from "../src/adapter-factory.js";
 
 // Mock adapter factory for coordinator integration tests
-vi.mock("../src/adapter-factory.js");
+vi.mock("../src/adapter-factory.js", () => ({
+	createAdapter: vi.fn(),
+	isKnownAdapter: vi.fn(),
+}));
 
 const mockPromptResult = {
 	text: "mock response",

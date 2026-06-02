@@ -42,6 +42,24 @@ describe("config", () => {
       expect(() => validateConfig({ agent_servers: { bad: { args: ["--acp"] } } as any })).toThrow(/command/i);
     });
 
+    it("accepts agent without command when mode is 'acpx'", () => {
+      const config = validateConfig({
+        agent_servers: {
+          "gemini-acpx": { mode: "acpx" as const },
+        },
+      });
+      expect(config.agent_servers["gemini-acpx"].mode).toBe("acpx");
+    });
+
+    it("accepts agent with both mode 'acpx' and optional command", () => {
+      const config = validateConfig({
+        agent_servers: {
+          "gemini-acpx": { mode: "acpx" as const, default_model: "gemini-2.5-pro" },
+        },
+      });
+      expect(config.agent_servers["gemini-acpx"].default_model).toBe("gemini-2.5-pro");
+    });
+
     it("merges default values", () => {
       const config = validateConfig({ agent_servers: { gemini: { command: "gemini" } } });
       expect(config.staleTimeoutMs).toBe(3_600_000);

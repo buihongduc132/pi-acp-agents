@@ -14,7 +14,9 @@ export interface AcpAliasConfig {
 
 /** Per-agent server configuration (matches Zed's agent_servers entry) */
 export interface AcpAgentConfig {
-	command: string;
+	/** How the agent is invoked: 'direct' (subprocess) or 'acpx' (CLI delegation). Defaults to 'direct'. */
+	mode?: "direct" | "acpx";
+	command?: string;
 	args?: string[];
 	env?: Record<string, string>;
 	cwd?: string;
@@ -22,6 +24,10 @@ export interface AcpAgentConfig {
 	default_model?: string;
 	/** Default mode for sessions created with this agent */
 	default_mode?: string;
+	/** Stall timeout in milliseconds for acpx mode */
+	stallTimeoutMs?: number;
+	/** Agent name for acpx session creation (defaults to adapter name) */
+	agentName?: string;
 	/** Allow passthrough of unknown fields for forward compat */
 	[key: string]: unknown;
 }
