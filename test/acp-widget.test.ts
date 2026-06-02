@@ -31,6 +31,7 @@ function makeState(overrides: Partial<AcpWidgetState> = {}): AcpWidgetState {
 			activeBroadcasts: 0,
 			activeCompares: 0,
 			delegations: [],
+			delegationHistory: [],
 			lastError: undefined,
 		},
 		...overrides,
@@ -321,5 +322,61 @@ describe("acp-widget", () => {
 		const factory = createAcpWidget(makeDeps(state));
 		const component = factory({}, createMockTheme());
 		expect(() => (component as any).dispose()).not.toThrow();
+	});
+
+	it("renders recent delegation history when entries exist", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s1",
+					agentName: "gemini",
+					cwd: "/",
+					status: "idle",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				delegations: [],
+				delegationHistory: [
+					{ agentName: "gemini", status: "completed", sessionId: "sid-1", finishedAt: new Date() },
+					{ agentName: "claude", status: "error", error: "spawn failed", finishedAt: new Date() },
+				],
+			},
+		});
+		const joined = render(makeDeps(state)).join("\n");
+		expect(joined).toContain("recent");
+		expect(joined).toContain("gemini");
+		expect(joined).toContain("claude");
+		expect(joined).toContain("spawn failed");
+	});
+
+	it("limits recent section to last 5 history entries", () => {
+		const history = Array.from({ length: 10 }, (_, i) => ({
+			agentName: `agent-${i}`,
+			status: "completed" as const,
+			sessionId: `sid-${i}`,
+			finishedAt: new Date(),
+		}));
+		const state = makeState({
+			sessions: [],
+			configuredAgentNames: ["gemini"],
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				delegations: [],
+				delegationHistory: history,
+			},
+		});
+		const lines = render(makeDeps(state));
+		const joined = lines.join("\n");
+		// Should show "recent" separator and last 5 entries
+		expect(joined).toContain("recent");
+		expect(joined).toContain("agent-9");
+		expect(joined).not.toContain("agent-4");
 	});
 });
