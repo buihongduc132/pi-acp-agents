@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
-import type { AcpAgentConfig, AcpConfig, LegacyAcpConfig } from "./types.js";
+import type { AcpAgentConfig, AcpAliasConfig, AcpConfig, LegacyAcpConfig } from "./types.js";
 
 const CONFIG_PATH = join(homedir(), ".pi", "acp-agents", "config.json");
 
@@ -134,6 +134,10 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 	validateNumericFields(resolved);
 	// EC-21: Validate healthCheckIntervalMs <= staleTimeoutMs
 	validateTimeoutOrder(resolved);
+	// EC-22: Validate agent_aliases if present
+	if (resolved.agent_aliases) {
+		validateAgentAliases(resolved.agent_aliases, resolved.agent_servers);
+	}
 
 	return resolved;
 }
@@ -164,6 +168,29 @@ function validateNumericFields(resolved: AcpConfig): void {
 function validateTimeoutOrder(resolved: AcpConfig): void {
 	if (resolved.healthCheckIntervalMs! > resolved.staleTimeoutMs!) {
 		throw new Error("healthCheckIntervalMs must be <= staleTimeoutMs");
+	}
+}
+
+/** Validate agent_aliases entries (EC-22) */
+function validateAgentAliases(
+	aliases: Record<string, AcpAliasConfig>,
+	agent_servers: Record<string, AcpAgentConfig>,
+): void {
+	for (const [aliasName, alias] of Object.entries(aliases)) {
+		if (!aliasName || aliasName.trim() === "") {
+			throw new Error("Alias name must be a non-empty string");
+		}
+		if (!alias.agents || !Array.isArray(alias.agents) || alias.agents.length === 0) {
+			throw new Error(`Alias "${aliasName}" must have a non-empty agents array`);
+		}
+		if (alias.strategy !== "failover" && alias.strategy !== "race") {
+			throw new Error(`Alias "${aliasName}" strategy must be "failover" or "race", got "${alias.strategy}"`);
+		}
+		for (const agentName of alias.agents) {
+			if (!agent_servers[agentName]) {
+				throw new Error(`Alias "${aliasName}" references unknown agent "${agentName}"`);
+			}
+		}
 	}
 }
 

@@ -86,4 +86,74 @@ describe("config", () => {
       expect(config.agent_servers).toEqual({});
     });
   });
+
+  describe("agent_aliases validation", () => {
+    it("accepts valid failover alias", () => {
+      const config = validateConfig({
+        agent_servers: { gemini: { command: "gemini" }, claude: { command: "claude" } },
+        agent_aliases: {
+          myAssistant: { agents: ["gemini", "claude"], strategy: "failover" },
+        },
+      });
+      expect(config.agent_aliases?.myAssistant.strategy).toBe("failover");
+      expect(config.agent_aliases?.myAssistant.agents).toEqual(["gemini", "claude"]);
+    });
+
+    it("accepts valid race alias", () => {
+      const config = validateConfig({
+        agent_servers: { gemini: { command: "gemini" }, claude: { command: "claude" } },
+        agent_aliases: {
+          fastReply: { agents: ["gemini", "claude"], strategy: "race" },
+        },
+      });
+      expect(config.agent_aliases?.fastReply.strategy).toBe("race");
+    });
+
+    it("rejects alias with empty agents array", () => {
+      expect(() =>
+        validateConfig({
+          agent_servers: { gemini: { command: "gemini" } },
+          agent_aliases: { bad: { agents: [], strategy: "failover" } },
+        }),
+      ).toThrow(/non-empty agents/);
+    });
+
+    it("rejects alias with invalid strategy", () => {
+      expect(() =>
+        validateConfig({
+          agent_servers: { gemini: { command: "gemini" } },
+          agent_aliases: { bad: { agents: ["gemini"], strategy: "random" as any } },
+        }),
+      ).toThrow(/strategy must be/);
+    });
+
+    it("rejects alias referencing unknown agent", () => {
+      expect(() =>
+        validateConfig({
+          agent_servers: { gemini: { command: "gemini" } },
+          agent_aliases: { bad: { agents: ["gemini", "unknown"], strategy: "failover" } },
+        }),
+      ).toThrow(/unknown agent/);
+    });
+
+    it("accepts config without agent_aliases", () => {
+      const config = validateConfig({
+        agent_servers: { gemini: { command: "gemini" } },
+      });
+      expect(config.agent_aliases).toBeUndefined();
+    });
+
+    it("loads agent_aliases from file", () => {
+      const configPath = join(tmpDir, "config.json");
+      writeFileSync(configPath, JSON.stringify({
+        agent_servers: { gemini: { command: "gemini" }, claude: { command: "claude" } },
+        agent_aliases: {
+          fallback: { agents: ["gemini", "claude"], strategy: "failover" },
+        },
+      }));
+      const config = loadConfig(configPath);
+      expect(config.agent_aliases?.fallback).toBeDefined();
+      expect(config.agent_aliases?.fallback.strategy).toBe("failover");
+    });
+  });
 });
