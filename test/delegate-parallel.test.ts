@@ -377,4 +377,108 @@ describe("acp_delegate_parallel", () => {
     // At least 2 calls (one per agent progress)
     expect(onUpdate.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
+
+  // Test 10: Successful delegation recorded in widget delegationHistory
+  it("records successful delegation in delegationHistory with status 'completed'", async () => {
+    mockDelegate.mockResolvedValue({
+      text: "success result",
+      sessionId: "sid-ok",
+      stopReason: "end_turn",
+    });
+
+    const tool = await loadParallelTool();
+    const ctx = createMockCtx();
+    const result = await tool.execute(
+      "tc10",
+      { message: "history test", agents: ["gemini", "claude"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    // Verify results are correct
+    expect(result.details.results).toHaveLength(2);
+    expect(result.details.results[0].error).toBeUndefined();
+    expect(result.details.results[1].error).toBeUndefined();
+
+    // Check delegationHistory from tool details
+    expect(result.details.delegationHistory).toBeDefined();
+    expect(result.details.delegationHistory.length).toBeGreaterThanOrEqual(2);
+
+    // Each history entry should have status "completed"
+    for (const entry of result.details.delegationHistory) {
+      expect(entry.status).toBe("completed");
+      expect(entry.agentName).toBeDefined();
+    }
+  });
+
+  // Test 11: Failed delegation recorded in widget delegationHistory with error
+  it("records failed delegation in delegationHistory with status 'error' and error message", async () => {
+    mockDelegate
+      .mockResolvedValueOnce({ text: "ok", sessionId: "sid-1", stopReason: "end_turn" })
+      .mockRejectedValueOnce(new Error("agent crashed"));
+
+    const tool = await loadParallelTool();
+    const ctx = createMockCtx();
+    const result = await tool.execute(
+      "tc11",
+      { message: "error history test", agents: ["gemini", "claude"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    // Check delegationHistory
+    expect(result.details.delegationHistory).toBeDefined();
+    expect(result.details.delegationHistory.length).toBeGreaterThanOrEqual(2);
+
+    // Find the failed entry
+    const errorEntry = result.details.delegationHistory.find(
+      (e: any) => e.status === "error",
+    );
+    expect(errorEntry).toBeDefined();
+    expect(errorEntry.error).toBe("agent crashed");
+
+    // Find the successful entry
+    const successEntry = result.details.delegationHistory.find(
+      (e: any) => e.status === "completed",
+    );
+    expect(successEntry).toBeDefined();
+  });
+
+  // Test 12: delegationHistory populated correctly for all agents
+  it("records all agent results in delegationHistory", async () => {
+    mockDelegate
+      .mockResolvedValueOnce({ text: "alpha", sessionId: "sid-a", stopReason: "end_turn" })
+      .mockRejectedValueOnce(new Error("beta failed"))
+      .mockResolvedValueOnce({ text: "gamma", sessionId: "sid-c", stopReason: "end_turn" });
+
+    const tool = await loadParallelTool();
+    const ctx = createMockCtx();
+    const result = await tool.execute(
+      "tc12",
+      { message: "history all", agents: ["gemini", "claude", "codex"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    // History should have 3 entries (one per agent)
+    expect(result.details.delegationHistory).toHaveLength(3);
+
+    // Verify each entry
+    const geminiEntry = result.details.delegationHistory.find((e: any) => e.agentName === "gemini");
+    const claudeEntry = result.details.delegationHistory.find((e: any) => e.agentName === "claude");
+    const codexEntry = result.details.delegationHistory.find((e: any) => e.agentName === "codex");
+
+    expect(geminiEntry.status).toBe("completed");
+    expect(geminiEntry.sessionId).toBe("sid-a");
+    expect(geminiEntry.error).toBeUndefined();
+
+    expect(claudeEntry.status).toBe("error");
+    expect(claudeEntry.error).toBe("beta failed");
+
+    expect(codexEntry.status).toBe("completed");
+    expect(codexEntry.sessionId).toBe("sid-c");
+  });
 });

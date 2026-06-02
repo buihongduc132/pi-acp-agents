@@ -46,11 +46,13 @@ export default function (pi: ExtensionAPI) {
   const sessionMgr = new SessionManager();
   const activeAdapters = new Map<string, ReturnType<typeof createAdapter>>();
   const busySessions = new Map<string, boolean>();
+  const DELEGATION_HISTORY_CAP = 20;
   const widgetActivity = {
     activeDelegations: 0,
     activeBroadcasts: 0,
     activeCompares: 0,
     delegations: [] as Array<{ id: string; agentName: string; phase: string; startedAt: Date; lastActivityAt: Date; text?: string }>,
+    delegationHistory: [] as Array<{ agentName: string; status: "completed" | "error"; error?: string; sessionId?: string; finishedAt: Date }>,
     lastError: undefined as string | undefined,
   };
 
@@ -955,6 +957,9 @@ export default function (pi: ExtensionAPI) {
 
       const delegatePromises = agentNames.map(async (agent, idx) => {
         const del = delegations[idx]!;
+        let resultStatus: "completed" | "error" = "completed";
+        let resultError: string | undefined;
+        let resultSessionId: string | undefined;
         const onProgress = (progress: any) => {
           if (widgetActivity) {
             const entry = widgetActivity.delegations.find(d => d.id === del.id);
@@ -970,6 +975,7 @@ export default function (pi: ExtensionAPI) {
 
         try {
           const result = await coordinator.delegate(agent, params.message, params.cwd ?? ctx.cwd, onProgress, signal);
+          resultSessionId = result.sessionId;
           return {
             agent,
             text: result.text,
@@ -977,17 +983,31 @@ export default function (pi: ExtensionAPI) {
             stopReason: result.stopReason,
           } as const;
         } catch (err: unknown) {
+          resultStatus = "error";
+          resultError = err instanceof Error ? err.message : String(err);
           return {
             agent,
             text: "",
             sessionId: "",
             stopReason: "error",
-            error: err instanceof Error ? err.message : String(err),
+            error: resultError,
           } as const;
         } finally {
           if (widgetActivity) {
             widgetActivity.delegations = widgetActivity.delegations.filter(d => d.id !== del.id);
             widgetActivity.activeDelegations = Math.max(0, widgetActivity.activeDelegations - 1);
+            // Record in delegation history
+            widgetActivity.delegationHistory.push({
+              agentName: del.agentName,
+              status: resultStatus,
+              error: resultError,
+              sessionId: resultSessionId,
+              finishedAt: new Date(),
+            });
+            // Cap history
+            if (widgetActivity.delegationHistory.length > DELEGATION_HISTORY_CAP) {
+              widgetActivity.delegationHistory = widgetActivity.delegationHistory.slice(-DELEGATION_HISTORY_CAP);
+            }
             refreshWidget(ctx);
           }
         }
@@ -1005,7 +1025,7 @@ export default function (pi: ExtensionAPI) {
 
       return {
         content: [textContent(`Parallel delegation results:\n\n${contentLines.join("\n\n")}`)],
-        details: { results },
+        details: { results, delegationHistory: [...widgetActivity.delegationHistory] },
       };
     },
   });
