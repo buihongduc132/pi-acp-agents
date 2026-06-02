@@ -374,11 +374,6 @@ export default function (pi: ExtensionAPI) {
   // Load tool visibility settings
   const toolSettings: AcpToolSettings = loadSettings(process.cwd());
 
-  // Consolidation mode: when acp_task_update and acp_message are EXPLICITLY
-  // listed in settings (not just default-enabled), we're in consolidated mode (7 tools instead of 33).
-  const consolidated = (toolSettings.tools as Record<string, { enabled: boolean }>)['acp_task_update'] !== undefined
-    && (toolSettings.tools as Record<string, { enabled: boolean }>)['acp_message'] !== undefined;
-
   // Core tools
   if (isToolEnabled(toolSettings, "acp_prompt")) pi.registerTool({
     name: "acp_prompt",
@@ -436,9 +431,8 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (target.sessionId && target.metadata) {
-          // Consolidation mode: auto-reload archived session
-          if (consolidated) {
-            const archived = target.metadata;
+          // Auto-reload archived session if it exists
+          const archived = target.metadata;
             const agentCfg = getAgentConfigOrThrow(agentName);
             const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
               onActivity: (sid) => monitor.touch(sid),
@@ -595,7 +589,8 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_session_new")) pi.registerTool({
+  // Session lifecycle tools — moved to pi-acp-advanced extension
+  if (isToolEnabled(toolSettings, "acp_session_new")) pi.registerTool({
       name: "acp_session_new",
     label: "ACP New Session",
     description: "Create a new ACP agent session. Returns session ID for use with acp_prompt.",
@@ -644,7 +639,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_session_load")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_session_load")) pi.registerTool({
       name: "acp_session_load",
     label: "ACP Load Session",
     description: "Load an existing ACP agent session by ID to resume a conversation.",
@@ -713,7 +708,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_session_set_model")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_session_set_model")) pi.registerTool({
       name: "acp_session_set_model",
     label: "ACP Set Model",
     description: "Change the model for an active ACP agent session.",
@@ -746,7 +741,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_session_set_mode")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_session_set_mode")) pi.registerTool({
       name: "acp_session_set_mode",
     label: "ACP Set Mode",
     description: "Change the agent session mode for an active ACP agent session.",
@@ -811,7 +806,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Level 3 tools
-  if (!consolidated && isToolEnabled(toolSettings, "acp_delegate")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_delegate")) pi.registerTool({
       name: "acp_delegate",
     label: "ACP Delegate",
     description: "Delegate a task to a specific ACP agent and get its response. Creates a short-lived session that is disposed after use.",

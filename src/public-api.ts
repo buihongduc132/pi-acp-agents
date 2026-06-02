@@ -33,12 +33,24 @@ export { AcpCircuitBreaker } from "./core/circuit-breaker.js";
 export { HealthMonitor } from "./core/health-monitor.js";
 export { SessionManager } from "./core/session-manager.js";
 
+// Adapter factory (for extension packages to create agent adapters)
+export { createAdapter } from "./adapter-factory.js";
+
 // Coordination
 export { AgentCoordinator } from "./coordination/coordinator.js";
 export { AliasResolver } from "./coordination/alias-resolver.js";
 
 // Logging
 export { createFileLogger, createNoopLogger } from "./logger.js";
+
+// Stores (for extension packages to instantiate against shared runtime dir)
+export { AcpTaskStore } from "./management/task-store.js";
+export { MailboxManager } from "./management/mailbox-manager.js";
+export { GovernanceStore } from "./management/governance-store.js";
+export { SessionArchiveStore } from "./management/session-archive-store.js";
+export { SessionNameStore } from "./management/session-name-store.js";
+export { WorkerStore } from "./management/worker-store.js";
+export { AcpEventLog } from "./management/event-log.js";
 
 // Version
 export { version } from "../package.json" with { type: "json" };
