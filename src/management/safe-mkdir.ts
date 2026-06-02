@@ -32,10 +32,10 @@ export function safeMkdir(
 	// Ownership check — detect root-owned dirs from sudo runs
 	try {
 		const stat = statSync(dirPath);
-		if (stat.uid !== process.uid) {
+		if (stat.uid !== process.getuid()) {
 			console.warn(
 				`[pi] WARNING: Directory ${dirPath} is owned by uid ${stat.uid}, ` +
-				`but pi runs as uid ${process.uid}. ` +
+				`but pi runs as uid ${process.getuid()}. ` +
 				`Fix: sudo chown -R $(whoami) ${dirPath}`,
 			);
 		}
@@ -55,10 +55,10 @@ export function checkDirOwnership(dirPath: string): {
 } {
 	try {
 		const stat = statSync(dirPath);
-		if (stat.uid !== process.uid) {
+		if (stat.uid !== process.getuid()) {
 			return {
 				ok: false,
-				reason: `owned by uid ${stat.uid}, expected ${process.uid}`,
+				reason: `owned by uid ${stat.uid}, expected ${process.getuid()}`,
 				fix: `sudo chown -R $(whoami) ${dirPath}`,
 			};
 		}
