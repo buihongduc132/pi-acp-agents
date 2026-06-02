@@ -1,0 +1,17 @@
+{
+  "name": "pi-acp-types",
+  "version": "0.1.0",
+  "description": "Shared types for pi-acp-agents base and pi-acp-advanced extension packages",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist/"],
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"types package — no tests\""
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

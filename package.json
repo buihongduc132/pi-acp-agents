@@ -52,8 +52,12 @@
       "optional": true
     }
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.21.0"
+    "@agentclientprotocol/sdk": "^0.21.0",
+    "pi-acp-types": "workspace:*"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "^0.73.0",

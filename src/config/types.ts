@@ -1,185 +1,32 @@
 /**
  * pi-acp-agents — Shared types
  *
+ * Re-exports from pi-acp-types for backward compatibility.
+ * New consumers should import directly from "pi-acp-types".
+ *
  * Config shape mirrors Zed's `agent_servers` pattern:
  * flat map of name → server config. No provider-specific fields.
  * All customization goes through args/env.
  */
 
-/** Configuration for a single agent alias with fallback chain */
-export interface AcpAliasConfig {
-	agents: string[];
-	strategy: "failover" | "race";
-}
-
-/** Per-agent server configuration (matches Zed's agent_servers entry) */
-export interface AcpAgentConfig {
-	/** How the agent is invoked: 'direct' (subprocess) or 'acpx' (CLI delegation). Defaults to 'direct'. */
-	mode?: "direct" | "acpx";
-	command?: string;
-	args?: string[];
-	env?: Record<string, string>;
-	cwd?: string;
-	/** Default model for sessions created with this agent */
-	default_model?: string;
-	/** Default mode for sessions created with this agent */
-	default_mode?: string;
-	/** Stall timeout in milliseconds for acpx mode */
-	stallTimeoutMs?: number;
-	/** Agent name for acpx session creation (defaults to adapter name) */
-	agentName?: string;
-	/** Allow passthrough of unknown fields for forward compat */
-	[key: string]: unknown;
-}
-
-/** Top-level config stored at ~/.pi/acp-agents/config.json */
-export interface AcpConfig {
-	/** Agent server definitions. Key = alias name. Matches Zed's agent_servers. */
-	agent_servers: Record<string, AcpAgentConfig>;
-	defaultAgent?: string;
-	logsDir?: string;
-	staleTimeoutMs?: number;
-	healthCheckIntervalMs?: number;
-	circuitBreakerMaxFailures?: number;
-	circuitBreakerResetMs?: number;
-	/** Stall timeout in milliseconds (default: 3_600_000 = 1 hour) */
-	stallTimeoutMs?: number;
-	/** Per-tool timeout overrides in milliseconds. Falls back to stallTimeoutMs. */
-	toolTimeouts?: {
-		prompt?: number;
-		delegate?: number;
-		broadcast?: number;
-		compare?: number;
-	};
-	/** Activity-based stall detection for persistent sessions (ms) */
-	needsAttentionMs?: number;     // default: 60_000
-	autoInterruptMs?: number;      // default: 300_000, 0 = disabled
-	interruptGraceMs?: number;     // default: 10_000
-	/** Agent alias definitions for fallback chains */
-	agent_aliases?: Record<string, AcpAliasConfig>;
-	runtimeDir?: string;
-	modelPolicy?: {
-		allowedModels?: string[];
-		blockedModels?: string[];
-		requireProviderPrefix?: boolean;
-	};
-}
-
-/**
- * Back-compat: old configs may use `agents` instead of `agent_servers`.
- * This legacy type is only used during migration.
- */
-export interface LegacyAcpConfig {
-	agents?: Record<string, AcpAgentConfig>;
-	agent_servers?: Record<string, AcpAgentConfig>;
-	[key: string]: unknown;
-}
-
-/** Alias used by some tests */
-export type AcpAgentsConfig = AcpConfig;
-
-/** Result of a prompt call */
-export interface AcpPromptResult {
-	text: string;
-	stopReason: string;
-	sessionId: string;
-	stalled?: boolean;
-}
-
-/** Tracked session info */
-export interface AcpSessionInfo {
-	sessionId: string;
-	sessionName?: string;
-	agentName: string;
-	cwd: string;
-	model?: string;
-	mode?: string;
-	createdAt: Date;
-}
-
-/** Archived runtime metadata used to reopen ACP sessions after auto-close. */
-export interface AcpArchivedSessionMetadata {
-	sessionId: string;
-	sessionName?: string;
-	agentName: string;
-	cwd: string;
-	createdAt: Date;
-	lastActivityAt: Date;
-	lastResponseAt?: Date;
-	completedAt?: Date;
-	disposed: boolean;
-	autoClosed?: boolean;
-	closeReason?: string;
-	model?: string;
-	mode?: string;
-}
-
-/** Internal handle kept by SessionManager. Also satisfies HealthMonitorable. */
-export interface AcpSessionHandle extends AcpArchivedSessionMetadata {
-	accumulatedText: string;
-	busy?: boolean;
-	/** True while a prompt() call is in-flight */
-	isPrompting?: boolean;
-	/** Timestamp when the current prompt started */
-	promptStartedAt?: Date;
-	planStatus?: "none" | "pending" | "approved" | "rejected";
-	dispose: () => Promise<void>;
-}
-
-/** Circuit breaker states */
-export type CircuitState = "closed" | "open" | "half-open";
-
-/** Adapter options */
-export interface AcpAdapterOptions {
-	config: AcpAgentConfig;
-	clientInfo?: { name: string; version: string };
-	logger?: Logger;
-	cwd?: string;
-	agentName?: string;
-	/** Activity callback — called on every session/update notification from the agent */
-	onActivity?: (sessionId: string) => void;
-}
-
-// --- Worker types (M6) ---
-
-export type AcpWorkerStatus = "online" | "idle" | "streaming" | "offline";
-
-export interface AcpWorkerRecord {
-	name: string;
-	sessionId: string;
-	agentName: string;
-	status: AcpWorkerStatus;
-	currentTaskId?: string;
-	spawnedAt: string;
-	lastActivityAt: string;
-	metadata: Record<string, unknown>;
-}
-
-// --- Task priority (M3, M5) ---
-
-export type AcpTaskPriority = "urgent" | "high" | "normal" | "low";
-
-// --- Async run types (M1) ---
-
-export type AcpAsyncRunState = "pending" | "running" | "completed" | "failed";
-
-export interface AcpAsyncRunRecord {
-	runId: string;
-	agentName: string;
-	message: string;
-	cwd?: string;
-	state: AcpAsyncRunState;
-	sessionId?: string;
-	result?: string;
-	error?: string;
-	createdAt: string;
-	startedAt?: string;
-	completedAt?: string;
-}
-
-/** Logger interface */
-export interface Logger {
-	info(msg: string, data?: unknown): void;
-	error(msg: string, data?: unknown): void;
-	debug(msg: string, data?: unknown): void;
-}
+// Re-export all shared types from pi-acp-types for backward compat
+export {
+	AcpAgentConfig,
+	AcpAliasConfig,
+	AcpConfig,
+	AcpPromptResult,
+	AcpSessionInfo,
+	AcpArchivedSessionMetadata,
+	AcpSessionHandle,
+	Logger,
+	AcpAdapterOptions,
+	AcpWorkerStatus,
+	AcpWorkerRecord,
+	AcpTaskPriority,
+	AcpAsyncRunState,
+	AcpAsyncRunRecord,
+	CircuitState,
+	AcpRuntimePaths,
+	LegacyAcpConfig,
+	AcpAgentsConfig,
+} from "pi-acp-types";
