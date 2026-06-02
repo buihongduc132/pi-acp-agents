@@ -475,7 +475,6 @@ export default function (pi: ExtensionAPI) {
                 busySessions.delete(target.sessionId); handle.busy = false; archiveSession(handle);
               }
             } catch (err) { adapter.dispose(); throw err; }
-          }
           throw new Error(`Session name "${target.sessionName ?? params.session_name}" refers to archived session "${target.sessionId}". Load it first with acp_session_load or use the raw session_id of a live session.`);
         }
         const agentCfg = getAgentConfigOrThrow(agentName);
@@ -876,7 +875,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_compare")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_compare")) pi.registerTool({
       name: "acp_compare",
     label: "ACP Compare",
     description: "Get responses from multiple ACP agents and compare them. Returns a structured comparison of all responses.",
@@ -910,7 +909,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Parallel delegation tool
-  if (!consolidated && isToolEnabled(toolSettings, "acp_delegate_parallel")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_delegate_parallel")) pi.registerTool({
       name: "acp_delegate_parallel",
     label: "ACP Delegate Parallel",
     description: "Delegate a task to multiple ACP agents in parallel. Each agent gets its own short-lived session. Returns all results.",
@@ -1026,7 +1025,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ── Consolidated tools (33→7 mode) ──
-  if (consolidated && isToolEnabled(toolSettings, "acp_task_update")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_task_update")) pi.registerTool({
       name: "acp_task_update",
     label: "ACP Task Update",
     description: "Update task status, assignee, dependencies, or result. Consolidates acp_task_assign, acp_task_set_status, acp_task_dep_add/rm, acp_task_clear. Supports bulk ops with task_id='*'.",
@@ -1075,7 +1074,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (consolidated && isToolEnabled(toolSettings, "acp_message")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_message")) pi.registerTool({
       name: "acp_message",
     label: "ACP Message",
     description: "Send or list messages. Consolidates acp_message_send and acp_message_list. Use action:'send' with kind:'dm'/'steer'/'broadcast', or action:'list'.",
@@ -1115,8 +1114,8 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Lifecycle / management tools (only in non-consolidated mode)
-  if (!consolidated && isToolEnabled(toolSettings, "acp_session_list")) pi.registerTool({
+  // Lifecycle / management tools
+  if (isToolEnabled(toolSettings, "acp_session_list")) pi.registerTool({
       name: "acp_session_list",
     label: "ACP Session List",
     description: "List active ACP sessions with agent, cwd, busy state, and plan state.",
@@ -1140,7 +1139,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_session_shutdown")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_session_shutdown")) pi.registerTool({
       name: "acp_session_shutdown",
     label: "ACP Session Shutdown",
     description: "Gracefully dispose a specific ACP session, or all sessions for an agent.",
@@ -1178,7 +1177,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_session_kill")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_session_kill")) pi.registerTool({
       name: "acp_session_kill",
     label: "ACP Session Kill",
     description: "Force-kill a specific ACP session and remove it from runtime state.",
@@ -1205,7 +1204,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_prune")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_prune")) pi.registerTool({
       name: "acp_prune",
     label: "ACP Prune",
     description: "Prune stale or disposed ACP sessions from runtime state.",
@@ -1232,7 +1231,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_runtime_info")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_runtime_info")) pi.registerTool({
       name: "acp_runtime_info",
     label: "ACP Runtime Info",
     description: "Show ACP runtime id/path information, configured agents, and runtime storage files.",
@@ -1254,7 +1253,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_env")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_env")) pi.registerTool({
       name: "acp_env",
     label: "ACP Env",
     description: "Show environment and command details for manually spawning a configured ACP agent.",
@@ -1299,7 +1298,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_task_list")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_task_list")) pi.registerTool({
       name: "acp_task_list",
     label: "ACP Task List",
     description: "List ACP tasks, optionally filtered by status.",
@@ -1314,7 +1313,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_task_get")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_task_get")) pi.registerTool({
       name: "acp_task_get",
     label: "ACP Task Get",
     description: "Show one ACP task including dependency state.",
@@ -1327,7 +1326,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_task_assign")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_task_assign")) pi.registerTool({
       name: "acp_task_assign",
     label: "ACP Task Assign",
     description: "Assign or unassign an ACP task.",
@@ -1345,7 +1344,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_task_set_status")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_task_set_status")) pi.registerTool({
       name: "acp_task_set_status",
     label: "ACP Task Set Status",
     description: "Set ACP task status transitions (pending, in_progress, completed, deleted).",
@@ -1365,7 +1364,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_task_dependency_add")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_task_dependency_add")) pi.registerTool({
       name: "acp_task_dependency_add",
     label: "ACP Task Dependency Add",
     description: "Add a blocking dependency to an ACP task.",
@@ -1383,7 +1382,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_task_dependency_remove")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_task_dependency_remove")) pi.registerTool({
       name: "acp_task_dependency_remove",
     label: "ACP Task Dependency Remove",
     description: "Remove a blocking dependency from an ACP task.",
@@ -1401,7 +1400,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_task_clear")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_task_clear")) pi.registerTool({
       name: "acp_task_clear",
     label: "ACP Task Clear",
     description: "Clear completed tasks or wipe the entire ACP task store.",
@@ -1417,7 +1416,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Messaging + governance + diagnostics
-  if (!consolidated && isToolEnabled(toolSettings, "acp_message_send")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_message_send")) pi.registerTool({
       name: "acp_message_send",
     label: "ACP Message Send",
     description: "Send a persistent mailbox message or steer message to an ACP agent.",
@@ -1440,7 +1439,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_message_list")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_message_list")) pi.registerTool({
       name: "acp_message_list",
     label: "ACP Message List",
     description: "List mailbox messages for an ACP agent.",
@@ -1452,7 +1451,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_plan_request")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_plan_request")) pi.registerTool({
       name: "acp_plan_request",
     label: "ACP Plan Request",
     description: "Mark an ACP agent as waiting for plan approval.",
@@ -1466,7 +1465,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_plan_resolve")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_plan_resolve")) pi.registerTool({
       name: "acp_plan_resolve",
     label: "ACP Plan Resolve",
     description: "Approve or reject a pending ACP plan request.",
@@ -1488,7 +1487,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_model_policy_get")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_model_policy_get")) pi.registerTool({
       name: "acp_model_policy_get",
     label: "ACP Model Policy Get",
     description: "Inspect ACP model policy constraints and current default behavior.",
@@ -1500,7 +1499,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_model_policy_check")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_model_policy_check")) pi.registerTool({
       name: "acp_model_policy_check",
     label: "ACP Model Policy Check",
     description: "Validate a model override against ACP governance rules.",
@@ -1514,7 +1513,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_doctor")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_doctor")) pi.registerTool({
       name: "acp_doctor",
     label: "ACP Doctor",
     description: "Run ACP diagnostics covering config, runtime paths, sessions, and policy state.",
@@ -1535,7 +1534,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_event_log")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_event_log")) pi.registerTool({
       name: "acp_event_log",
     label: "ACP Event Log",
     description: "Return the ACP structured event log file path for inspection.",
@@ -1546,7 +1545,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  if (!consolidated && isToolEnabled(toolSettings, "acp_cleanup")) pi.registerTool({
+  if (isToolEnabled(toolSettings, "acp_cleanup")) pi.registerTool({
       name: "acp_cleanup",
     label: "ACP Cleanup",
     description: "Clean up ACP runtime state: sessions, tasks, or mailbox contents.",
