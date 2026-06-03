@@ -68,7 +68,7 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json",
 	}),
 }));
-vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info() {}, error() {}, debug() {} }) }));
+vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info() {}, error() {}, debug() {} }), createNoopLogger: () => ({ info() {}, error() {}, debug() {} }) }));
 vi.mock("../src/core/circuit-breaker.js", () => ({
 	AcpCircuitBreaker: class {
 		state = "closed";

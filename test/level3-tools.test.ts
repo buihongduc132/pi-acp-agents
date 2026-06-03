@@ -15,61 +15,37 @@ describe("Level 3+ — ACP management tool registration", () => {
     registeredTools.length = 0;
   });
 
-  it("registers level 3 coordination tools", async () => {
-    const mod = await import("../index.js");
-    mod.default(mockPi as any);
-    expect(registeredTools).toEqual(expect.arrayContaining(["acp_delegate", "acp_broadcast", "acp_compare"]));
-  });
-
-  it("registers lifecycle tools", async () => {
-    const mod = await import("../index.js");
-    mod.default(mockPi as any);
-    expect(registeredTools).toEqual(expect.arrayContaining([
-      "acp_session_list",
-      "acp_session_shutdown",
-      "acp_session_kill",
-      "acp_prune",
-      "acp_runtime_info",
-      "acp_env",
-      "acp_cleanup",
-    ]));
-  });
-
-  it("registers task, messaging, governance, and diagnostic tools", async () => {
-    const mod = await import("../index.js");
-    mod.default(mockPi as any);
-    expect(registeredTools).toEqual(expect.arrayContaining([
-      "acp_task_create",
-      "acp_task_list",
-      "acp_task_get",
-      "acp_task_assign",
-      "acp_task_set_status",
-      "acp_task_dependency_add",
-      "acp_task_dependency_remove",
-      "acp_task_clear",
-      "acp_message_send",
-      "acp_message_list",
-      "acp_plan_request",
-      "acp_plan_resolve",
-      "acp_model_policy_get",
-      "acp_model_policy_check",
-      "acp_doctor",
-      "acp_event_log",
-    ]));
-  });
-
-  it("registers expanded tool count", async () => {
+  it("registers exactly 7 consolidated tools", async () => {
     const mod = await import("../index.js");
     mod.default(mockPi as any);
     expect(registeredTools).toEqual(expect.arrayContaining([
       "acp_prompt",
       "acp_status",
-      "acp_session_new",
-      "acp_session_load",
-      "acp_session_set_model",
-      "acp_session_set_mode",
       "acp_cancel",
+      "acp_broadcast",
+      "acp_task_update",
+      "acp_message",
+      "acp_task_create",
     ]));
-    expect(registeredTools.length).toBe(36);
+    expect(registeredTools.length).toBe(7);
+  });
+
+  it("does NOT register removed tools", async () => {
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const REMOVED = [
+      "acp_session_new", "acp_session_load", "acp_session_set_model", "acp_session_set_mode",
+      "acp_delegate", "acp_compare", "acp_delegate_parallel",
+      "acp_session_list", "acp_session_shutdown", "acp_session_kill", "acp_prune",
+      "acp_runtime_info", "acp_env", "acp_cleanup", "acp_doctor", "acp_event_log",
+      "acp_task_list", "acp_task_get", "acp_task_assign", "acp_task_set_status",
+      "acp_task_dependency_add", "acp_task_dependency_remove", "acp_task_clear",
+      "acp_message_send", "acp_message_list",
+      "acp_plan_request", "acp_plan_resolve",
+      "acp_model_policy_get", "acp_model_policy_check",
+    ];
+    for (const tool of REMOVED) {
+      expect(registeredTools).not.toContain(tool);
+    }
   });
 });

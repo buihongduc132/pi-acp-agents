@@ -29,7 +29,7 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 		sessionArchiveFile: "/mock/runtime/session-archive.json",
 	}),
 }));
-vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
+vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }), createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
 vi.mock("../src/core/circuit-breaker.js", () => ({ AcpCircuitBreaker: vi.fn() }));
 vi.mock("../src/adapter-factory.js", () => ({ createAdapter: vi.fn() }));
 vi.mock("../src/coordination/coordinator.js", () => ({ AgentCoordinator: vi.fn() }));

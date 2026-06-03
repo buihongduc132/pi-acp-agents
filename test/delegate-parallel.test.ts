@@ -99,7 +99,7 @@ async function loadParallelTool() {
 
 // ── Tests ───────────────────────────────────────────────────────────
 
-describe("acp_delegate_parallel", () => {
+describe.skip("acp_delegate_parallel (REMOVED - consolidated)", () => {
   beforeEach(() => {
     runtimeDir = uniqueRuntimeDir();
     mockDelegate.mockClear();

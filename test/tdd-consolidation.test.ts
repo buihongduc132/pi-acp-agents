@@ -157,7 +157,7 @@ function mkSession(id: string, agent = "gemini", sessionName?: string): AcpSessi
 
 // ── Test Setup ────────────────────────────────────────────────────────
 
-describe.skip("Consolidated Tool Surface (33 → 7)", () => {
+describe("Consolidated Tool Surface (33 → 7)", () => {
 	let tools: Map<string, any>;
 	let commands: Map<string, any>;
 	let hooks: Map<string, Function>;
@@ -425,9 +425,10 @@ describe.skip("Consolidated Tool Surface (33 → 7)", () => {
 			const handle = m.sm.add.mock.calls[0]?.[0];
 			if (!handle) return;
 			m.sm.get.mockReturnValue(handle);
-			// Add to activeAdapters by setting session on the mock
-			m.sm.get.mockReturnValue(handle);
 			m.cb.execute.mockImplementation(async (fn: () => any) => fn());
+
+			// Clear spawn mock so we can verify it's NOT called for reuse
+			m.ad.spawn.mockClear();
 
 			// Second call with session_id should reuse
 			const r = await exec("acp_prompt", {

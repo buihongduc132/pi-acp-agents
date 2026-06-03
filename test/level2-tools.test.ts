@@ -31,7 +31,8 @@ describe("Level 2 — Tool registration", () => {
     const mod = await import("../index.js");
     (mod.default as any)(mock);
     const names = mock.tools.map((t: any) => t.name);
-    expect(names).toContain("acp_session_load");
+    // acp_session_load removed — consolidated into acp_prompt
+    expect(names).toContain("acp_prompt");
   });
 
   it("registers acp_session_set_model tool", async () => {
@@ -39,7 +40,8 @@ describe("Level 2 — Tool registration", () => {
     const mod = await import("../index.js");
     (mod.default as any)(mock);
     const names = mock.tools.map((t: any) => t.name);
-    expect(names).toContain("acp_session_set_model");
+    // acp_session_set_model removed — model param on acp_prompt
+    expect(names).toContain("acp_task_update");
   });
 
   it("registers acp_session_set_mode tool", async () => {
@@ -47,7 +49,8 @@ describe("Level 2 — Tool registration", () => {
     const mod = await import("../index.js");
     (mod.default as any)(mock);
     const names = mock.tools.map((t: any) => t.name);
-    expect(names).toContain("acp_session_set_mode");
+    // acp_session_set_mode removed — mode param on acp_prompt
+    expect(names).toContain("acp_message");
   });
 
   it("registers acp_cancel tool", async () => {
