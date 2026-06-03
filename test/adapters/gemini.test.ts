@@ -1,11 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, mock } from "bun:test";
 import { GeminiAcpAdapter } from "../../src/adapters/gemini.js";
 import type { AcpAgentConfig } from "../../src/config/types.js";
 import type { Logger } from "../../src/logger.js";
 
 // Mock child_process to prevent real gemini calls
-vi.mock("node:child_process", () => ({
-	execSync: vi.fn((cmd: string) => {
+mock.module("node:child_process", () => ({
+	execSync: mock((cmd: string) => {
 		if (cmd.includes("which gemini")) throw new Error("not found");
 		if (cmd.includes("--version")) return "gemini v1.0.0";
 		return "";
@@ -14,9 +14,9 @@ vi.mock("node:child_process", () => ({
 
 function noopLogger(): Logger {
 	return {
-		info: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
+		info: mock(),
+		error: mock(),
+		debug: mock(),
 	};
 }
 

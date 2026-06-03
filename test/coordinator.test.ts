@@ -7,40 +7,46 @@
  * - Emits error progress
  * - Does not leak listeners
  */
-import { describe, it, expect, vi, beforeEach, mock } from "bun:test";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { AgentCoordinator, type AcpDelegateProgress } from "../src/coordination/coordinator.js";
 import type { AcpConfig } from "../src/config/types.js";
 import { createAdapter } from "../src/adapter-factory.js";
 
-mock.module("../src/adapter-factory.js", () => ({
-	createAdapter: vi.fn(),
-	isKnownAdapter: vi.fn(),
-}));
+mock.module("../src/adapter-factory.js");
 
 /**
  * Create a mock adapter where cancel() rejects any hanging in-flight promise.
  * This mirrors real behavior: cancel() aborts the pending ACP operation.
  */
 function createMockAdapter(overrides: Record<string, any> = {}) {
+  // Track pending operations so cancel() can reject them
   let pendingReject: ((err: Error) => void) | null = null;
 
+  const trackPending = <T>(promiseFactory: () => Promise<T>): (() => Promise<T>) => {
+    return () =>
+      new Promise<T>((resolve, reject) => {
+        pendingReject = reject;
+        promiseFactory().then(resolve, reject);
+      });
+  };
+
   const adapter: Record<string, any> = {
-    spawn: vi.fn().mockResolvedValue(undefined),
-    initialize: vi.fn().mockResolvedValue(undefined),
-    newSession: vi.fn().mockResolvedValue("test-session"),
-    prompt: vi.fn().mockResolvedValue({
+    spawn: mock().mockResolvedValue(undefined),
+    initialize: mock().mockResolvedValue(undefined),
+    newSession: mock().mockResolvedValue("test-session"),
+    prompt: mock().mockResolvedValue({
       text: "result",
       stopReason: "end_turn",
       sessionId: "test-session",
     }),
-    cancel: vi.fn().mockImplementation(() => {
+    cancel: mock().mockImplementation(() => {
       if (pendingReject) {
         pendingReject(new DOMException("Operation cancelled", "AbortError"));
         pendingReject = null;
       }
       return Promise.resolve();
     }),
-    dispose: vi.fn(),
+    dispose: mock(),
     connected: true,
     ...overrides,
   };
@@ -60,10 +66,11 @@ function createHangingMockAdapter(hangMethod: "spawn" | "initialize" | "prompt")
     });
 
   const adapter = createMockAdapter({
-    [hangMethod]: vi.fn().mockImplementation(hangFn),
+    [hangMethod]: mock().mockImplementation(hangFn),
   });
 
-  adapter.cancel = vi.fn().mockImplementation(() => {
+  // Override cancel to reject the hanging promise
+  adapter.cancel = mock().mockImplementation(() => {
     if (pendingReject) {
       pendingReject(new DOMException("Operation cancelled", "AbortError"));
       pendingReject = null;
@@ -81,20 +88,17 @@ const mockConfig: AcpConfig = {
   defaultAgent: "gemini",
 };
 
-// Get the mocked createAdapter reference
-const mockedCreateAdapter = createAdapter as ReturnType<typeof vi.fn>;
-
 describe("AgentCoordinator — AbortSignal propagation", () => {
   let coordinator: AgentCoordinator;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    createAdapter as any.mockReturnValue(createMockAdapter() as any);
     coordinator = new AgentCoordinator(mockConfig, "/tmp");
   });
 
   it("pre-aborted signal: throws AbortError and disposes adapter", async () => {
     const adapter = createMockAdapter();
-    mockedCreateAdapter.mockReturnValue(adapter as any);
+    createAdapter as any.mockReturnValue(adapter as any);
 
     const controller = new AbortController();
     controller.abort();
@@ -106,6 +110,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
       expect(err.name).toBe("AbortError");
     }
 
+    // cancel + dispose called by onAbort; dispose also called in finally
     expect(adapter.cancel).toHaveBeenCalled();
     expect(adapter.dispose).toHaveBeenCalled();
   });
@@ -113,7 +118,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
   it("abort during prompt: cancels and disposes adapter", async () => {
     const controller = new AbortController();
     const adapter = createHangingMockAdapter("prompt");
-    mockedCreateAdapter.mockReturnValue(adapter as any);
+    createAdapter as any.mockReturnValue(adapter as any);
 
     const delegatePromise = coordinator.delegate(
       "gemini",
@@ -123,20 +128,23 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
       controller.signal,
     );
 
+    // Let coordinator reach the prompt phase
     await new Promise((r) => setTimeout(r, 30));
 
     controller.abort();
 
     await expect(delegatePromise).rejects.toThrow();
 
+    // cancel called by onAbort (or by the pending promise rejection)
     expect(adapter.cancel).toHaveBeenCalled();
+    // dispose called by onAbort + finally
     expect(adapter.dispose).toHaveBeenCalled();
   });
 
   it("abort during spawn: cleans up, no leak", async () => {
     const controller = new AbortController();
     const adapter = createHangingMockAdapter("spawn");
-    mockedCreateAdapter.mockReturnValue(adapter as any);
+    createAdapter as any.mockReturnValue(adapter as any);
 
     const delegatePromise = coordinator.delegate(
       "gemini",
@@ -158,7 +166,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
   it("abort during initialize: cleans up, no leak", async () => {
     const controller = new AbortController();
     const adapter = createHangingMockAdapter("initialize");
-    mockedCreateAdapter.mockReturnValue(adapter as any);
+    createAdapter as any.mockReturnValue(adapter as any);
 
     const delegatePromise = coordinator.delegate(
       "gemini",
@@ -179,13 +187,14 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
 
   it("no signal = no abort: completes normally", async () => {
     const adapter = createMockAdapter();
-    mockedCreateAdapter.mockReturnValue(adapter as any);
+    createAdapter as any.mockReturnValue(adapter as any);
 
     const result = await coordinator.delegate("gemini", "test");
 
     expect(result.text).toBe("result");
     expect(result.stopReason).toBe("end_turn");
     expect(adapter.cancel).not.toHaveBeenCalled();
+    // dispose called exactly once (from finally, not from abort)
     expect(adapter.dispose).toHaveBeenCalledTimes(1);
   });
 
@@ -195,7 +204,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
     const onProgress = (p: AcpDelegateProgress) => progressCalls.push(p);
 
     const adapter = createHangingMockAdapter("prompt");
-    mockedCreateAdapter.mockReturnValue(adapter as any);
+    createAdapter as any.mockReturnValue(adapter as any);
 
     const delegatePromise = coordinator.delegate(
       "gemini",
@@ -212,6 +221,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
       await delegatePromise;
     } catch {}
 
+    // Should have received at least one error phase
     const errorPhases = progressCalls.filter((p) => p.phase === "error");
     expect(errorPhases.length).toBeGreaterThanOrEqual(1);
     expect(errorPhases[0].agentName).toBe("gemini");

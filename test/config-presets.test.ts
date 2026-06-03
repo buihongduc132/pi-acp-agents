@@ -2,39 +2,31 @@
  * Branch coverage for config/config.ts AGENT_PRESETS
  * These preset functions call execSync and need mocking
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const FAKE_HOME = join(tmpdir(), `acp-presets-test-${process.pid}`);
+const TEST_DIR = join(tmpdir(), `acp-presets-test-${process.pid}`);
 
-vi.mock("node:os", async (importOriginal) => {
-	const actual = await importOriginal() as any;
-	return {
-		...actual,
-		homedir: () => join(actual.tmpdir(), `acp-presets-test-${process.pid}`),
-	};
+// Mock node:child_process for execSync
+const mockExecSync = mock((cmd: string) => {
+	throw new Error("not found");
 });
-
-// Mock child_process for execSync
-const mockExecSync = vi.fn();
-vi.mock("node:child_process", async (importOriginal) => {
-	const actual = await importOriginal() as any;
-	return {
-		...actual,
-		execSync: (...args: any[]) => mockExecSync(...args),
-	};
-});
+mock.module("node:child_process", () => ({
+	execSync: mockExecSync,
+}));
 
 describe("AGENT_PRESETS", () => {
 	beforeEach(() => {
-		mkdirSync(FAKE_HOME, { recursive: true });
-		vi.clearAllMocks();
+		mkdirSync(TEST_DIR, { recursive: true });
+		mockExecSync.mockImplementation(() => {
+			throw new Error("not found");
+		});
 	});
 
 	afterEach(() => {
-		rmSync(FAKE_HOME, { recursive: true, force: true });
+		rmSync(TEST_DIR, { recursive: true, force: true });
 	});
 
 	it("gemini preset returns config when binary found", async () => {

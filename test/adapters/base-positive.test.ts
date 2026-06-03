@@ -2,23 +2,23 @@
  * Branch coverage for adapters/base.ts — positive paths (with client)
  * Tests both branches of each guard: no-client (throws) and with-client (delegates)
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, mock } from "bun:test";
 import { AcpAgentAdapter } from "../../src/adapters/base.js";
 import type { AcpAgentConfig } from "../../src/config/types.js";
 
 // Mock AcpClient
-vi.mock("../../src/core/client.js", () => {
+mock.module("../../src/core/client.js", () => {
 	return {
 		AcpClient: class MockAcpClient {
-			connect = vi.fn().mockResolvedValue(undefined);
-			initialize = vi.fn().mockResolvedValue({ protocolVersion: "0.1" });
-			newSession = vi.fn().mockResolvedValue("session-123");
-			quickPrompt = vi.fn().mockResolvedValue({ text: "hi", stopReason: "end_turn", sessionId: "session-123" });
-			cancel = vi.fn().mockResolvedValue(undefined);
-			loadSession = vi.fn().mockResolvedValue("session-456");
-			setModel = vi.fn().mockResolvedValue(undefined);
-			setMode = vi.fn().mockResolvedValue(undefined);
-			dispose = vi.fn();
+			connect = mock().mockResolvedValue(undefined);
+			initialize = mock().mockResolvedValue({ protocolVersion: "0.1" });
+			newSession = mock().mockResolvedValue("session-123");
+			quickPrompt = mock().mockResolvedValue({ text: "hi", stopReason: "end_turn", sessionId: "session-123" });
+			cancel = mock().mockResolvedValue(undefined);
+			loadSession = mock().mockResolvedValue("session-456");
+			setModel = mock().mockResolvedValue(undefined);
+			setMode = mock().mockResolvedValue(undefined);
+			dispose = mock();
 			sessionId = "session-123";
 			agentInfo = { protocolVersion: "0.1" };
 			connected = true;

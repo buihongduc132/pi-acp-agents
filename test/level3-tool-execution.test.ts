@@ -1,18 +1,18 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 
-const mockDelegate = vi.fn();
-const mockBroadcast = vi.fn();
-const mockCompare = vi.fn();
-const mockNewSession = vi.fn(async () => "persisted-session-1");
-const mockLoadSession = vi.fn(async (sessionId: string) => sessionId);
-const mockPrompt = vi.fn(async () => ({ text: "prompt ok", sessionId: "persisted-session-1", stopReason: "end_turn" }));
+const mockDelegate = mock();
+const mockBroadcast = mock();
+const mockCompare = mock();
+const mockNewSession = mock(async () => "persisted-session-1");
+const mockLoadSession = mock(async (sessionId: string) => sessionId);
+const mockPrompt = mock(async () => ({ text: "prompt ok", sessionId: "persisted-session-1", stopReason: "end_turn" }));
 let runtimeDir = "";
 
-vi.mock("../src/config/config.js", () => ({
-  loadConfig: vi.fn(() => ({
+mock.module("../src/config/config.js", () => ({
+  loadConfig: mock(() => ({
     agent_servers: {
       gemini: { command: "gemini", args: ["--acp"] },
       claude: { command: "claude", args: ["--acp"] },
@@ -32,7 +32,7 @@ vi.mock("../src/config/config.js", () => ({
   })),
 }));
 
-vi.mock("../src/coordination/coordinator.js", () => ({
+mock.module("../src/coordination/coordinator.js", () => ({
   AgentCoordinator: class MockAgentCoordinator {
     delegate = mockDelegate;
     broadcast = mockBroadcast;
@@ -43,17 +43,17 @@ vi.mock("../src/coordination/coordinator.js", () => ({
   },
 }));
 
-vi.mock("../src/adapter-factory.js", () => ({
-  createAdapter: vi.fn(() => ({
-    spawn: vi.fn(),
-    initialize: vi.fn(),
+mock.module("../src/adapter-factory.js", () => ({
+  createAdapter: mock(() => ({
+    spawn: mock(),
+    initialize: mock(),
     newSession: mockNewSession,
     loadSession: mockLoadSession,
     prompt: mockPrompt,
-    setModel: vi.fn(),
-    setMode: vi.fn(),
-    cancel: vi.fn(),
-    dispose: vi.fn(),
+    setModel: mock(),
+    setMode: mock(),
+    cancel: mock(),
+    dispose: mock(),
   })),
 }));
 
@@ -77,14 +77,14 @@ function createMockCtx(setWidgetImpl?: () => void) {
   return {
     cwd: "/base",
     ui: {
-      setWidget: vi.fn(() => setWidgetImpl?.()),
-      notify: vi.fn(),
+      setWidget: mock(() => setWidgetImpl?.()),
+      notify: mock(),
     },
   };
 }
 
 async function loadTools() {
-  vi.resetModules();
+  ;
   const mockPi = createMockPi();
   const mod = await import("../index.js");
   mod.default(mockPi as any);
@@ -115,7 +115,6 @@ async function loadTools() {
 
 describe("Level 3+ — tool execute behavior", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     runtimeDir = uniqueRuntimeDir();
   });
 

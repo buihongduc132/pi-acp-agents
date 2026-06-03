@@ -1,19 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 
 describe("Level 3+ — ACP management tool registration", () => {
   const registeredTools: string[] = [];
 
   const mockPi = {
-    registerTool: vi.fn((tool: any) => {
+    registerTool: mock((tool: any) => {
       registeredTools.push(tool.name);
     }),
-    registerCommand: vi.fn(),
-    on: vi.fn(),
+    registerCommand: mock(),
+    on: mock(),
   };
 
   beforeEach(() => {
     registeredTools.length = 0;
-    vi.clearAllMocks();
   });
 
   it("registers level 3 coordination tools", async () => {

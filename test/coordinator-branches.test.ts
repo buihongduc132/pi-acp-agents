@@ -2,40 +2,39 @@
  * Branch coverage for coordinator.ts — broadcast, compare, formatComparison
  * Covers the rejected promise path and error formatting branches
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, mock } from "bun:test";
 import { AgentCoordinator } from "../src/coordination/coordinator.js";
 import type { AcpConfig } from "../src/config/types.js";
 
 // Mock adapter-factory
-vi.mock("../src/adapter-factory.js", () => ({
-	createAdapter: vi.fn(),
+const mockCreateAdapter = mock();
+mock.module("../src/adapter-factory.js", () => ({
+	createAdapter: mockCreateAdapter,
 }));
-
-import { createAdapter } from "../src/adapter-factory.js";
 
 function makeMockAdapter(result: Record<string, any> = {}) {
 	return {
-		spawn: vi.fn().mockResolvedValue(undefined),
-		initialize: vi.fn().mockResolvedValue(undefined),
-		newSession: vi.fn().mockResolvedValue("session-1"),
-		prompt: vi.fn().mockResolvedValue({
+		spawn: mock().mockResolvedValue(undefined),
+		initialize: mock().mockResolvedValue(undefined),
+		newSession: mock().mockResolvedValue("session-1"),
+		prompt: mock().mockResolvedValue({
 			text: "response",
 			stopReason: "end_turn",
 			sessionId: "session-1",
 			...result,
 		}),
-		dispose: vi.fn(),
+		dispose: mock(),
 		connected: true,
 	};
 }
 
 function makeFailingAdapter(error: Error) {
 	return {
-		spawn: vi.fn().mockRejectedValue(error),
-		initialize: vi.fn(),
-		newSession: vi.fn(),
-		prompt: vi.fn(),
-		dispose: vi.fn(),
+		spawn: mock().mockRejectedValue(error),
+		initialize: mock(),
+		newSession: mock(),
+		prompt: mock(),
+		dispose: mock(),
 		connected: false,
 	};
 }
@@ -51,7 +50,7 @@ const mockConfig: AcpConfig = {
 
 describe("AgentCoordinator — broadcast/compare branches", () => {
 	it("broadcast returns results from all agents", async () => {
-		vi.mocked(createAdapter).mockReturnValue(makeMockAdapter() as any);
+		mockCreateAdapter.mockReturnValue(makeMockAdapter() as any);
 		const coordinator = new AgentCoordinator(mockConfig, "/tmp");
 		const results = await coordinator.broadcast(["gemini", "claude"], "hello");
 		expect(results).toHaveLength(2);
@@ -60,30 +59,28 @@ describe("AgentCoordinator — broadcast/compare branches", () => {
 	});
 
 	it("broadcast handles partial failure — one agent fails", async () => {
-		vi.mocked(createAdapter)
+		mockCreateAdapter
 			.mockReturnValueOnce(makeMockAdapter() as any)
 			.mockReturnValueOnce(makeFailingAdapter(new Error("spawn failed")) as any);
 		const coordinator = new AgentCoordinator(mockConfig, "/tmp");
 		const results = await coordinator.broadcast(["gemini", "claude"], "hello");
 		expect(results).toHaveLength(2);
-		// First succeeds
 		expect(results[0].agent).toBe("gemini");
 		expect(results[0].error).toBeUndefined();
-		// Second fails — handled in catch
 		expect(results[1].agent).toBe("claude");
 		expect(results[1].error).toBe("spawn failed");
 		expect(results[1].stopReason).toBe("error");
 	});
 
 	it("broadcast handles non-Error throws", async () => {
-		vi.mocked(createAdapter).mockReturnValue(makeFailingAdapter("string error" as any) as any);
+		mockCreateAdapter.mockReturnValue(makeFailingAdapter("string error" as any) as any);
 		const coordinator = new AgentCoordinator(mockConfig, "/tmp");
 		const results = await coordinator.broadcast(["gemini"], "hello");
 		expect(results[0].error).toBe("string error");
 	});
 
 	it("compare returns structured comparison", async () => {
-		vi.mocked(createAdapter).mockReturnValue(makeMockAdapter() as any);
+		mockCreateAdapter.mockReturnValue(makeMockAdapter() as any);
 		const coordinator = new AgentCoordinator(mockConfig, "/tmp");
 		const comparison = await coordinator.compare(["gemini", "claude"], "test prompt");
 		expect(comparison.prompt).toBe("test prompt");
@@ -119,13 +116,13 @@ describe("AgentCoordinator — broadcast/compare branches", () => {
 	});
 
 	it("delegate throws for unknown agent", async () => {
-		vi.mocked(createAdapter).mockReturnValue(makeMockAdapter() as any);
+		mockCreateAdapter.mockReturnValue(makeMockAdapter() as any);
 		const coordinator = new AgentCoordinator(mockConfig, "/tmp");
 		await expect(coordinator.delegate("unknown", "hello")).rejects.toThrow('Agent "unknown" not found');
 	});
 
 	it("delegate resolves with default agent", async () => {
-		vi.mocked(createAdapter).mockReturnValue(makeMockAdapter() as any);
+		mockCreateAdapter.mockReturnValue(makeMockAdapter() as any);
 		const coordinator = new AgentCoordinator(mockConfig, "/tmp");
 		const result = await coordinator.delegate("gemini", "hello");
 		expect(result.text).toBe("response");

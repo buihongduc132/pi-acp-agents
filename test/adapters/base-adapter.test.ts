@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { Readable, Writable } from "node:stream";
 import type { AcpAdapterOptions } from "../../src/adapters/base.js";
 import { AcpAgentAdapter } from "../../src/adapters/base.js";
 
 // Mock child_process
-vi.mock("node:child_process", () => ({
-	spawn: vi.fn(() => {
+mock.module("node:child_process", () => ({
+	spawn: mock(() => {
 		const { Writable, Readable } = require("node:stream");
 		const { EventEmitter } = require("node:events");
 		return {
@@ -13,29 +13,29 @@ vi.mock("node:child_process", () => ({
 			stdout: new Readable({ read() {} }),
 			stderr: new EventEmitter(),
 			killed: false,
-			kill: vi.fn(),
-			on: vi.fn(),
+			kill: mock(),
+			on: mock(),
 		};
 	}),
 }));
 
-vi.mock("../../src/core/circuit-breaker.js", () => ({
-	killWithEscalation: vi.fn(),
+mock.module("../../src/core/circuit-breaker.js", () => ({
+	killWithEscalation: mock(),
 }));
 
-vi.mock("../../src/core/protocol-validator.js", () => ({
-	classifyConnectionError: vi.fn((err) => err),
-	validateInitializeResponse: vi.fn(),
-	validateNewSessionResponse: vi.fn(),
-	validatePromptResponse: vi.fn(),
+mock.module("../../src/core/protocol-validator.js", () => ({
+	classifyConnectionError: mock((err) => err),
+	validateInitializeResponse: mock(),
+	validateNewSessionResponse: mock(),
+	validatePromptResponse: mock(),
 	AcpProtocolError: class extends Error {
 		constructor(public details: any) { super(details.message); this.name = "AcpProtocolError"; }
 	},
 }));
 
-vi.mock("../../src/logger.js", () => ({
-	createNoopLogger: vi.fn(() => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() })),
-	createFileLogger: vi.fn(() => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() })),
+mock.module("../../src/logger.js", () => ({
+	createNoopLogger: mock(() => ({ info: mock(), error: mock(), debug: mock() })),
+	createFileLogger: mock(() => ({ info: mock(), error: mock(), debug: mock() })),
 }));
 
 /** Concrete subclass for testing */
@@ -53,7 +53,6 @@ function makeOpts(overrides: Partial<AcpAdapterOptions> = {}): AcpAdapterOptions
 
 describe("AcpAgentAdapter (base)", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("constructor", () => {
@@ -78,7 +77,7 @@ describe("AcpAgentAdapter (base)", () => {
 		});
 
 		it("stores onActivity callback", () => {
-			const cb = vi.fn();
+			const cb = mock();
 			const adapter = new TestAdapter(makeOpts({ onActivity: cb }));
 			expect(adapter["onActivity"]).toBe(cb);
 		});

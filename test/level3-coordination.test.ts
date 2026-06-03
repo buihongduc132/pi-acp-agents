@@ -4,7 +4,7 @@
  * Tests that acp_delegate, acp_broadcast, and acp_compare tools
  * are registered in the extension entry point with correct parameters.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, mock } from "bun:test";
 
 function createMockPi() {
   const tools: Array<{ name: string; parameters: any; description: string }> = [];

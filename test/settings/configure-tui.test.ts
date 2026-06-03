@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join as pathJoin } from "node:path";
 import { tmpdir } from "node:os";
 
 // Mock node:os to override homedir but keep tmpdir
-vi.mock("node:os", async (importOriginal) => {
+mock.module("node:os", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:os")>();
 	const fakeHome = pathJoin(actual.tmpdir(), `acp-configure-test-${process.pid}`);
 	return {
@@ -35,10 +35,10 @@ describe("configureToolSettings", () => {
 		const ctx = {
 			hasUI: false,
 			ui: {
-				confirm: vi.fn(),
-				input: vi.fn(),
-				notify: vi.fn(),
-				select: vi.fn(),
+				confirm: mock(),
+				input: mock(),
+				notify: mock(),
+				select: mock(),
 			},
 		};
 		const result = await configureToolSettings(ctx, tmpDir);
@@ -53,10 +53,10 @@ describe("configureToolSettings", () => {
 		const ctx = {
 			hasUI: true,
 			ui: {
-				confirm: vi.fn(),
-				input: vi.fn(),
-				notify: vi.fn(),
-				select: vi.fn(async (_prompt: string, _items: string[]) => {
+				confirm: mock(),
+				input: mock(),
+				notify: mock(),
+				select: mock(async (_prompt: string, _items: string[]) => {
 					return "Done";
 				}),
 			},
@@ -70,10 +70,10 @@ describe("configureToolSettings", () => {
 		const ctx = {
 			hasUI: true,
 			ui: {
-				confirm: vi.fn(),
-				input: vi.fn(),
-				notify: vi.fn(),
-				select: vi.fn(async () => undefined),
+				confirm: mock(),
+				input: mock(),
+				notify: mock(),
+				select: mock(async () => undefined),
 			},
 		};
 		const result = await configureToolSettings(ctx, tmpDir);
@@ -86,10 +86,10 @@ describe("configureToolSettings", () => {
 		const ctx = {
 			hasUI: true,
 			ui: {
-				confirm: vi.fn(),
-				input: vi.fn(),
-				notify: vi.fn(),
-				select: vi.fn(async (_prompt: string, items: string[]) => {
+				confirm: mock(),
+				input: mock(),
+				notify: mock(),
+				select: mock(async (_prompt: string, items: string[]) => {
 					selectCount++;
 					if (selectCount === 1) {
 						return items.find((i: string) => i.startsWith("Core"));
@@ -125,10 +125,10 @@ describe("configureToolSettings", () => {
 		const ctx = {
 			hasUI: true,
 			ui: {
-				confirm: vi.fn(),
-				input: vi.fn(),
-				notify: vi.fn(),
-				select: vi.fn(async (_prompt: string, items: string[]) => {
+				confirm: mock(),
+				input: mock(),
+				notify: mock(),
+				select: mock(async (_prompt: string, items: string[]) => {
 					selectCount++;
 					if (selectCount === 1) {
 						return items.find((i: string) => i.startsWith("Core"));

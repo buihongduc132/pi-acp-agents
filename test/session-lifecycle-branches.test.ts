@@ -1,7 +1,7 @@
 /**
  * Branch coverage for session-lifecycle.ts — getSessionPruneReason
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { getSessionPruneReason, getSessionAutoCloseReason, isSessionAutoClosable } from "../src/core/session-lifecycle.js";
 
 describe("session-lifecycle — branch coverage", () => {

@@ -1,19 +1,19 @@
 /**
  * Tests for all 33 MCP tools registered by index.ts
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, mock } from "bun:test";
 import type { AcpSessionHandle } from "../src/config/types.js";
 
-vi.mock("../src/config/config.js", async (imp) => ({ ...await imp(), loadConfig: vi.fn() }));
-vi.mock("../src/core/session-manager.js", async (imp) => ({ ...await imp(), SessionManager: vi.fn() }));
-vi.mock("../src/management/task-store.js", async (imp) => ({ ...await imp(), AcpTaskStore: vi.fn() }));
-vi.mock("../src/management/mailbox-manager.js", async (imp) => ({ ...await imp(), MailboxManager: vi.fn() }));
-vi.mock("../src/management/governance-store.js", async (imp) => ({ ...await imp(), GovernanceStore: vi.fn() }));
-vi.mock("../src/management/event-log.js", async (imp) => ({ ...await imp(), AcpEventLog: vi.fn() }));
-vi.mock("../src/management/session-archive-store.js", () => ({
+mock.module("../src/config/config.js", () => ({ loadConfig: mock() }));
+mock.module("../src/core/session-manager.js", () => ({ SessionManager: mock() }));
+mock.module("../src/management/task-store.js", () => ({ AcpTaskStore: mock() }));
+mock.module("../src/management/mailbox-manager.js", () => ({ MailboxManager: mock() }));
+mock.module("../src/management/governance-store.js", () => ({ GovernanceStore: mock() }));
+mock.module("../src/management/event-log.js", () => ({ AcpEventLog: mock() }));
+mock.module("../src/management/session-archive-store.js", () => ({
 	SessionArchiveStore: class MockSessionArchiveStore {
-		get = vi.fn((sessionId: string) => sessionArchiveMappings.get(sessionId));
-		upsert = vi.fn((session: AcpSessionHandle) => {
+		get = mock((sessionId: string) => sessionArchiveMappings.get(sessionId));
+		upsert = mock((session: AcpSessionHandle) => {
 			sessionArchiveMappings.set(session.sessionId, session);
 			return session;
 		});
@@ -21,11 +21,11 @@ vi.mock("../src/management/session-archive-store.js", () => ({
 }));
 const sessionArchiveMappings = new Map<string, AcpSessionHandle>();
 const sessionNameMappings = new Map<string, string>();
-vi.mock("../src/management/session-name-store.js", () => ({
+mock.module("../src/management/session-name-store.js", () => ({
 	SessionNameStore: class MockSessionNameStore {
-		getSessionId = vi.fn((sessionName: string) => sessionNameMappings.get(sessionName));
-		getName = vi.fn((sessionId: string) => Array.from(sessionNameMappings.entries()).find(([, id]) => id === sessionId)?.[0]);
-		register = vi.fn((sessionName: string, sessionId: string) => {
+		getSessionId = mock((sessionName: string) => sessionNameMappings.get(sessionName));
+		getName = mock((sessionId: string) => Array.from(sessionNameMappings.entries()).find(([, id]) => id === sessionId)?.[0]);
+		register = mock((sessionName: string, sessionId: string) => {
 			const existing = sessionNameMappings.get(sessionName);
 			if (existing && existing !== sessionId) {
 				throw new Error(`Session name "${sessionName}" is already assigned to session "${existing}".`);
@@ -35,7 +35,7 @@ vi.mock("../src/management/session-name-store.js", () => ({
 		});
 	},
 }));
-vi.mock("../src/management/runtime-paths.js", () => ({
+mock.module("../src/management/runtime-paths.js", () => ({
 	ensureRuntimeDir: () => ({
 		rootDir: "/mock/runtime", tasksFile: "/mock/runtime/tasks.json",
 		mailboxesFile: "/mock/runtime/mailboxes.json", governanceFile: "/mock/runtime/governance.json",
@@ -43,12 +43,12 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json",
 	}),
 }));
-vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
-vi.mock("../src/core/circuit-breaker.js", async (imp) => ({ ...await imp(), AcpCircuitBreaker: vi.fn() }));
-vi.mock("../src/core/health-monitor.js", async (imp) => ({ ...await imp(), HealthMonitor: vi.fn() }));
-vi.mock("../src/adapter-factory.js", async (imp) => ({ ...await imp(), createAdapter: vi.fn() }));
-vi.mock("../src/coordination/coordinator.js", async (imp) => ({ ...await imp(), AgentCoordinator: vi.fn() }));
-vi.mock("../src/acp-widget.js", () => ({ createAcpWidget: () => () => ({ render: vi.fn() }) }));
+mock.module("../src/logger.js", () => ({ createFileLogger: () => ({ info: mock(), error: mock(), debug: mock() }) }));
+mock.module("../src/core/circuit-breaker.js", () => ({ AcpCircuitBreaker: mock() }));
+mock.module("../src/core/health-monitor.js", () => ({ HealthMonitor: mock() }));
+mock.module("../src/adapter-factory.js", () => ({ createAdapter: mock() }));
+mock.module("../src/coordination/coordinator.js", () => ({ AgentCoordinator: mock() }));
+mock.module("../src/acp-widget.js", () => ({ createAcpWidget: () => () => ({ render: mock() }) }));
 
 import main from "../index.js";
 import { loadConfig } from "../src/config/config.js";
@@ -71,37 +71,36 @@ const CFG = {
 function mkSession(id: string, agent = "gemini", sessionName?: string): AcpSessionHandle {
 	return { sessionId: id, sessionName, agentName: agent, cwd: "/tmp", createdAt: new Date(), lastActivityAt: new Date(),
 		lastResponseAt: undefined, completedAt: undefined, accumulatedText: "", disposed: false, busy: false,
-		autoClosed: false, closeReason: undefined, planStatus: "none", dispose: vi.fn() };
+		autoClosed: false, closeReason: undefined, planStatus: "none", dispose: mock() };
 }
 
 describe("ACP Extension Tools", () => {
 	let tools: Map<string, any>;
 	let m: any;
-	const ctx = { cwd: "/project", ui: { setWidget: vi.fn(), notify: vi.fn() } };
+	const ctx = { cwd: "/project", ui: { setWidget: mock(), notify: mock() } };
 
 	beforeEach(() => {
-		vi.clearAllMocks();
 		sessionArchiveMappings.clear();
 		sessionNameMappings.clear();
 		tools = new Map();
 		m = {
-			sm: { add: vi.fn(), get: vi.fn(), list: vi.fn(() => []), listByAgent: vi.fn(() => []), remove: vi.fn(), disposeAll: vi.fn(), pruneStale: vi.fn(async () => ({ removedSessionIds: [] })), size: 0 },
-			ts: { create: vi.fn((i) => ({ id: "t1", subject: i.subject, description: i.description ?? null, status: "pending", assignee: i.assignee ?? null, blockedBy: [], result: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })),
-				get: vi.fn(), update: vi.fn((_id, mut) => { const t: any = { id: _id, subject: "mock", status: "pending", blockedBy: [], assignee: null, result: null, createdAt: "", updatedAt: "" }; mut(t); return t; }),
-				list: vi.fn(() => []), clear: vi.fn(() => ({ removed: 0, remaining: 0 })) },
-			mb: { send: vi.fn((i) => ({ id: "m1", from: i.from, to: i.to, message: i.message, kind: i.kind, createdAt: new Date().toISOString() })),
-				listFor: vi.fn(() => []), clearFor: vi.fn(() => 0) },
-			gs: { getPlan: vi.fn(), requestPlan: vi.fn((a) => ({ agent: a, status: "pending", requestedAt: new Date().toISOString() })),
-				resolvePlan: vi.fn((a, s) => ({ agent: a, status: s, requestedAt: new Date().toISOString(), resolvedAt: new Date().toISOString() })),
-				getModelPolicy: vi.fn(() => ({ allowedModels: [], blockedModels: [] })), setModelPolicy: vi.fn(), checkModel: vi.fn(() => ({ ok: true, reason: "" })) },
-			el: { append: vi.fn() },
-			cb: { execute: vi.fn(async (fn: () => any) => fn()), state: "closed" },
-			hm: { start: vi.fn(), stop: vi.fn(), register: vi.fn(), touch: vi.fn(), markPromptStart: vi.fn(), markPromptEnd: vi.fn() },
-			ad: { spawn: vi.fn(), initialize: vi.fn(), newSession: vi.fn(async () => "ses-1"), loadSession: vi.fn(async (sessionId?: string) => sessionId ?? "ses-l"),
-				prompt: vi.fn(async () => ({ text: "response", stopReason: "end_turn", sessionId: "ses-1" })), setModel: vi.fn(), setMode: vi.fn(), cancel: vi.fn(), dispose: vi.fn() },
-			co: { delegate: vi.fn(async () => ({ text: "delegated", stopReason: "end_turn", sessionId: "d1" })),
-				broadcast: vi.fn(async () => [{ agent: "gemini", text: "g" }, { agent: "claude", text: "c" }]),
-				compare: vi.fn(async () => ({ responses: [{ agent: "gemini", text: "go" }, { agent: "claude", text: "co" }], timestamp: new Date().toISOString() })) },
+			sm: { add: mock(), get: mock(), list: mock(() => []), listByAgent: mock(() => []), remove: mock(), disposeAll: mock(), pruneStale: mock(async () => ({ removedSessionIds: [] })), size: 0 },
+			ts: { create: mock((i) => ({ id: "t1", subject: i.subject, description: i.description ?? null, status: "pending", assignee: i.assignee ?? null, blockedBy: [], result: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })),
+				get: mock(), update: mock((_id, mut) => { const t: any = { id: _id, subject: "mock", status: "pending", blockedBy: [], assignee: null, result: null, createdAt: "", updatedAt: "" }; mut(t); return t; }),
+				list: mock(() => []), clear: mock(() => ({ removed: 0, remaining: 0 })) },
+			mb: { send: mock((i) => ({ id: "m1", from: i.from, to: i.to, message: i.message, kind: i.kind, createdAt: new Date().toISOString() })),
+				listFor: mock(() => []), clearFor: mock(() => 0) },
+			gs: { getPlan: mock(), requestPlan: mock((a) => ({ agent: a, status: "pending", requestedAt: new Date().toISOString() })),
+				resolvePlan: mock((a, s) => ({ agent: a, status: s, requestedAt: new Date().toISOString(), resolvedAt: new Date().toISOString() })),
+				getModelPolicy: mock(() => ({ allowedModels: [], blockedModels: [] })), setModelPolicy: mock(), checkModel: mock(() => ({ ok: true, reason: "" })) },
+			el: { append: mock() },
+			cb: { execute: mock(async (fn: () => any) => fn()), state: "closed" },
+			hm: { start: mock(), stop: mock(), register: mock(), touch: mock(), markPromptStart: mock(), markPromptEnd: mock() },
+			ad: { spawn: mock(), initialize: mock(), newSession: mock(async () => "ses-1"), loadSession: mock(async (sessionId?: string) => sessionId ?? "ses-l"),
+				prompt: mock(async () => ({ text: "response", stopReason: "end_turn", sessionId: "ses-1" })), setModel: mock(), setMode: mock(), cancel: mock(), dispose: mock() },
+			co: { delegate: mock(async () => ({ text: "delegated", stopReason: "end_turn", sessionId: "d1" })),
+				broadcast: mock(async () => [{ agent: "gemini", text: "g" }, { agent: "claude", text: "c" }]),
+				compare: mock(async () => ({ responses: [{ agent: "gemini", text: "go" }, { agent: "claude", text: "co" }], timestamp: new Date().toISOString() })) },
 		};
 
 		(loadConfig as any).mockReturnValue(CFG);
@@ -115,7 +114,7 @@ describe("ACP Extension Tools", () => {
 		(createAdapter as any).mockImplementation(function() { return m.ad; });
 		(AgentCoordinator as any).mockImplementation(function() { return m.co; });
 
-		main({ registerTool: vi.fn((t: any) => tools.set(t.name, t)), registerCommand: vi.fn(), on: vi.fn() } as any);
+		main({ registerTool: mock((t: any) => tools.set(t.name, t)), registerCommand: mock(), on: mock() } as any);
 	});
 
 	const exec = (name: string, params: any) => tools.get(name)!.execute("t", params, undefined, undefined, ctx);

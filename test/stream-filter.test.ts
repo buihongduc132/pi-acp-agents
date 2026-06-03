@@ -4,7 +4,7 @@
  * Verifies that non-JSON lines (stack traces, MCP errors) are filtered
  * before reaching ndJsonStream, preventing "Failed to parse JSON message" noise.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { TextEncoder, TextDecoder } from "node:util";
 
 // Inline the filter function for unit testing (mirrors client.ts createFilteredStdoutStream)

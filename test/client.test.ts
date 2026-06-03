@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, mock } from "bun:test";
 import { createMockAgent } from "./helpers/mock-acp-server.js";
 import { ndJsonStream, ClientSideConnection } from "@agentclientprotocol/sdk";
 import type { PromptResponse } from "@agentclientprotocol/sdk";

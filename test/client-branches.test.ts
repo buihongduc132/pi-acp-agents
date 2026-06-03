@@ -3,60 +3,54 @@
  * Targets: createFilteredStdoutStream, handleSessionUpdate branches,
  * stderr truncation, quickPrompt lifecycle, setModel/setMode without session
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Readable, Writable } from "node:stream";
+import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { Readable, Writable, EventEmitter } from "node:stream";
 
 // Mock child_process
-const mockSpawn = vi.fn();
-vi.mock("node:child_process", () => ({
-	spawn: (...args: any[]) => mockSpawn(...args),
+const mockSpawn = mock((...args: any[]) => {
+	throw new Error("spawn ENOENT");
+});
+mock.module("node:child_process", () => ({
+	spawn: mockSpawn,
 }));
 
 // Mock circuit-breaker
-vi.mock("../src/core/circuit-breaker.js", () => ({
-	killWithEscalation: vi.fn(),
+mock.module("../src/core/circuit-breaker.js", () => ({
+	killWithEscalation: mock(),
 }));
 
-// Mock protocol-validator — must export AcpProtocolError class
-vi.mock("../src/core/protocol-validator.js", async (importOriginal) => {
-	const actual = await importOriginal() as any;
-	return {
-		...actual,
-		classifyConnectionError: vi.fn((err) => err),
-		validateInitializeResponse: vi.fn(),
-		validateNewSessionResponse: vi.fn(),
-		validatePromptResponse: vi.fn(),
-	};
-});
+// Mock protocol-validator
+mock.module("../src/core/protocol-validator.js", () => ({
+	AcpProtocolError: class AcpProtocolError extends Error {},
+	classifyConnectionError: (err: Error) => err,
+	validateInitializeResponse: mock(),
+	validateNewSessionResponse: mock(),
+	validatePromptResponse: mock(),
+}));
 
 // Mock logger
-vi.mock("../src/logger.js", () => ({
-	createFileLogger: vi.fn(() => ({
-		info: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
+mock.module("../src/logger.js", () => ({
+	createFileLogger: mock(() => ({
+		info: mock(),
+		error: mock(),
+		debug: mock(),
 	})),
-	createNoopLogger: vi.fn(() => ({
-		info: vi.fn(),
-		error: vi.fn(),
-		debug: vi.fn(),
+	createNoopLogger: mock(() => ({
+		info: mock(),
+		error: mock(),
+		debug: mock(),
 	})),
 }));
 
 import { AcpClient } from "../src/core/client.js";
-import { EventEmitter } from "node:events";
 
 function createMockProc() {
 	const proc = new EventEmitter() as any;
 	proc.stdin = new Writable() as any;
 	proc.stdout = new Readable({ read() {} }) as any;
 	proc.stderr = new EventEmitter() as any;
-	proc.stderr.on = vi.fn((event: string, cb: (...args: any[]) => void) => {
-		EventEmitter.prototype.on.call(proc.stderr, event, cb);
-		return proc.stderr;
-	});
 	proc.killed = false;
-	proc.kill = vi.fn(() => { proc.killed = true; });
+	proc.kill = mock(() => { proc.killed = true; });
 	return proc;
 }
 
@@ -71,7 +65,6 @@ function makeClient(opts: any = {}) {
 
 describe("AcpClient — branch coverage", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("connect — spawn failure", () => {
@@ -181,7 +174,6 @@ describe("AcpClient — branch coverage", () => {
 			// Access private field
 			const stderr = (client as any).lastStderr;
 			expect(stderr.length).toBeLessThanOrEqual(2048);
-			// Should keep last 2048
 			expect(stderr.length).toBe(2048);
 		});
 	});
@@ -198,17 +190,9 @@ describe("AcpClient — branch coverage", () => {
 		});
 	});
 
-	describe("quickPrompt — connect + initialize + newSession + prompt", () => {
-		it("calls connect + initialize when not connected", async () => {
-			const proc = createMockProc();
-			mockSpawn.mockReturnValue(proc);
+	describe("quickPrompt", () => {
+		it("quickPrompt method exists", async () => {
 			const client = makeClient();
-
-			// We need to mock the connection to make initialize/newSession/prompt work
-			// This tests the quickPrompt lifecycle path
-			const connectSpy = vi.spyOn(client as any, "connect");
-			// Since we can't fully mock the connection without the SDK, 
-			// we test the branching logic by verifying the method exists
 			expect(typeof client.quickPrompt).toBe("function");
 		});
 	});

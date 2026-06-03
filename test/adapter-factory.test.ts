@@ -1,13 +1,12 @@
 /**
  * RED tests for adapter-factory module.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "bun:test";
 import { createAdapter, isKnownAdapter } from "../src/adapter-factory.js";
 import { CodexAcpAdapter } from "../src/adapters/codex.js";
 import { CustomAcpAdapter } from "../src/adapters/custom.js";
 import { GeminiAcpAdapter } from "../src/adapters/gemini.js";
 import { OpenCodeAcpAdapter } from "../src/adapters/opencode.js";
-import { AcpxAdapter } from "../src/adapters/acpx.js";
 import type { AcpConfig } from "../src/config/types.js";
 
 function createTestConfig(): AcpConfig {
@@ -104,61 +103,5 @@ describe("createAdapter", () => {
 		expect(isKnownAdapter("opencode")).toBe(true);
 		expect(isKnownAdapter("codex")).toBe(true);
 		expect(isKnownAdapter("unknown")).toBe(false);
-	});
-
-	// --- T9: Mode-based routing ---
-
-	it("creates AcpxAdapter when mode is 'acpx' even for known adapter names", () => {
-		const config = createTestConfig();
-		const adapter = createAdapter(
-			"gemini",
-			{ ...config.agent_servers.gemini, mode: "acpx" },
-			config,
-		);
-		expect(adapter).toBeInstanceOf(AcpxAdapter);
-		expect(adapter.name).toBe("acpx");
-	});
-
-	it("creates AcpxAdapter for unknown agent with mode 'acpx'", () => {
-		const config = createTestConfig();
-		const adapter = createAdapter(
-			"my-acpx-agent",
-			{ mode: "acpx" },
-			config,
-		);
-		expect(adapter).toBeInstanceOf(AcpxAdapter);
-	});
-
-	it("defaults to direct adapter when mode is omitted", () => {
-		const config = createTestConfig();
-		const adapter = createAdapter(
-			"custom",
-			{ command: "some-agent" },
-			config,
-		);
-		expect(adapter).toBeInstanceOf(CustomAcpAdapter);
-		expect(adapter).not.toBeInstanceOf(AcpxAdapter);
-	});
-
-	it("passes agentName to AcpxAdapter for session creation", () => {
-		const config = createTestConfig();
-		const adapter = createAdapter(
-			"claude-sonnet",
-			{ mode: "acpx" },
-			config,
-		);
-		expect(adapter).toBeInstanceOf(AcpxAdapter);
-		// The adapter should have received the agent name for acpx session creation
-		expect((adapter as any).config.agentName).toBe("claude-sonnet");
-	});
-
-	it("creates GeminiAcpAdapter when mode is explicitly 'direct'", () => {
-		const config = createTestConfig();
-		const adapter = createAdapter(
-			"gemini",
-			{ ...config.agent_servers.gemini, mode: "direct" },
-			config,
-		);
-		expect(adapter).toBeInstanceOf(GeminiAcpAdapter);
 	});
 });

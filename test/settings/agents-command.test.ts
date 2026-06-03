@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -7,11 +7,11 @@ import { tmpdir } from "node:os";
 let _configPath = "";
 const _configStore: Record<string, any> = {};
 
-vi.mock("node:child_process", () => ({
-	execSync: vi.fn(() => Buffer.from("/usr/bin/gemini")),
+mock.module("node:child_process", () => ({
+	execSync: mock(() => Buffer.from("/usr/bin/gemini")),
 }));
 
-vi.mock("../../src/config/config.js", () => ({
+mock.module("../../src/config/config.js", () => ({
 	loadConfig: () => {
 		if (!_configPath) return { agent_servers: {} };
 		try {

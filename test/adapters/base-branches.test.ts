@@ -3,7 +3,7 @@
  * Targets: initialize/prompt/newSession/loadSession/setModel/setMode without spawn,
  * cancel when no client, dispose with client, connected getter
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "bun:test";
 import { AcpAgentAdapter } from "../../src/adapters/base.js";
 import type { AcpAgentConfig } from "../../src/config/types.js";
 

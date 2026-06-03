@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { HealthMonitor, type HealthMonitorable } from "../src/core/health-monitor.js";
 
 function createMockSession(id: string, opts: Partial<HealthMonitorable> = {}): HealthMonitorable {
@@ -42,7 +42,7 @@ describe("HealthMonitor — prompt stall detection", () => {
 			isPrompting: true,
 			lastActivityAt: new Date(Date.now() - 200),
 		});
-		const onNeedsAttention = vi.fn().mockResolvedValue(undefined);
+		const onNeedsAttention = mock().mockResolvedValue(undefined);
 		const mon = new HealthMonitor({
 			intervalMs: 30,
 			staleTimeoutMs: 600_000,
@@ -94,7 +94,7 @@ describe("HealthMonitor — prompt stall detection", () => {
 	});
 
 	it("calls onStale for stalled prompts via start() loop", async () => {
-		const onStale = vi.fn().mockResolvedValue(undefined);
+		const onStale = mock().mockResolvedValue(undefined);
 		const mon = new HealthMonitor({
 			intervalMs: 50,
 			staleTimeoutMs: 600_000,
@@ -129,7 +129,7 @@ describe("HealthMonitor — prompt stall detection", () => {
 	});
 
 	it("markPromptStart resets attentionNotified flag", async () => {
-		const onNeedsAttention = vi.fn().mockResolvedValue(undefined);
+		const onNeedsAttention = mock().mockResolvedValue(undefined);
 		const mon = new HealthMonitor({
 			intervalMs: 30,
 			staleTimeoutMs: 600_000,
@@ -157,7 +157,7 @@ describe("HealthMonitor — prompt stall detection", () => {
 	});
 
 	it("onNeedsAttention errors are caught gracefully", async () => {
-		const onNeedsAttention = vi.fn().mockRejectedValue(new Error("callback fail"));
+		const onNeedsAttention = mock().mockRejectedValue(new Error("callback fail"));
 		const mon = new HealthMonitor({
 			intervalMs: 50,
 			staleTimeoutMs: 600_000,
@@ -176,7 +176,7 @@ describe("HealthMonitor — prompt stall detection", () => {
 	});
 
 	it("onStale callback error is caught in start() loop", async () => {
-		const onStale = vi.fn().mockRejectedValue(new Error("stale fail"));
+		const onStale = mock().mockRejectedValue(new Error("stale fail"));
 		const mon = new HealthMonitor({
 			intervalMs: 50,
 			staleTimeoutMs: 100,

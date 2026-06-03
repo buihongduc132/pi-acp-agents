@@ -11,7 +11,7 @@
  *   4. executeWithStallTimeout must accept per-call overrides
  *   5. safeExecute must pass tool-specific timeouts to cb.execute
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { AcpCircuitBreaker } from "../src/core/circuit-breaker.js";
 import { DEFAULT_CONFIG, validateConfig } from "../src/config/config.js";
 import type { AcpConfig } from "../src/config/types.js";

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { SessionManager } from "../src/core/session-manager.js";
 import type { AcpSessionHandle } from "../src/config/types.js";
 

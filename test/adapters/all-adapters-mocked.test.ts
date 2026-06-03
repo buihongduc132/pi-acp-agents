@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, mock, beforeEach } from "bun:test";
 
-vi.mock("node:child_process", () => ({
-	execSync: vi.fn(),
+mock.module("node:child_process", () => ({
+	execSync: mock(),
 }));
 
 import { GeminiAcpAdapter } from "../../src/adapters/gemini.js";
@@ -10,11 +10,10 @@ import { OpenCodeAcpAdapter } from "../../src/adapters/opencode.js";
 
 import { execSync } from "node:child_process";
 
-const mockExec = execSync as ReturnType<typeof vi.fn>;
+const mockExec = execSync as ReturnType<typeof mock>;
 
 describe("adapters/gemini (mocked)", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("isAvailable", () => {
@@ -68,7 +67,6 @@ describe("adapters/gemini (mocked)", () => {
 
 describe("adapters/codex (mocked)", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("isAvailable", () => {
@@ -116,7 +114,6 @@ describe("adapters/codex (mocked)", () => {
 
 describe("adapters/opencode (mocked)", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("isAvailable", () => {
