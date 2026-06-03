@@ -18,3 +18,5 @@ sgconfig.yml
 .gitnexus/
 .gitnexusignore
 .bug-hunter/
+bun.lock
+bunfig.toml
