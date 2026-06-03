@@ -8,6 +8,25 @@
 import { createAdapter } from "../adapter-factory.js";
 import { AliasResolver } from "./alias-resolver.js";
 import type { AcpConfig, AcpPromptResult } from "../config/types.js";
+import type { CancelFn } from "./alias-resolver.js";
+
+/** Merge two AbortSignals — aborts when either one aborts */
+function mergeSignals(
+	a?: AbortSignal,
+	b?: AbortSignal,
+): AbortSignal | undefined {
+	if (!a && !b) return undefined;
+	if (a && !b) return a;
+	if (!a && b) return b;
+	const ctrl = new AbortController();
+	if (a.aborted || b.aborted) {
+		ctrl.abort();
+		return ctrl.signal;
+	}
+	a.addEventListener("abort", () => ctrl.abort(), { once: true });
+	b.addEventListener("abort", () => ctrl.abort(), { once: true });
+	return ctrl.signal;
+}
 
 /** Progress update during delegation */
 export interface AcpDelegateProgress {
@@ -83,19 +102,36 @@ export class AgentCoordinator {
       const isHealthy = this.isHealthyFn;
       const recordSuccess = this.recordSuccessFn;
       const recordFailure = this.recordFailureFn;
+      // Build a cancelFn that can cancel in-flight delegate calls for this alias resolution
+      const activeDelegates = new Map<string, { signal: AbortController }>();
+      const cancelFn: CancelFn = (agentName: string) => {
+        const entry = activeDelegates.get(agentName);
+        if (entry) {
+          entry.signal.abort();
+          activeDelegates.delete(agentName);
+        }
+      };
       const resolver = new AliasResolver(
         { [agentName]: aliasConfig },
         async (name, msg, c) => {
+          const ctrl = new AbortController();
+          activeDelegates.set(name, { signal: ctrl });
+          // Merge with outer signal if provided
+          const merged = mergeSignals(signal, ctrl.signal);
           try {
-            const result = await this.delegateToAgent(name, msg, c, onProgress, signal);
+            const result = await this.delegateToAgent(name, msg, c, onProgress, merged);
             recordSuccess?.(name);
             return result;
           } catch (err) {
             recordFailure?.(name);
             throw err;
+          } finally {
+            activeDelegates.delete(name);
           }
         },
         (name) => isHealthy(name),
+        cancelFn,
+        { raceTimeoutMs: this.config.raceTimeoutMs },
       );
       return resolver.resolve(agentName, message, cwd);
     }

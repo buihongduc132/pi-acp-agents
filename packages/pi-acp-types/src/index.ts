@@ -60,6 +60,8 @@ export interface AcpConfig {
 	interruptGraceMs?: number;
 	/** Agent alias definitions for fallback chains */
 	agent_aliases?: Record<string, AcpAliasConfig>;
+	/** Timeout in milliseconds for race strategy (default: 30_000) */
+	raceTimeoutMs?: number;
 	runtimeDir?: string;
 	modelPolicy?: {
 		allowedModels?: string[];

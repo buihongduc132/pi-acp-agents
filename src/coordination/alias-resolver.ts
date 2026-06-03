@@ -41,16 +41,30 @@ export type DelegateFn = (
 
 export type IsHealthyFn = (agentName: string) => boolean;
 
+/** Called to cancel an in-flight request for a specific agent */
+export type CancelFn = (agentName: string) => void;
+
+/** Optional race strategy configuration */
+export interface RaceOptions {
+	raceTimeoutMs?: number;
+}
+
 // ---------------------------------------------------------------------------
 // AliasResolver
 // ---------------------------------------------------------------------------
 
 export class AliasResolver {
+	private readonly raceTimeoutMs: number;
+
 	constructor(
 		private readonly aliases: Record<string, AcpAliasConfig>,
 		private readonly delegateFn: DelegateFn,
 		private readonly isHealthyFn: IsHealthyFn,
-	) {}
+		private readonly cancelFn?: CancelFn,
+		private readonly raceOptions?: RaceOptions,
+	) {
+		this.raceTimeoutMs = raceOptions?.raceTimeoutMs ?? 30_000;
+	}
 
 	/**
 	 * Resolve an alias to a concrete agent result.
@@ -109,7 +123,9 @@ export class AliasResolver {
 	}
 
 	// -------------------------------------------------------------------------
-	// Race: dispatch to all healthy agents in parallel, first response wins
+	// Race: dispatch to all healthy agents in parallel, first response wins.
+	// EC-1: Timeout guard — rejects if no agent responds within raceTimeoutMs.
+	// EC-2: Cancels all losing agents once one wins (or on timeout).
 	// -------------------------------------------------------------------------
 
 	private async race(
@@ -120,28 +136,55 @@ export class AliasResolver {
 	): Promise<AcpPromptResult> {
 		if (agents.length === 0) throw new NoHealthyAgentsError(aliasName);
 
+		// Track which agents have settled for cancellation
+		const settledAgents = new Set<string>();
+
 		return new Promise<AcpPromptResult>((resolve, reject) => {
-			let settled = false;
+			let resolved = false;
 			let failureCount = 0;
 			const attempts: Array<{ agent: string; error: Error }> = [];
+
+			const cancelLosersAndSettle = (loserAgents: string[]) => {
+				for (const loser of loserAgents) {
+					if (!settledAgents.has(loser)) {
+						this.cancelFn?.(loser);
+					}
+				}
+			};
+
+			// EC-1: Timeout guard — if no agent resolves within raceTimeoutMs, reject
+			const timeoutId = setTimeout(() => {
+				if (!resolved) {
+					resolved = true;
+					cancelLosersAndSettle(agents);
+					reject(new Error(`Race for alias "${aliasName}" timed out after ${this.raceTimeoutMs}ms — all agents hung`));
+				}
+			}, this.raceTimeoutMs);
 
 			for (const agent of agents) {
 				this.delegateFn(agent, message, cwd)
 					.then((result) => {
-						if (!settled) {
-							settled = true;
+						if (!resolved) {
+							resolved = true;
+							settledAgents.add(agent);
+							clearTimeout(timeoutId);
+							// EC-2: Cancel all other in-flight agents
+							const losers = agents.filter((a) => a !== agent);
+							cancelLosersAndSettle(losers);
 							resolve(result);
 						}
 					})
 					.catch((err) => {
-						if (!settled) {
+						if (!resolved) {
+							settledAgents.add(agent);
 							attempts.push({
 								agent,
 								error: err instanceof Error ? err : new Error(String(err)),
 							});
 							failureCount++;
 							if (failureCount === agents.length) {
-								settled = true;
+								resolved = true;
+								clearTimeout(timeoutId);
 								reject(new AllAgentsFailedError(attempts, aliasName));
 							}
 						}
