@@ -820,7 +820,11 @@ export default function (pi: ExtensionAPI) {
       if (!config.agent_servers[agentName] && !config.agent_aliases?.[agentName]) {
         return { content: [textContent(`Agent \"${agentName}\" not found. Available: ${Object.keys(config.agent_servers).join(", ") || "none"}${config.agent_aliases ? `. Aliases: ${Object.keys(config.agent_aliases).join(", ")}` : ""}`)], details: { agent: agentName, error: "not found" } };
       }
-      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd);
+      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd, {
+        isHealthyFn: (name) => cb.isHealthy(name),
+        recordSuccessFn: (name) => cb.recordSuccess(name),
+        recordFailureFn: (name) => cb.recordFailure(name),
+      });
       beginWidgetActivity("delegate", ctx);
       const result = await safeExecute(async () => {
         const r = await coordinator.delegate(agentName, params.message, params.cwd ?? ctx.cwd);
@@ -858,7 +862,11 @@ export default function (pi: ExtensionAPI) {
       if (agentNames.length === 0) {
         return { content: [textContent("No agent servers configured or specified.")], details: { results: [], error: "no agents" } };
       }
-      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd);
+      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd, {
+        isHealthyFn: (name) => cb.isHealthy(name),
+        recordSuccessFn: (name) => cb.recordSuccess(name),
+        recordFailureFn: (name) => cb.recordFailure(name),
+      });
       beginWidgetActivity("broadcast", ctx);
       const result = await safeExecute(async () => {
         const output = await coordinator.broadcast(agentNames, params.message, params.cwd ?? ctx.cwd);
@@ -890,7 +898,11 @@ export default function (pi: ExtensionAPI) {
       if (agentNames.length === 0) {
         return { content: [textContent("No agent servers configured or specified.")], details: { comparison: null, error: "no agents" } };
       }
-      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd);
+      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd, {
+        isHealthyFn: (name) => cb.isHealthy(name),
+        recordSuccessFn: (name) => cb.recordSuccess(name),
+        recordFailureFn: (name) => cb.recordFailure(name),
+      });
       beginWidgetActivity("compare", ctx);
       const result = await safeExecute(async () => {
         const output = await coordinator.compare(agentNames, params.message, params.cwd ?? ctx.cwd);
@@ -924,7 +936,11 @@ export default function (pi: ExtensionAPI) {
       if (agentNames.length === 0) {
         return { content: [textContent("No agents specified or configured.")], details: { results: [], error: "no_agents" } };
       }
-      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd);
+      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd, {
+        isHealthyFn: (name) => cb.isHealthy(name),
+        recordSuccessFn: (name) => cb.recordSuccess(name),
+        recordFailureFn: (name) => cb.recordFailure(name),
+      });
       const results: Array<{ agent: string; text: string; sessionId: string; stopReason: string; error?: string }> = [];
 
       // Track each delegation in widget

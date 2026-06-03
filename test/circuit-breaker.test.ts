@@ -108,3 +108,56 @@ describe("AcpCircuitBreaker", () => {
     });
   });
 });
+
+// Per-agent circuit breaker tests (T4)
+describe("AcpCircuitBreaker — per-agent tracking", () => {
+  it("returns healthy for unknown agent (no history)", () => {
+    const cb = new AcpCircuitBreaker(2, 1000);
+    expect(cb.isHealthy("unknown-agent")).toBe(true);
+  });
+
+  it("records failures per-agent without affecting others", () => {
+    const cb = new AcpCircuitBreaker(2, 60_000);
+    cb.recordFailure("agent-a");
+    cb.recordFailure("agent-a");
+    // agent-a should be unhealthy
+    expect(cb.isHealthy("agent-a")).toBe(false);
+    // agent-b should still be healthy (independent tracking)
+    expect(cb.isHealthy("agent-b")).toBe(true);
+    expect(cb.isHealthy("agent-c")).toBe(true);
+  });
+
+  it("resets agent circuit on success", () => {
+    const cb = new AcpCircuitBreaker(2, 60_000);
+    cb.recordFailure("agent-a");
+    cb.recordFailure("agent-a");
+    expect(cb.isHealthy("agent-a")).toBe(false);
+    cb.recordSuccess("agent-a");
+    expect(cb.isHealthy("agent-a")).toBe(true);
+    expect(cb.getAgentState("agent-a")).toBe("closed");
+  });
+
+  it("transitions agent to half-open after reset timeout", async () => {
+    const cb = new AcpCircuitBreaker(1, 50);
+    cb.recordFailure("agent-a");
+    expect(cb.isHealthy("agent-a")).toBe(false);
+    expect(cb.getAgentState("agent-a")).toBe("open");
+    // Wait for reset timeout
+    await new Promise((r) => setTimeout(r, 60));
+    expect(cb.getAgentState("agent-a")).toBe("half-open");
+    expect(cb.isHealthy("agent-a")).toBe(true); // half-open = healthy (probe-able)
+  });
+
+  it("getAgentState returns closed for unknown agent", () => {
+    const cb = new AcpCircuitBreaker();
+    expect(cb.getAgentState("never-seen")).toBe("closed");
+  });
+
+  it("legacy execute() still works independently", async () => {
+    const cb = new AcpCircuitBreaker(1, 60_000);
+    await expect(cb.execute(async () => { throw new Error("boom"); })).rejects.toThrow();
+    expect(cb.state).toBe("open");
+    // Per-agent tracking should be unaffected
+    expect(cb.isHealthy("some-agent")).toBe(true);
+  });
+});

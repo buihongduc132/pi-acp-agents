@@ -34,11 +34,28 @@ export interface ComparisonResult {
   timestamp: string;
 }
 
+export interface AgentCoordinatorDeps {
+  /** Check if a specific agent's circuit breaker is healthy */
+  isHealthyFn?: (agentName: string) => boolean;
+  /** Record success/failure for circuit breaker tracking */
+  recordSuccessFn?: (agentName: string) => void;
+  recordFailureFn?: (agentName: string) => void;
+}
+
 export class AgentCoordinator {
+  private isHealthyFn: (agentName: string) => boolean;
+  private recordSuccessFn?: (agentName: string) => void;
+  private recordFailureFn?: (agentName: string) => void;
+
   constructor(
     private config: AcpConfig,
     private cwd: string,
-  ) {}
+    deps?: AgentCoordinatorDeps,
+  ) {
+    this.isHealthyFn = deps?.isHealthyFn ?? (() => true);
+    this.recordSuccessFn = deps?.recordSuccessFn;
+    this.recordFailureFn = deps?.recordFailureFn;
+  }
 
   /** Delegate a task to a single agent or alias. Creates a short-lived session. */
   async delegate(
@@ -63,10 +80,22 @@ export class AgentCoordinator {
     // Check if it's an alias first
     const aliasConfig = this.config.agent_aliases?.[agentName];
     if (aliasConfig) {
+      const isHealthy = this.isHealthyFn;
+      const recordSuccess = this.recordSuccessFn;
+      const recordFailure = this.recordFailureFn;
       const resolver = new AliasResolver(
         { [agentName]: aliasConfig },
-        (name, msg, c) => this.delegateToAgent(name, msg, c, onProgress, signal),
-        () => true, // circuit breaker check — simplified for now
+        async (name, msg, c) => {
+          try {
+            const result = await this.delegateToAgent(name, msg, c, onProgress, signal);
+            recordSuccess?.(name);
+            return result;
+          } catch (err) {
+            recordFailure?.(name);
+            throw err;
+          }
+        },
+        (name) => isHealthy(name),
       );
       return resolver.resolve(agentName, message, cwd);
     }
