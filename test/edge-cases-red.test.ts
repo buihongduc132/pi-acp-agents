@@ -52,7 +52,8 @@ describe("[RED] EC-1: Race — timeout guard for all-agents-hanging", () => {
 			{ hung: makeAliasConfig(["a", "b"], "race") },
 			delegateFn,
 			healthFn,
-			200, // 200ms race timeout
+			undefined,
+			{ raceTimeoutMs: 200 },
 		);
 
 		const start = Date.now();
@@ -94,7 +95,8 @@ describe("[RED] EC-2: Race — losing agents cancelled on winner", () => {
 			{ mixed: makeAliasConfig(["fast", "slow1", "slow2"], "race") },
 			delegateFn,
 			healthFn,
-			5000, // generous timeout
+			undefined,
+			{ raceTimeoutMs: 5000 },
 		);
 
 		const result = await resolver.resolve("mixed", "test");
@@ -120,7 +122,8 @@ describe("[RED] EC-2: Race — losing agents cancelled on winner", () => {
 			{ test: makeAliasConfig(["winner", "loser1", "loser2"], "race") },
 			delegateFn,
 			() => true,
-			2000,
+			undefined,
+			{ raceTimeoutMs: 2000 },
 		);
 
 		const result = await resolver.resolve("test", "go");

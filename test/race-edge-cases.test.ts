@@ -55,7 +55,7 @@ describe("EC-1: race() timeout guard", () => {
 		);
 
 		const start = Date.now();
-		await expect(resolver.resolve("hang", "test")).rejects.toThrow("timed out");
+		await expect(resolver.resolve("hang", "test")).rejects.toThrow("Race timeout");
 		const elapsed = Date.now() - start;
 		// Must reject within ~3x the timeout (not hang forever)
 		expect(elapsed).toBeLessThan(500);
@@ -194,7 +194,7 @@ describe("EC-2: cancel losing agents on winner", () => {
 			{ raceTimeoutMs: 50 },
 		);
 
-		await expect(resolver.resolve("allhang", "test")).rejects.toThrow("timed out");
+		await expect(resolver.resolve("allhang", "test")).rejects.toThrow("Race timeout");
 		// All hung agents should be cancelled on timeout
 		expect(cancelCalls).toContain("h1");
 		expect(cancelCalls).toContain("h2");

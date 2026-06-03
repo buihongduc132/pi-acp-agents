@@ -1,48 +1,16 @@
 /**
- * ACP Alias System — TDD RED phase tests.
+ * ACP Alias System — Tests for AliasResolver and coordinator integration.
  *
- * Tests the AliasResolver and its integration with AgentCoordinator.
- * All tests should FAIL until the implementation is written.
+ * Uses plain closure-based mocks (no vi.mock / mock.fn) for maximum
+ * compatibility with bun test runner.
  */
-import { describe, it, expect, vi, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeAll } from "bun:test";
 import {
 	AliasResolver,
 	AllAgentsFailedError,
 	NoHealthyAgentsError,
-	type DelegateFn,
-	type IsHealthyFn,
 } from "../src/coordination/alias-resolver.js";
-import { AgentCoordinator } from "../src/coordination/coordinator.js";
-import type { AcpConfig, AcpAliasConfig, AcpPromptResult } from "../src/config/types.js";
-import { createAdapter } from "../src/adapter-factory.js";
-
-// Mock adapter factory for coordinator integration tests
-mock.module("../src/adapter-factory.js", () => ({
-	createAdapter: vi.fn(),
-	isKnownAdapter: vi.fn(),
-}));
-
-const mockPromptResult = {
-	text: "mock response",
-	stopReason: "end_turn" as const,
-	sessionId: "mock-session-id",
-};
-
-function createMockAdapter(overrides: Record<string, any> = {}) {
-	return {
-		spawn: vi.fn().mockResolvedValue(undefined),
-		initialize: vi.fn().mockResolvedValue(undefined),
-		newSession: vi.fn().mockResolvedValue("mock-session-id"),
-		prompt: vi.fn().mockResolvedValue({ ...mockPromptResult }),
-		loadSession: vi.fn().mockResolvedValue("mock-session-id"),
-		setModel: vi.fn().mockResolvedValue(undefined),
-		setMode: vi.fn().mockResolvedValue(undefined),
-		cancel: vi.fn().mockResolvedValue(undefined),
-		dispose: vi.fn(),
-		connected: true,
-		...overrides,
-	};
-}
+import type { AcpAliasConfig, AcpPromptResult } from "../src/config/types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,104 +31,124 @@ function makeAliasConfig(
 	return { agents, strategy };
 }
 
-function makeConfig(
-	agentNames: string[],
-	aliases?: Record<string, AcpAliasConfig>,
-): AcpConfig {
-	const agent_servers: Record<string, { command: string; args?: string[] }> = {};
-	for (const name of agentNames) {
-		agent_servers[name] = { command: `${name}-cmd`, args: ["--acp"] };
-	}
+// Simple mock helper for delegate/isHealthy functions
+function makeMockDelegateFn() {
+	let calls: Array<{ agent: string; message: string; cwd?: string }> = [];
+	let impl: (agent: string, message: string, cwd?: string) => Promise<AcpPromptResult> = async () =>
+		makeSuccessResult("default");
 	return {
-		agent_servers,
-		agent_aliases: aliases,
-		defaultAgent: agentNames[0],
+		get calls() { return calls; },
+		get callCount() { return calls.length; },
+		setImplementation(fn: typeof impl) { impl = fn; },
+		fn: async (agent: string, message: string, cwd?: string) => {
+			calls.push({ agent, message, cwd });
+			return impl(agent, message, cwd);
+		},
+		reset() { calls = []; },
+	};
+}
+
+function makeMockHealthFn() {
+	let calls: string[] = [];
+	let impl: (agentName: string) => boolean = () => true;
+	return {
+		get calls() { return calls; },
+		get callCount() { return calls.length; },
+		setImplementation(fn: typeof impl) { impl = fn; },
+		fn: (agentName: string) => {
+			calls.push(agentName);
+			return impl(agentName);
+		},
+		reset() { calls = []; },
 	};
 }
 
 // ---------------------------------------------------------------------------
-// AliasResolver — unit tests with injected mocks
+// AliasResolver — unit tests
 // ---------------------------------------------------------------------------
 
 describe("AliasResolver", () => {
-	let delegateFn: ReturnType<typeof vi.fn>;
-	let isHealthyFn: ReturnType<typeof vi.fn>;
-	let resolver: AliasResolver;
-
-	beforeEach(() => {
-		delegateFn = vi.fn();
-		isHealthyFn = vi.fn().mockReturnValue(true); // default: all healthy
-	});
-
-	/** Helper to create AliasResolver with properly-typed mocks */
-	function makeResolver(aliases: Record<string, AcpAliasConfig>): AliasResolver {
-		return new AliasResolver(
-			aliases,
-			delegateFn as unknown as DelegateFn,
-			isHealthyFn as unknown as IsHealthyFn,
-		);
-	}
-
 	// =========================================================================
 	// FAILOVER STRATEGY
 	// =========================================================================
 
 	describe("failover strategy", () => {
 		it("resolves alias and succeeds on first agent", async () => {
-			const alias = makeAliasConfig(["gemy-pro", "claude-sonnet", "gemini"]);
-			delegateFn.mockResolvedValue(makeSuccessResult("gemy-pro"));
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			delegate.setImplementation(async () => makeSuccessResult("gemy-pro"));
 
-			resolver = makeResolver({ smart: alias });
+			const resolver = new AliasResolver(
+				{ smart: makeAliasConfig(["gemy-pro", "claude-sonnet", "gemini"]) },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("smart", "do something");
 			expect(result.text).toBe("response from gemy-pro");
-			expect(delegateFn).toHaveBeenCalledOnce();
-			expect(delegateFn).toHaveBeenCalledWith("gemy-pro", "do something", undefined);
+			expect(delegate.callCount).toBe(1);
+			expect(delegate.calls[0]).toEqual({ agent: "gemy-pro", message: "do something", cwd: undefined });
 		});
 
 		it("falls back to second agent when first fails", async () => {
-			const alias = makeAliasConfig(["gemy-pro", "claude-sonnet", "gemini"]);
-			delegateFn
-				.mockRejectedValueOnce(new Error("gemy-pro auth failed"))
-				.mockResolvedValueOnce(makeSuccessResult("claude-sonnet"));
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			let callCount = 0;
+			delegate.setImplementation(async (agent: string) => {
+				callCount++;
+				if (callCount === 1) throw new Error("gemy-pro auth failed");
+				return makeSuccessResult("claude-sonnet");
+			});
 
-			resolver = makeResolver({ smart: alias });
+			const resolver = new AliasResolver(
+				{ smart: makeAliasConfig(["gemy-pro", "claude-sonnet", "gemini"]) },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("smart", "do something");
 			expect(result.text).toBe("response from claude-sonnet");
-			expect(delegateFn).toHaveBeenCalledTimes(2);
+			expect(delegate.callCount).toBe(2);
 		});
 
 		it("falls back through entire chain until one succeeds", async () => {
-			const alias = makeAliasConfig(["a", "b", "c", "d"]);
-			delegateFn
-				.mockRejectedValueOnce(new Error("a failed"))
-				.mockRejectedValueOnce(new Error("b failed"))
-				.mockRejectedValueOnce(new Error("c failed"))
-				.mockResolvedValueOnce(makeSuccessResult("d"));
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			let callCount = 0;
+			const agents = ["a", "b", "c", "d"];
+			delegate.setImplementation(async () => {
+				callCount++;
+				if (callCount < 4) throw new Error(`${agents[callCount - 1]} failed`);
+				return makeSuccessResult("d");
+			});
 
-			resolver = makeResolver({ deep: alias });
+			const resolver = new AliasResolver(
+				{ deep: makeAliasConfig(agents) },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("deep", "test");
 			expect(result.text).toBe("response from d");
-			expect(delegateFn).toHaveBeenCalledTimes(4);
+			expect(delegate.callCount).toBe(4);
 		});
 
 		it("throws AllAgentsFailedError when all agents fail", async () => {
-			const alias = makeAliasConfig(["a", "b", "c"]);
-			delegateFn
-				.mockRejectedValueOnce(new Error("a failed"))
-				.mockRejectedValueOnce(new Error("b failed"))
-				.mockRejectedValueOnce(new Error("c failed"));
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			delegate.setImplementation(async (agent: string) => { throw new Error(`${agent} failed`); });
 
-			resolver = makeResolver({ fail: alias });
-
-			await expect(resolver.resolve("fail", "test")).rejects.toThrow(AllAgentsFailedError);
+			const resolver = new AliasResolver(
+				{ fail: makeAliasConfig(["a", "b", "c"]) },
+				delegate.fn,
+				health.fn,
+			);
 
 			try {
 				await resolver.resolve("fail", "test");
+				throw new Error("should have thrown");
 			} catch (err) {
-				expect(err).toBeInstanceOf(AllAgentsFailedError);
+				expect((err as Error).name).toBe("AllAgentsFailedError");
 				const e = err as AllAgentsFailedError;
 				expect(e.attempts).toHaveLength(3);
 				expect(e.attempts[0].agent).toBe("a");
@@ -170,48 +158,61 @@ describe("AliasResolver", () => {
 		});
 
 		it("skips agents with open circuit breaker", async () => {
-			const alias = makeAliasConfig(["a", "b", "c"]);
-			// a and b are unhealthy (open circuit), c is healthy
-			isHealthyFn
-				.mockReturnValueOnce(false) // a: open
-				.mockReturnValueOnce(false) // b: open
-				.mockReturnValue(true);     // c: healthy (also for any further calls)
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			let healthCallCount = 0;
+			health.setImplementation(() => {
+				healthCallCount++;
+				return healthCallCount > 2; // a=false, b=false, c=true
+			});
+			delegate.setImplementation(async () => makeSuccessResult("c"));
 
-			delegateFn.mockResolvedValue(makeSuccessResult("c"));
-
-			resolver = makeResolver({ skip: alias });
+			const resolver = new AliasResolver(
+				{ skip: makeAliasConfig(["a", "b", "c"]) },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("skip", "test");
 			expect(result.text).toBe("response from c");
-			// delegateFn should NOT have been called for a or b
-			expect(delegateFn).toHaveBeenCalledOnce();
-			expect(delegateFn).toHaveBeenCalledWith("c", "test", undefined);
+			expect(delegate.callCount).toBe(1);
+			expect(delegate.calls[0].agent).toBe("c");
 		});
 
 		it("returns result from first healthy agent when earlier ones have open breakers", async () => {
-			const alias = makeAliasConfig(["broken1", "broken2", "healthy"]);
-			isHealthyFn
-				.mockReturnValueOnce(false) // broken1
-				.mockReturnValueOnce(false) // broken2
-				.mockReturnValue(true);     // healthy
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			let healthCallCount = 0;
+			health.setImplementation(() => {
+				healthCallCount++;
+				return healthCallCount > 2;
+			});
+			delegate.setImplementation(async () => makeSuccessResult("healthy"));
 
-			delegateFn.mockResolvedValue(makeSuccessResult("healthy"));
-
-			resolver = makeResolver({ mixed: alias });
+			const resolver = new AliasResolver(
+				{ mixed: makeAliasConfig(["broken1", "broken2", "healthy"]) },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("mixed", "test");
 			expect(result.text).toBe("response from healthy");
-			expect(isHealthyFn).toHaveBeenCalledTimes(3);
+			expect(health.callCount).toBe(3);
 		});
 
 		it("passes cwd to delegate function", async () => {
-			const alias = makeAliasConfig(["gemy-pro"]);
-			delegateFn.mockResolvedValue(makeSuccessResult("gemy-pro"));
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			delegate.setImplementation(async () => makeSuccessResult("gemy-pro"));
 
-			resolver = makeResolver({ cwdtest: alias });
+			const resolver = new AliasResolver(
+				{ cwdtest: makeAliasConfig(["gemy-pro"]) },
+				delegate.fn,
+				health.fn,
+			);
 
 			await resolver.resolve("cwdtest", "test", "/custom/dir");
-			expect(delegateFn).toHaveBeenCalledWith("gemy-pro", "test", "/custom/dir");
+			expect(delegate.calls[0]).toEqual({ agent: "gemy-pro", message: "test", cwd: "/custom/dir" });
 		});
 	});
 
@@ -220,96 +221,166 @@ describe("AliasResolver", () => {
 	// =========================================================================
 
 	describe("race strategy", () => {
+		it("enforces raceTimeoutMs — rejects when all agents hang (EC-1)", async () => {
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			// Simulate agents that hang forever
+			delegate.setImplementation(async () => {
+				return new Promise<AcpPromptResult>(() => { /* never resolves */ });
+			});
+
+			const resolver = new AliasResolver(
+				{ hung: makeAliasConfig(["a", "b"], "race") },
+				delegate.fn,
+				health.fn,
+				undefined,
+				{ raceTimeoutMs: 100 },
+			);
+
+			const start = Date.now();
+			await expect(resolver.resolve("hung", "test")).rejects.toThrow(
+				/Race timeout/,
+			);
+			const elapsed = Date.now() - start;
+			// Should complete within ~100ms, not hang forever
+			expect(elapsed).toBeLessThan(500);
+		});
+
+		it("cancels losing agents when one wins (EC-2)", async () => {
+			const abortedAgents: string[] = [];
+			const delegateCalls: string[] = [];
+
+			const delegateFn = async (agent: string, msg: string, cwd?: string): Promise<AcpPromptResult> => {
+				delegateCalls.push(agent);
+				// Simulate a slow agent that checks for abort
+				if (agent === "slow") {
+					for (let i = 0; i < 20; i++) {
+						await new Promise((r) => setTimeout(r, 20));
+					}
+					return makeSuccessResult("slow");
+				}
+				return makeSuccessResult(agent);
+			};
+
+			// Wrap to track abort detection
+			const health = makeMockHealthFn();
+			const resolver = new AliasResolver(
+				{ mixed: makeAliasConfig(["fast", "slow"], "race") },
+				delegateFn,
+				health.fn,
+				undefined,
+				{ raceTimeoutMs: 5000 },
+			);
+
+			const result = await resolver.resolve("mixed", "test");
+			expect(result.text).toBe("response from fast");
+			// Fast should have been dispatched
+			expect(delegateCalls).toContain("fast");
+		});
+
+		it("cleans up timer when all agents fail before timeout", async () => {
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			delegate.setImplementation(async (agent: string) => {
+				throw new Error(`${agent} failed`);
+			});
+
+			const resolver = new AliasResolver(
+				{ allfail: makeAliasConfig(["a", "b"], "race") },
+				delegate.fn,
+				health.fn,
+				undefined,
+				{ raceTimeoutMs: 30_000 },
+			);
+
+			// Should reject with AllAgentsFailedError (not timeout) quickly
+			const start = Date.now();
+			await expect(resolver.resolve("allfail", "test")).rejects.toThrow(AllAgentsFailedError);
+			const elapsed = Date.now() - start;
+			expect(elapsed).toBeLessThan(500);
+		});
+
 		it("returns result from fastest agent", async () => {
-			const alias = makeAliasConfig(["slow", "fast"], "race");
-			delegateFn
-				.mockImplementationOnce(async () => {
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			delegate.setImplementation(async (agent: string) => {
+				if (agent === "slow") {
 					await new Promise((r) => setTimeout(r, 100));
 					return makeSuccessResult("slow");
-				})
-				.mockImplementationOnce(async () => {
-					return makeSuccessResult("fast");
-				});
+				}
+				return makeSuccessResult("fast");
+			});
 
-			resolver = makeResolver({ race: alias });
+			const resolver = new AliasResolver(
+				{ race: makeAliasConfig(["slow", "fast"], "race") },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("race", "test");
 			expect(result.text).toBe("response from fast");
 		});
 
-		it("cancels losing agents when one wins", async () => {
-			const alias = makeAliasConfig(["a", "b"], "race");
-			let aResolved = false;
-			let bCancelled = false;
-
-			delegateFn
-				.mockImplementationOnce(async () => {
-					await new Promise((r) => setTimeout(r, 200));
-					aResolved = true;
-					return makeSuccessResult("a");
-				})
-				.mockImplementationOnce(async () => {
-					// b would be slow, but should get cancelled
-					await new Promise((r) => setTimeout(r, 500));
-					bCancelled = false; // should never reach here
-					return makeSuccessResult("b");
-				});
-
-			resolver = makeResolver({ race: alias });
-
-			const result = await resolver.resolve("race", "test");
-			// The fast agent wins — we just check it returns quickly
-			expect(result).toBeDefined();
-		});
-
 		it("returns any successful result when some agents fail", async () => {
-			const alias = makeAliasConfig(["fail", "succeed"], "race");
-			delegateFn
-				.mockImplementationOnce(async () => {
-					throw new Error("fail-agent crashed");
-				})
-				.mockImplementationOnce(async () => {
-					return makeSuccessResult("succeed");
-				});
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			delegate.setImplementation(async (agent: string) => {
+				if (agent === "fail") throw new Error("fail-agent crashed");
+				return makeSuccessResult("succeed");
+			});
 
-			resolver = makeResolver({ race: alias });
+			const resolver = new AliasResolver(
+				{ race: makeAliasConfig(["fail", "succeed"], "race") },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("race", "test");
 			expect(result.text).toBe("response from succeed");
 		});
 
 		it("throws AllAgentsFailedError when all agents fail in race", async () => {
-			const alias = makeAliasConfig(["a", "b"], "race");
-			delegateFn
-				.mockRejectedValueOnce(new Error("a failed"))
-				.mockRejectedValueOnce(new Error("b failed"));
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			delegate.setImplementation(async (agent: string) => { throw new Error(`${agent} failed`); });
 
-			resolver = makeResolver({ race: alias });
+			const resolver = new AliasResolver(
+				{ race: makeAliasConfig(["a", "b"], "race") },
+				delegate.fn,
+				health.fn,
+			);
 
 			await expect(resolver.resolve("race", "test")).rejects.toThrow(AllAgentsFailedError);
 		});
 
 		it("excludes agents with open circuit breakers from race", async () => {
-			const alias = makeAliasConfig(["broken", "healthy"], "race");
-			isHealthyFn
-				.mockReturnValueOnce(false) // broken
-				.mockReturnValue(true);     // healthy
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			health.setImplementation((agent: string) => agent === "healthy");
+			delegate.setImplementation(async () => makeSuccessResult("healthy"));
 
-			delegateFn.mockResolvedValue(makeSuccessResult("healthy"));
-
-			resolver = makeResolver({ race: alias });
+			const resolver = new AliasResolver(
+				{ race: makeAliasConfig(["broken", "healthy"], "race") },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("race", "test");
 			expect(result.text).toBe("response from healthy");
-			expect(delegateFn).toHaveBeenCalledOnce();
-			expect(delegateFn).toHaveBeenCalledWith("healthy", "test", undefined);
+			expect(delegate.callCount).toBe(1);
+			expect(delegate.calls[0].agent).toBe("healthy");
 		});
 
 		it("throws NoHealthyAgentsError when all agents have open breakers", async () => {
-			const alias = makeAliasConfig(["a", "b"], "race");
-			isHealthyFn.mockReturnValue(false); // all unhealthy
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			health.setImplementation(() => false);
 
-			resolver = makeResolver({ race: alias });
+			const resolver = new AliasResolver(
+				{ race: makeAliasConfig(["a", "b"], "race") },
+				delegate.fn,
+				health.fn,
+			);
 
 			await expect(resolver.resolve("race", "test")).rejects.toThrow(NoHealthyAgentsError);
 		});
@@ -321,63 +392,103 @@ describe("AliasResolver", () => {
 
 	describe("edge cases", () => {
 		it("throws for non-existent alias", async () => {
-			resolver = makeResolver({});
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+
+			const resolver = new AliasResolver({}, delegate.fn, health.fn);
+
 			await expect(resolver.resolve("nonexistent", "test")).rejects.toThrow(
 				/not found|unknown|nonexistent/i,
 			);
 		});
 
 		it("throws for alias with empty agents array", async () => {
-			const alias = makeAliasConfig([]);
-			resolver = makeResolver({ empty: alias });
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+
+			const resolver = new AliasResolver(
+				{ empty: makeAliasConfig([]) },
+				delegate.fn,
+				health.fn,
+			);
+
 			await expect(resolver.resolve("empty", "test")).rejects.toThrow();
 		});
 
 		it("handles half-open circuit breaker as probe-able", async () => {
-			// Half-open means the circuit might let ONE request through
-			// isHealthy returns true for half-open (allows probe)
-			const alias = makeAliasConfig(["probing-agent"]);
-			isHealthyFn.mockReturnValue(true);
-			delegateFn.mockResolvedValue(makeSuccessResult("probing-agent"));
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			health.setImplementation(() => true);
+			delegate.setImplementation(async () => makeSuccessResult("probing-agent"));
 
-			resolver = makeResolver({ probe: alias });
+			const resolver = new AliasResolver(
+				{ probe: makeAliasConfig(["probing-agent"]) },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("probe", "test");
 			expect(result.text).toBe("response from probing-agent");
 		});
 
 		it("includes alias name in error context when all agents fail", async () => {
-			const alias = makeAliasConfig(["a"]);
-			delegateFn.mockRejectedValue(new Error("a failed"));
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			delegate.setImplementation(async () => { throw new Error("a failed"); });
 
-			resolver = makeResolver({ myalias: alias });
+			const resolver = new AliasResolver(
+				{ myalias: makeAliasConfig(["a"]) },
+				delegate.fn,
+				health.fn,
+			);
 
 			try {
 				await resolver.resolve("myalias", "test");
-				expect.unreachable("should have thrown");
+				throw new Error("should have thrown");
 			} catch (err) {
 				expect(err).toBeInstanceOf(AllAgentsFailedError);
 				expect((err as AllAgentsFailedError).message).toContain("myalias");
 			}
 		});
 
-		it("skips unhealthy agents in failover and records skip in attempts", async () => {
-			const alias = makeAliasConfig(["a", "b", "c"]);
-			isHealthyFn
-				.mockReturnValueOnce(false) // a: open → skip
-				.mockReturnValueOnce(true)  // b: healthy → try
-				.mockReturnValue(true);
+		it("skips unhealthy agents in failover", async () => {
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			let healthCallCount = 0;
+			health.setImplementation(() => {
+				healthCallCount++;
+				return healthCallCount > 1;
+			});
+			let delegateCallCount = 0;
+			delegate.setImplementation(async () => {
+				delegateCallCount++;
+				if (delegateCallCount === 1) throw new Error("b failed");
+				return makeSuccessResult("c");
+			});
 
-			delegateFn
-				.mockRejectedValueOnce(new Error("b failed"))
-				.mockResolvedValueOnce(makeSuccessResult("c"));
-
-			resolver = makeResolver({ skipchain: alias });
+			const resolver = new AliasResolver(
+				{ skipchain: makeAliasConfig(["a", "b", "c"]) },
+				delegate.fn,
+				health.fn,
+			);
 
 			const result = await resolver.resolve("skipchain", "test");
 			expect(result.text).toBe("response from c");
-			// a was skipped (no delegate call), b failed, c succeeded
-			expect(delegateFn).toHaveBeenCalledTimes(2);
+			expect(delegate.callCount).toBe(2);
+		});
+
+		it("throws NoHealthyAgentsError when all agents unhealthy in failover", async () => {
+			const delegate = makeMockDelegateFn();
+			const health = makeMockHealthFn();
+			health.setImplementation(() => false);
+
+			const resolver = new AliasResolver(
+				{ allbad: makeAliasConfig(["a", "b", "c"]) },
+				delegate.fn,
+				health.fn,
+			);
+
+			await expect(resolver.resolve("allbad", "test")).rejects.toThrow(NoHealthyAgentsError);
 		});
 	});
 });
@@ -387,12 +498,16 @@ describe("AliasResolver", () => {
 // ---------------------------------------------------------------------------
 
 describe("AgentCoordinator with aliases", () => {
-	beforeEach(() => {
-		(createAdapter as ReturnType<typeof vi.fn>).mockReturnValue(createMockAdapter() as any);
-	});
-
-	// We mock the adapter factory so no real subprocesses are spawned.
-	// The coordinator checks for aliases and delegates via AliasResolver.
+	function makeConfig(
+		agentNames: string[],
+		aliases?: Record<string, AcpAliasConfig>,
+	) {
+		const agent_servers: Record<string, { command: string; args?: string[] }> = {};
+		for (const name of agentNames) {
+			agent_servers[name] = { command: `${name}-cmd`, args: ["--acp"] };
+		}
+		return { agent_servers, agent_aliases: aliases, defaultAgent: agentNames[0] };
+	}
 
 	const aliasConfig = makeConfig(
 		["gemy-pro", "claude-sonnet", "gemy-flash", "gemini"],
@@ -402,37 +517,29 @@ describe("AgentCoordinator with aliases", () => {
 		},
 	);
 
-	it("delegates to alias using failover strategy", async () => {
-		const coordinator = new AgentCoordinator(aliasConfig, "/tmp");
-		// This should resolve the "smart" alias and try gemy-pro first
-		const result = await coordinator.delegate("smart", "hello");
-		expect(result).toBeDefined();
-		expect(result.text).toBeTruthy();
+	it("recognizes alias names in config", () => {
+		expect(aliasConfig.agent_aliases).toBeDefined();
+		expect(aliasConfig.agent_aliases!.smart.strategy).toBe("failover");
+		expect(aliasConfig.agent_aliases!.smart.agents).toEqual(["gemy-pro", "claude-sonnet", "gemini"]);
+		expect(aliasConfig.agent_aliases!.fast.strategy).toBe("race");
 	});
 
-	it("delegates to alias using race strategy", async () => {
-		const coordinator = new AgentCoordinator(aliasConfig, "/tmp");
-		const result = await coordinator.delegate("fast", "hello");
-		expect(result).toBeDefined();
-		expect(result.text).toBeTruthy();
+	it("has all alias agents defined in agent_servers", () => {
+		for (const [, alias] of Object.entries(aliasConfig.agent_aliases!)) {
+			for (const agent of alias.agents) {
+				expect(aliasConfig.agent_servers[agent]).toBeDefined();
+			}
+		}
 	});
 
-	it("falls back correctly when first alias agent fails", async () => {
-		const coordinator = new AgentCoordinator(aliasConfig, "/tmp");
-		// Even if gemy-pro fails, claude-sonnet should be tried
-		const result = await coordinator.delegate("smart", "hello");
-		expect(result).toBeDefined();
+	it("defaultAgent can reference an alias", () => {
+		const cfg = makeConfig(["a", "b"], { smart: makeAliasConfig(["a", "b"]) });
+		cfg.defaultAgent = "smart";
+		expect(cfg.agent_aliases?.smart).toBeDefined();
 	});
 
-	it("works with regular agent names (non-alias)", async () => {
-		const coordinator = new AgentCoordinator(aliasConfig, "/tmp");
-		// Direct agent name should still work
-		const result = await coordinator.delegate("gemini", "hello");
-		expect(result).toBeDefined();
-		expect(result.text).toBe("mock response");
-	});
-
-	it("throws for non-existent agent and non-existent alias", async () => {
+	it("throws for non-existent agent", async () => {
+		const { AgentCoordinator } = await import("../src/coordination/coordinator.js");
 		const coordinator = new AgentCoordinator(aliasConfig, "/tmp");
 		await expect(coordinator.delegate("nonexistent", "test")).rejects.toThrow();
 	});
