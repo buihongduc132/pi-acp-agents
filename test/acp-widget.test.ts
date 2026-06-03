@@ -1,7 +1,7 @@
 /**
  * Tests for ACP TUI Widget (acp-widget.ts)
  */
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import {
 	type AcpWidgetDeps,
 	type AcpWidgetState,

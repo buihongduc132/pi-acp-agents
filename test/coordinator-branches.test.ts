@@ -2,39 +2,41 @@
  * Branch coverage for coordinator.ts — broadcast, compare, formatComparison
  * Covers the rejected promise path and error formatting branches
  */
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import { AgentCoordinator } from "../src/coordination/coordinator.js";
 import type { AcpConfig } from "../src/config/types.js";
 
 // Mock adapter-factory
-const mockCreateAdapter = mock();
-mock.module("../src/adapter-factory.js", () => ({
+const { mockCreateAdapter } = vi.hoisted(() => ({
+	mockCreateAdapter: vi.fn(),
+}));
+vi.mock("../src/adapter-factory.js", () => ({
 	createAdapter: mockCreateAdapter,
 }));
 
 function makeMockAdapter(result: Record<string, any> = {}) {
 	return {
-		spawn: mock().mockResolvedValue(undefined),
-		initialize: mock().mockResolvedValue(undefined),
-		newSession: mock().mockResolvedValue("session-1"),
-		prompt: mock().mockResolvedValue({
+		spawn: vi.fn().mockResolvedValue(undefined),
+		initialize: vi.fn().mockResolvedValue(undefined),
+		newSession: vi.fn().mockResolvedValue("session-1"),
+		prompt: vi.fn().mockResolvedValue({
 			text: "response",
 			stopReason: "end_turn",
 			sessionId: "session-1",
 			...result,
 		}),
-		dispose: mock(),
+		dispose: vi.fn(),
 		connected: true,
 	};
 }
 
 function makeFailingAdapter(error: Error) {
 	return {
-		spawn: mock().mockRejectedValue(error),
-		initialize: mock(),
-		newSession: mock(),
-		prompt: mock(),
-		dispose: mock(),
+		spawn: vi.fn().mockRejectedValue(error),
+		initialize: vi.fn(),
+		newSession: vi.fn(),
+		prompt: vi.fn(),
+		dispose: vi.fn(),
 		connected: false,
 	};
 }

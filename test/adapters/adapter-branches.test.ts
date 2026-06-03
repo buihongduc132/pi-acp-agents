@@ -1,12 +1,13 @@
-import { describe, it, expect, mock, afterEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock console.debug to avoid noise
 const origConsoleDebug = console.debug;
-beforeEach(() => { console.debug = () => {}; });
+const mockConsoleDebug = vi.fn();
+beforeEach(() => { console.debug = mockConsoleDebug; });
 afterEach(() => { console.debug = origConsoleDebug; });
 
-mock.module("node:child_process", () => ({
-	execSync: mock(),
+vi.mock("node:child_process", () => ({
+	execSync: vi.fn(),
 }));
 
 import { GeminiAcpAdapter } from "../../src/adapters/gemini.js";
@@ -14,7 +15,7 @@ import { CodexAcpAdapter } from "../../src/adapters/codex.js";
 import { OpenCodeAcpAdapter } from "../../src/adapters/opencode.js";
 import { execSync } from "node:child_process";
 
-const mockExec = execSync as ReturnType<typeof mock>;
+const mockExec = execSync as ReturnType<typeof vi.fn>;
 
 describe("adapters — catch branches", () => {
 	afterEach(() => {

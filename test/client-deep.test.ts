@@ -1,4 +1,4 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 
@@ -7,50 +7,50 @@ function makeFakeProc() {
 	const stdin = new Writable({ write(_chunk: any, _enc: any, cb: any) { cb(); } });
 	const stdout = new Readable({ read() {} });
 	const stderr = new EventEmitter();
-	return { stdin, stdout, stderr, killed: false, kill: mock(), on: mock() };
+	return { stdin, stdout, stderr, killed: false, kill: vi.fn(), on: vi.fn() };
 }
 
-const mockKillWithEscalation = mock();
+const mockKillWithEscalation = vi.fn();
 
-mock.module("node:child_process", () => ({
-	spawn: mock(() => makeFakeProc()),
+vi.mock("node:child_process", () => ({
+	spawn: vi.fn(() => makeFakeProc()),
 }));
 
-mock.module("../src/core/circuit-breaker.js", () => ({
+vi.mock("../src/core/circuit-breaker.js", () => ({
 	killWithEscalation: (...args: any[]) => mockKillWithEscalation(...args),
 }));
 
-mock.module("../src/core/protocol-validator.js", () => ({
-	classifyConnectionError: mock((err) => err),
-	validateInitializeResponse: mock(),
-	validateNewSessionResponse: mock(),
-	validatePromptResponse: mock(),
+vi.mock("../src/core/protocol-validator.js", () => ({
+	classifyConnectionError: vi.fn((err) => err),
+	validateInitializeResponse: vi.fn(),
+	validateNewSessionResponse: vi.fn(),
+	validatePromptResponse: vi.fn(),
 	AcpProtocolError: class extends Error {
 		constructor(public details: any) { super(details.message); this.name = "AcpProtocolError"; }
 	},
 }));
 
-mock.module("../src/logger.js", () => ({
-	createFileLogger: mock(() => ({
-		info: mock(),
-		error: mock(),
-		debug: mock(),
+vi.mock("../src/logger.js", () => ({
+	createFileLogger: vi.fn(() => ({
+		info: vi.fn(),
+		error: vi.fn(),
+		debug: vi.fn(),
 	})),
 }));
 
 // Mock the SDK — use a class that tracks callbacks
 let capturedCallbacks: any = null;
 
-mock.module("@agentclientprotocol/sdk", () => {
+vi.mock("@agentclientprotocol/sdk", () => {
 	class MockClientSideConnection {
-		initialize = mock();
-		newSession = mock();
-		prompt = mock();
-		cancel = mock();
-		loadSession = mock();
-		authenticate = mock();
-		unstable_setSessionModel = mock();
-		setSessionMode = mock();
+		initialize = vi.fn();
+		newSession = vi.fn();
+		prompt = vi.fn();
+		cancel = vi.fn();
+		loadSession = vi.fn();
+		authenticate = vi.fn();
+		unstable_setSessionModel = vi.fn();
+		setSessionMode = vi.fn();
 
 		constructor(callbacks: any) {
 			capturedCallbacks = callbacks;
@@ -58,7 +58,7 @@ mock.module("@agentclientprotocol/sdk", () => {
 	}
 	return {
 		ClientSideConnection: MockClientSideConnection,
-		ndJsonStream: mock(() => ({})),
+		ndJsonStream: vi.fn(() => ({})),
 		PROTOCOL_VERSION: 1,
 	};
 });
@@ -130,7 +130,7 @@ describe("AcpClient — deep branches", () => {
 		});
 
 		it("continues when auth fails (best-effort)", async () => {
-			const client = createClient({ logger: { info: mock(), error: mock(), debug: mock() } });
+			const client = createClient({ logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn() } });
 			const conn = await connectAndGetConn(client);
 			conn.initialize.mockResolvedValueOnce({
 				protocolVersion: 1,
@@ -184,7 +184,7 @@ describe("AcpClient — deep branches", () => {
 		it("handles set model failure gracefully", async () => {
 			const client = createClient({
 				config: { command: "c", args: [], default_model: "gpt-4" },
-				logger: { info: mock(), error: mock(), debug: mock() },
+				logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 			});
 			const conn = await connectAndGetConn(client);
 			conn.newSession.mockResolvedValueOnce({ sessionId: "sess-4", models: {}, modes: {} });
@@ -196,7 +196,7 @@ describe("AcpClient — deep branches", () => {
 		it("handles set mode failure gracefully", async () => {
 			const client = createClient({
 				config: { command: "c", args: [], default_mode: "auto" },
-				logger: { info: mock(), error: mock(), debug: mock() },
+				logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 			});
 			const conn = await connectAndGetConn(client);
 			conn.newSession.mockResolvedValueOnce({ sessionId: "sess-5", models: {}, modes: {} });
@@ -325,7 +325,7 @@ describe("AcpClient — deep branches", () => {
 
 	describe("handleSessionUpdate", () => {
 		it("accumulates text from agent_message_chunk", async () => {
-			const onActivity = mock();
+			const onActivity = vi.fn();
 			const client = createClient({ onActivity });
 			await client.connect();
 			const conn = (client as any).conn;

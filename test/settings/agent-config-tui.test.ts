@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { buildSettingItems } from "../../src/settings/agent-config-tui.js";
 import type { AcpConfig, AcpAgentConfig } from "../../src/config/types.js";
 

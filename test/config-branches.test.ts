@@ -3,7 +3,7 @@
  * Targets: numeric field validation, timeout order, getAgentConfig, empty name,
  * migrateLegacyConfig with auto-save, loadConfig with invalid JSON
  */
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

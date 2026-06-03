@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-mock.module("../src/config/config.js", () => ({
+vi.mock("../src/config/config.js", () => ({
 	loadConfig: () => ({
 		agent_servers: { gemini: { command: "gemini", args: ["--acp"] } },
 		defaultAgent: "gemini",
@@ -11,7 +11,7 @@ mock.module("../src/config/config.js", () => ({
 		modelPolicy: {},
 	}),
 }));
-mock.module("../src/core/session-manager.js", () => ({
+vi.mock("../src/core/session-manager.js", () => ({
 	SessionManager: class {
 		size = 0;
 		list() { return []; }
@@ -23,41 +23,41 @@ mock.module("../src/core/session-manager.js", () => ({
 		pruneStale() { return Promise.resolve({ removedSessionIds: [] }); }
 	},
 }));
-mock.module("../src/management/task-store.js", () => ({
+vi.mock("../src/management/task-store.js", () => ({
 	AcpTaskStore: class {
 		list() { return []; }
 		clear() { return { removed: 0, remaining: 0 }; }
 	},
 }));
-mock.module("../src/management/mailbox-manager.js", () => ({
+vi.mock("../src/management/mailbox-manager.js", () => ({
 	MailboxManager: class {
 		clearFor() { return 0; }
 	},
 }));
-mock.module("../src/management/governance-store.js", () => ({
+vi.mock("../src/management/governance-store.js", () => ({
 	GovernanceStore: class {
 		setModelPolicy() {}
 	},
 }));
-mock.module("../src/management/event-log.js", () => ({
+vi.mock("../src/management/event-log.js", () => ({
 	AcpEventLog: class {
 		append() {}
 	},
 }));
-mock.module("../src/management/session-archive-store.js", () => ({
+vi.mock("../src/management/session-archive-store.js", () => ({
 	SessionArchiveStore: class {
 		get() { return undefined; }
 		upsert(v: unknown) { return v; }
 	},
 }));
-mock.module("../src/management/session-name-store.js", () => ({
+vi.mock("../src/management/session-name-store.js", () => ({
 	SessionNameStore: class {
 		getSessionId() { return undefined; }
 		getName() { return undefined; }
 		register() { return undefined; }
 	},
 }));
-mock.module("../src/management/runtime-paths.js", () => ({
+vi.mock("../src/management/runtime-paths.js", () => ({
 	ensureRuntimeDir: () => ({
 		rootDir: "/mock/runtime",
 		tasksFile: "/mock/runtime/tasks.json",
@@ -68,23 +68,23 @@ mock.module("../src/management/runtime-paths.js", () => ({
 		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json",
 	}),
 }));
-mock.module("../src/logger.js", () => ({ createFileLogger: () => ({ info() {}, error() {}, debug() {} }) }));
-mock.module("../src/core/circuit-breaker.js", () => ({
+vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info() {}, error() {}, debug() {} }) }));
+vi.mock("../src/core/circuit-breaker.js", () => ({
 	AcpCircuitBreaker: class {
 		state = "closed";
 		execute<T>(fn: () => Promise<T>) { return fn(); }
 	},
 }));
-mock.module("../src/core/health-monitor.js", () => ({
+vi.mock("../src/core/health-monitor.js", () => ({
 	HealthMonitor: class {
 		start() {}
 		stop() {}
 		register() {}
 	},
 }));
-mock.module("../src/adapter-factory.js", () => ({ createAdapter: () => ({ dispose() {} }) }));
-mock.module("../src/coordination/coordinator.js", () => ({ AgentCoordinator: class {} }));
-mock.module("../src/acp-widget.js", () => ({ createAcpWidget: () => () => ({ render: mock() }) }));
+vi.mock("../src/adapter-factory.js", () => ({ createAdapter: () => ({ dispose() {} }) }));
+vi.mock("../src/coordination/coordinator.js", () => ({ AgentCoordinator: class {} }));
+vi.mock("../src/acp-widget.js", () => ({ createAcpWidget: () => () => ({ render: vi.fn() }) }));
 
 import main from "../index.js";
 
@@ -94,8 +94,8 @@ describe("ACP command surface", () => {
 	const ctx = {
 		cwd: "/project",
 		ui: {
-			setWidget: mock(),
-			notify: mock((message: string) => {
+			setWidget: vi.fn(),
+			notify: vi.fn((message: string) => {
 				notifications.push(message);
 			}),
 		},
@@ -105,10 +105,10 @@ describe("ACP command surface", () => {
 		commands = new Map();
 		notifications = [];
 		main({
-			registerTool: mock(),
-			registerCommand: mock((name: string, opts: any) => commands.set(name, opts)),
-			on: mock(),
-			getCommands: mock(() => Array.from(commands.entries()).map(([name, opts]) => ({ name, source: "extension", description: opts.description }))),
+			registerTool: vi.fn(),
+			registerCommand: vi.fn((name: string, opts: any) => commands.set(name, opts)),
+			on: vi.fn(),
+			getCommands: vi.fn(() => Array.from(commands.entries()).map(([name, opts]) => ({ name, source: "extension", description: opts.description }))),
 		} as any);
 	});
 

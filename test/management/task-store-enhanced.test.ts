@@ -1,7 +1,7 @@
 /**
  * TDD tests for TaskStore enhancements (M3: Auto-claim, M5: Dep validation, Priority)
  */
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

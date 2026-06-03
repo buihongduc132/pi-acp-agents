@@ -10,13 +10,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockDelegate = mock();
+const mockDelegate = vi.fn();
 let runtimeDir = "";
 
-mock.module("../src/config/config.js", () => ({
-  loadConfig: mock(() => ({
+vi.mock("../src/config/config.js", () => ({
+  loadConfig: vi.fn(() => ({
     agent_servers: {
       gemini: { command: "gemini", args: ["--acp"] },
       claude: { command: "claude", args: ["--acp"] },
@@ -37,28 +37,28 @@ mock.module("../src/config/config.js", () => ({
   })),
 }));
 
-mock.module("../src/coordination/coordinator.js", () => ({
+vi.mock("../src/coordination/coordinator.js", () => ({
   AgentCoordinator: class MockAgentCoordinator {
     delegate = mockDelegate;
-    broadcast = mock();
-    compare = mock();
+    broadcast = vi.fn();
+    compare = vi.fn();
     formatComparison() {
       return "formatted";
     }
   },
 }));
 
-mock.module("../src/adapter-factory.js", () => ({
-  createAdapter: mock(() => ({
-    spawn: mock(),
-    initialize: mock(),
-    newSession: mock(async () => "session-1"),
-    loadSession: mock(),
-    prompt: mock(async () => ({ text: "ok", sessionId: "session-1", stopReason: "end_turn" })),
-    setModel: mock(),
-    setMode: mock(),
-    cancel: mock(),
-    dispose: mock(),
+vi.mock("../src/adapter-factory.js", () => ({
+  createAdapter: vi.fn(() => ({
+    spawn: vi.fn(),
+    initialize: vi.fn(),
+    newSession: vi.fn(async () => "session-1"),
+    loadSession: vi.fn(),
+    prompt: vi.fn(async () => ({ text: "ok", sessionId: "session-1", stopReason: "end_turn" })),
+    setModel: vi.fn(),
+    setMode: vi.fn(),
+    cancel: vi.fn(),
+    dispose: vi.fn(),
   })),
 }));
 
@@ -75,7 +75,7 @@ function createMockPi() {
     },
     registerCommand() {},
     on() {},
-    sendMessage: mock(),
+    sendMessage: vi.fn(),
   };
 }
 
@@ -83,8 +83,8 @@ function createMockCtx() {
   return {
     cwd: "/base",
     ui: {
-      setWidget: mock(),
-      notify: mock(),
+      setWidget: vi.fn(),
+      notify: vi.fn(),
     },
   };
 }
@@ -102,6 +102,7 @@ async function loadParallelTool() {
 describe("acp_delegate_parallel", () => {
   beforeEach(() => {
     runtimeDir = uniqueRuntimeDir();
+    mockDelegate.mockClear();
   });
 
   // Test 1: Parallel delegate calls beginWidgetActivity per agent
@@ -352,7 +353,7 @@ describe("acp_delegate_parallel", () => {
 
   // Test 9: Forwards _onUpdate progress per agent
   it("calls _onUpdate with per-agent progress", async () => {
-    const onUpdate = mock();
+    const onUpdate = vi.fn();
 
     mockDelegate.mockImplementation(async (agent: string, _msg: string, _cwd: string, onProgress?: Function) => {
       if (onProgress) {

@@ -4,7 +4,7 @@
  * This test spawns the real `ocxo acp` process and performs the ACP handshake.
  * Skipped if `ocxo` is not on PATH.
  */
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { OpenCodeAcpAdapter } from "../src/adapters/opencode.js";
 
 describe.skipIf(!OpenCodeAcpAdapter.isAvailable())("OpenCode ACP live smoke test", () => {

@@ -1,7 +1,7 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-mock.module("node:child_process", () => ({
-	execSync: mock(),
+vi.mock("node:child_process", () => ({
+	execSync: vi.fn(),
 }));
 
 import { GeminiAcpAdapter } from "../../src/adapters/gemini.js";

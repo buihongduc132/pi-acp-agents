@@ -4,24 +4,36 @@
  * Tests the acpx CLI adapter that delegates agent interaction to the acpx CLI
  * instead of spawning a subprocess directly.
  */
-import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AcpAdapterOptions } from "../../src/config/types.js";
 import { AcpxAdapter } from "../../src/adapters/acpx.js";
 
 // ---------------------------------------------------------------------------
-// Mock spawnSync
+// Mock spawnSync — shared mutable state in vi.hoisted for mock factory access
 // ---------------------------------------------------------------------------
+const { spawnSyncMock, queueResult, resetMockState } = vi.hoisted(() => {
+	const spawnSyncResults: Array<{ status: number; stdout: string; stderr: string }> = [];
+	let callIndex = 0;
 
-const spawnSyncResults: Array<{ status: number; stdout: string; stderr: string }> = [];
-let callIndex = 0;
+	const spawnSyncMock = vi.fn(() => {
+		const idx = callIndex++;
+		const result = spawnSyncResults[idx] ?? spawnSyncResults[spawnSyncResults.length - 1];
+		return result ?? { status: 1, stdout: "", stderr: "no mock result queued" };
+	});
 
-const spawnSyncMock = mock(() => {
-	const idx = callIndex++;
-	const result = spawnSyncResults[idx] ?? spawnSyncResults[spawnSyncResults.length - 1];
-	return result ?? { status: 1, stdout: "", stderr: "no mock result queued" };
+	function queueResult(status: number, stdout: string, stderr = "") {
+		spawnSyncResults.push({ status, stdout, stderr });
+	}
+
+	function resetMockState() {
+		spawnSyncResults.length = 0;
+		callIndex = 0;
+	}
+
+	return { spawnSyncMock, queueResult, resetMockState };
 });
 
-mock.module("node:child_process", () => ({
+vi.mock("node:child_process", () => ({
 	spawnSync: spawnSyncMock,
 }));
 
@@ -36,9 +48,7 @@ function makeOpts(overrides: Partial<AcpAdapterOptions> = {}): AcpAdapterOptions
 	};
 }
 
-function queueResult(status: number, stdout: string, stderr = "") {
-	spawnSyncResults.push({ status, stdout, stderr });
-}
+// queueResult is provided by vi.hoisted above
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -46,8 +56,7 @@ function queueResult(status: number, stdout: string, stderr = "") {
 
 describe("AcpxAdapter", () => {
 	beforeEach(() => {
-		spawnSyncResults.length = 0;
-		callIndex = 0;
+		resetMockState();
 	});
 
 	describe("name", () => {

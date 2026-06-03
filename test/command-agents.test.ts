@@ -6,13 +6,13 @@
  *
  * Mocks config path to temp dir — same pattern as config.test.ts.
  */
-import { beforeEach, afterEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // Mock homedir so config goes to temp dir
-mock.module("node:os", () => {
+vi.mock("node:os", () => {
 	const { tmpdir } = require("node:os");
 	const { join } = require("node:path");
 	return {
@@ -51,7 +51,7 @@ function makeCtx() {
 		notifications,
 		ctx: {
 			ui: {
-				notify: mock((message: string, type: string) => {
+				notify: vi.fn((message: string, type: string) => {
 					notifications.push({ message, type });
 				}),
 			},
@@ -212,8 +212,8 @@ describe("/acp agents command handler", () => {
 			const tuiCalls: string[] = [];
 			const ctx = {
 				ui: {
-					notify: mock(),
-					custom: mock(async () => {
+					notify: vi.fn(),
+					custom: vi.fn(async () => {
 						tuiCalls.push("opened");
 					}),
 				},

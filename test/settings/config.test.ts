@@ -7,14 +7,14 @@
  * - deepMerge(global, local) with local overriding global per key
  * - DEFAULT_CONFIG has all tools enabled
  */
-import { beforeEach, afterEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // We mock homedir so global config goes to a temp dir
 // vi.mock is hoisted, so we must compute FAKE_HOME inside the factory
-mock.module("node:os", () => {
+vi.mock("node:os", () => {
 	const { tmpdir } = require("node:os");
 	const { join } = require("node:path");
 	return {

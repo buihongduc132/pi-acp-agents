@@ -2,7 +2,7 @@
  * Additional branch coverage for circuit-breaker.ts
  * Targets: concurrent half-open probe, killWithEscalation edge cases
  */
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import { AcpCircuitBreaker, CircuitHalfOpenError, CircuitOpenError, killWithEscalation } from "../src/core/circuit-breaker.js";
 import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
@@ -76,7 +76,7 @@ describe("killWithEscalation", () => {
 	it("does nothing if proc is already killed", () => {
 		const proc = new EventEmitter() as any;
 		proc.killed = true;
-		proc.kill = mock();
+		proc.kill = vi.fn();
 		killWithEscalation(proc);
 		expect(proc.kill).not.toHaveBeenCalled();
 	});
@@ -84,7 +84,7 @@ describe("killWithEscalation", () => {
 	it("sends SIGTERM then SIGKILL after timeout", async () => {
 		const proc = new EventEmitter() as any;
 		proc.killed = false;
-		proc.kill = mock(() => {
+		proc.kill = vi.fn(() => {
 			// First SIGTERM doesn't kill, but SIGKILL does
 			if (proc.kill.mock.calls.length > 1) {
 				proc.killed = true;
@@ -100,7 +100,7 @@ describe("killWithEscalation", () => {
 	it("catches SIGTERM error when already dead", () => {
 		const proc = new EventEmitter() as any;
 		proc.killed = false;
-		proc.kill = mock(() => { throw new Error("already dead"); });
+		proc.kill = vi.fn(() => { throw new Error("already dead"); });
 		expect(() => killWithEscalation(proc)).not.toThrow();
 	});
 
@@ -108,7 +108,7 @@ describe("killWithEscalation", () => {
 		const proc = new EventEmitter() as any;
 		let killCallCount = 0;
 		proc.killed = false;
-		proc.kill = mock((signal: string) => {
+		proc.kill = vi.fn((signal: string) => {
 			killCallCount++;
 			if (signal === "SIGKILL") {
 				throw new Error("already dead");

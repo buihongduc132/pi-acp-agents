@@ -8,7 +8,7 @@
  *
  * These tests are designed to FAIL initially, proving the gaps exist.
  */
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import {
 	AliasResolver,
 	AllAgentsFailedError,

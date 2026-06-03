@@ -2,7 +2,7 @@
  * Branch coverage for config/config.ts AGENT_PRESETS
  * These preset functions call execSync and need mocking
  */
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,10 +10,10 @@ import { tmpdir } from "node:os";
 const TEST_DIR = join(tmpdir(), `acp-presets-test-${process.pid}`);
 
 // Mock node:child_process for execSync
-const mockExecSync = mock((cmd: string) => {
+const mockExecSync = vi.fn((cmd: string) => {
 	throw new Error("not found");
 });
-mock.module("node:child_process", () => ({
+vi.mock("node:child_process", () => ({
 	execSync: mockExecSync,
 }));
 

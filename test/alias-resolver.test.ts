@@ -4,7 +4,7 @@
  * Uses plain closure-based mocks (no vi.mock / mock.fn) for maximum
  * compatibility with bun test runner.
  */
-import { describe, it, expect, beforeAll, mock } from "bun:test";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import {
 	AliasResolver,
 	AllAgentsFailedError,

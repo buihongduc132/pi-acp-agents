@@ -1,4 +1,4 @@
-import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { HealthMonitor, type HealthMonitorable } from "../src/core/health-monitor.js";
 
 function createMockSession(id: string, lastActivity?: Date): HealthMonitorable {
@@ -142,7 +142,7 @@ describe("HealthMonitor", () => {
     });
 
     it("calls onStale callback for stale sessions", async () => {
-      const onStale = mock().mockResolvedValue(undefined);
+      const onStale = vi.fn().mockResolvedValue(undefined);
       const mon = new HealthMonitor({
         intervalMs: 50,
         staleTimeoutMs: 100,

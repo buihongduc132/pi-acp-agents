@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AcpCircuitBreaker, CircuitOpenError } from "../src/core/circuit-breaker.js";
 
 describe("AcpCircuitBreaker", () => {

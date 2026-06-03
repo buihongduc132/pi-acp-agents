@@ -1,7 +1,7 @@
 /**
  * RED tests for adapter-factory module.
  */
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { createAdapter, isKnownAdapter } from "../src/adapter-factory.js";
 import { AcpxAdapter } from "../src/adapters/acpx.js";
 import { CodexAcpAdapter } from "../src/adapters/codex.js";

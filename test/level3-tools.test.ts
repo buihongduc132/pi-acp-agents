@@ -1,14 +1,14 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 describe("Level 3+ — ACP management tool registration", () => {
   const registeredTools: string[] = [];
 
   const mockPi = {
-    registerTool: mock((tool: any) => {
+    registerTool: vi.fn((tool: any) => {
       registeredTools.push(tool.name);
     }),
-    registerCommand: mock(),
-    on: mock(),
+    registerCommand: vi.fn(),
+    on: vi.fn(),
   };
 
   beforeEach(() => {
@@ -70,6 +70,6 @@ describe("Level 3+ — ACP management tool registration", () => {
       "acp_session_set_mode",
       "acp_cancel",
     ]));
-    expect(registeredTools.length).toBe(34);
+    expect(registeredTools.length).toBe(36);
   });
 });

@@ -1,27 +1,27 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 
 // Mock child_process spawn
-const mockSpawn = mock();
-const mockKillFn = mock();
+const mockSpawn = vi.fn();
+const mockKillFn = vi.fn();
 
-mock.module("node:child_process", () => ({
+vi.mock("node:child_process", () => ({
 	spawn: (...args: any[]) => mockSpawn(...args),
 }));
 
 // Mock circuit-breaker
-const mockKillWithEscalation = mock();
-mock.module("../src/core/circuit-breaker.js", () => ({
+const mockKillWithEscalation = vi.fn();
+vi.mock("../src/core/circuit-breaker.js", () => ({
 	killWithEscalation: (...args: any[]) => mockKillWithEscalation(...args),
 }));
 
 // Mock protocol-validator
-mock.module("../src/core/protocol-validator.js", () => ({
-	classifyConnectionError: mock((err) => err),
-	validateInitializeResponse: mock(),
-	validateNewSessionResponse: mock(),
-	validatePromptResponse: mock(),
+vi.mock("../src/core/protocol-validator.js", () => ({
+	classifyConnectionError: vi.fn((err) => err),
+	validateInitializeResponse: vi.fn(),
+	validateNewSessionResponse: vi.fn(),
+	validatePromptResponse: vi.fn(),
 	AcpProtocolError: class extends Error {
 		constructor(public details: any) {
 			super(details.message);
@@ -31,11 +31,11 @@ mock.module("../src/core/protocol-validator.js", () => ({
 }));
 
 // Mock logger
-mock.module("../src/logger.js", () => ({
-	createFileLogger: mock(() => ({
-		info: mock(),
-		error: mock(),
-		debug: mock(),
+vi.mock("../src/logger.js", () => ({
+	createFileLogger: vi.fn(() => ({
+		info: vi.fn(),
+		error: vi.fn(),
+		debug: vi.fn(),
 	})),
 }));
 
@@ -52,7 +52,7 @@ function makeFakeProc() {
 		stderr,
 		killed: false,
 		kill: mockKillFn,
-		on: mock(),
+		on: vi.fn(),
 	};
 	return proc;
 }

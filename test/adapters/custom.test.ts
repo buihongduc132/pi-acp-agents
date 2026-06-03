@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { CustomAcpAdapter } from "../../src/adapters/custom.js";
 
 describe("CustomAcpAdapter", () => {

@@ -1,7 +1,7 @@
 /**
  * RED tests for logger module.
  */
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createFileLogger, createNoopLogger } from "../src/logger.js";
 import { existsSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";

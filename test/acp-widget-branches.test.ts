@@ -1,7 +1,7 @@
 /**
  * Branch coverage for acp-widget.ts — formatTokens and timeAgo branches
  */
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { createAcpWidget, type AcpWidgetState, type AcpWidgetSession, type AcpWidgetDeps } from "../src/acp-widget.js";
 
 const mockTheme: any = {

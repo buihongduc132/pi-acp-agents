@@ -1,7 +1,7 @@
 /**
  * Branch coverage for logger.ts — error paths, mkdirSync failure, appendFileSync failure
  */
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

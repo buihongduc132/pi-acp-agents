@@ -1,10 +1,10 @@
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AgentCoordinator } from "../src/coordination/coordinator.js";
 import type { AcpConfig } from "../src/config/types.js";
 import { createAdapter } from "../src/adapter-factory.js";
 
 // Mock the adapter factory
-mock.module("../src/adapter-factory.js");
+vi.mock("../src/adapter-factory.js");
 
 const mockPromptResult = {
   text: "mock response",
@@ -14,15 +14,15 @@ const mockPromptResult = {
 
 function createMockAdapter(overrides: Record<string, any> = {}) {
   return {
-    spawn: mock().mockResolvedValue(undefined),
-    initialize: mock().mockResolvedValue(undefined),
-    newSession: mock().mockResolvedValue("mock-session-id"),
-    prompt: mock().mockResolvedValue({ ...mockPromptResult }),
-    loadSession: mock().mockResolvedValue("mock-session-id"),
-    setModel: mock().mockResolvedValue(undefined),
-    setMode: mock().mockResolvedValue(undefined),
-    cancel: mock().mockResolvedValue(undefined),
-    dispose: mock(),
+    spawn: vi.fn().mockResolvedValue(undefined),
+    initialize: vi.fn().mockResolvedValue(undefined),
+    newSession: vi.fn().mockResolvedValue("mock-session-id"),
+    prompt: vi.fn().mockResolvedValue({ ...mockPromptResult }),
+    loadSession: vi.fn().mockResolvedValue("mock-session-id"),
+    setModel: vi.fn().mockResolvedValue(undefined),
+    setMode: vi.fn().mockResolvedValue(undefined),
+    cancel: vi.fn().mockResolvedValue(undefined),
+    dispose: vi.fn(),
     connected: true,
     ...overrides,
   };
@@ -44,7 +44,7 @@ describe("AgentCoordinator", () => {
   let coordinator: AgentCoordinator;
 
   beforeEach(() => {
-    createAdapter as any.mockReturnValue(createMockAdapter() as any);
+    (createAdapter as any).mockReturnValue(createMockAdapter() as any);
     coordinator = new AgentCoordinator(mockConfig, "/tmp");
   });
 
@@ -74,16 +74,16 @@ describe("AgentCoordinator", () => {
 
     it("disposes adapter after use", async () => {
       const adapter = createMockAdapter();
-      createAdapter as any.mockReturnValue(adapter as any);
+      (createAdapter as any).mockReturnValue(adapter as any);
       await coordinator.delegate("gemini", "test");
       expect(adapter.dispose).toHaveBeenCalled();
     });
 
     it("disposes adapter even on error", async () => {
       const adapter = createMockAdapter({
-        prompt: mock().mockRejectedValue(new Error("boom")),
+        prompt: vi.fn().mockRejectedValue(new Error("boom")),
       });
-      createAdapter as any.mockReturnValue(adapter as any);
+      (createAdapter as any).mockReturnValue(adapter as any);
       await expect(coordinator.delegate("gemini", "test")).rejects.toThrow("boom");
       expect(adapter.dispose).toHaveBeenCalled();
     });
@@ -100,11 +100,11 @@ describe("AgentCoordinator", () => {
 
     it("handles individual agent failures gracefully", async () => {
       let callCount = 0;
-      createAdapter as any.mockImplementation((() => {
+      (createAdapter as any).mockImplementation((() => {
         callCount++;
         if (callCount === 2) {
           return createMockAdapter({
-            prompt: mock().mockRejectedValue(new Error("agent crashed")),
+            prompt: vi.fn().mockRejectedValue(new Error("agent crashed")),
           }) as any;
         }
         return createMockAdapter() as any;
@@ -133,11 +133,11 @@ describe("AgentCoordinator", () => {
 
     it("includes error info in comparison", async () => {
       let callCount = 0;
-      createAdapter as any.mockImplementation((() => {
+      (createAdapter as any).mockImplementation((() => {
         callCount++;
         if (callCount === 2) {
           return createMockAdapter({
-            prompt: mock().mockRejectedValue(new Error("fail")),
+            prompt: vi.fn().mockRejectedValue(new Error("fail")),
           }) as any;
         }
         return createMockAdapter() as any;

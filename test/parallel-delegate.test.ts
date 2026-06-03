@@ -11,7 +11,7 @@
  *   - Cleanup removes only the targeted delegation
  *   - Widget state snapshots are accurate
  */
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import {
 	type AcpWidgetDeps,
 	type AcpWidgetState,

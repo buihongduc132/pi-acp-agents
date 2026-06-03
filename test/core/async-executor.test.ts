@@ -1,7 +1,7 @@
 /**
  * TDD tests for AsyncExecutor (M1: Async Background Delegation)
  */
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 // Mock AgentCoordinator
 function createMockCoordinator(response: string, delayMs = 50) {
 	return {
-		delegate: mock(async () => {
+		delegate: vi.fn(async () => {
 			await new Promise((r) => setTimeout(r, delayMs));
 			return { text: response, stopReason: "stop", sessionId: "mock-ses-1" };
 		}),
@@ -53,7 +53,7 @@ describe("AsyncExecutor", () => {
 		it("handles error → state = failed", async () => {
 			const { AsyncExecutor } = await import("../../src/core/async-executor.js");
 			const coordinator = {
-				delegate: mock(async () => {
+				delegate: vi.fn(async () => {
 					throw new Error("Agent crashed");
 				}),
 			};

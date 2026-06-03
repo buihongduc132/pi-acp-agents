@@ -3,42 +3,44 @@
  * Targets: createFilteredStdoutStream, handleSessionUpdate branches,
  * stderr truncation, quickPrompt lifecycle, setModel/setMode without session
  */
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { Readable, Writable, EventEmitter } from "node:stream";
 
 // Mock child_process
-const mockSpawn = mock((...args: any[]) => {
-	throw new Error("spawn ENOENT");
-});
-mock.module("node:child_process", () => ({
+const { mockSpawn } = vi.hoisted(() => ({
+	mockSpawn: vi.fn((...args: any[]) => {
+		throw new Error("spawn ENOENT");
+	}),
+}));
+vi.mock("node:child_process", () => ({
 	spawn: mockSpawn,
 }));
 
 // Mock circuit-breaker
-mock.module("../src/core/circuit-breaker.js", () => ({
-	killWithEscalation: mock(),
+vi.mock("../src/core/circuit-breaker.js", () => ({
+	killWithEscalation: vi.fn(),
 }));
 
 // Mock protocol-validator
-mock.module("../src/core/protocol-validator.js", () => ({
-	AcpProtocolError: class AcpProtocolError extends Error {},
+vi.mock("../src/core/protocol-validator.js", () => ({
+	AcpProtocolError: class AcpProtocolError extends Error { constructor(opts: any) { super(typeof opts === 'string' ? opts : opts?.message || String(opts)); } },
 	classifyConnectionError: (err: Error) => err,
-	validateInitializeResponse: mock(),
-	validateNewSessionResponse: mock(),
-	validatePromptResponse: mock(),
+	validateInitializeResponse: vi.fn(),
+	validateNewSessionResponse: vi.fn(),
+	validatePromptResponse: vi.fn(),
 }));
 
 // Mock logger
-mock.module("../src/logger.js", () => ({
-	createFileLogger: mock(() => ({
-		info: mock(),
-		error: mock(),
-		debug: mock(),
+vi.mock("../src/logger.js", () => ({
+	createFileLogger: vi.fn(() => ({
+		info: vi.fn(),
+		error: vi.fn(),
+		debug: vi.fn(),
 	})),
-	createNoopLogger: mock(() => ({
-		info: mock(),
-		error: mock(),
-		debug: mock(),
+	createNoopLogger: vi.fn(() => ({
+		info: vi.fn(),
+		error: vi.fn(),
+		debug: vi.fn(),
 	})),
 }));
 
@@ -50,7 +52,7 @@ function createMockProc() {
 	proc.stdout = new Readable({ read() {} }) as any;
 	proc.stderr = new EventEmitter() as any;
 	proc.killed = false;
-	proc.kill = mock(() => { proc.killed = true; });
+	proc.kill = vi.fn(() => { proc.killed = true; });
 	return proc;
 }
 

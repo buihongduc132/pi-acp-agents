@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "bun:test";
+import { describe, it, expect, vi } from "vitest";
 import { AcpAgentAdapter, type AcpAdapterOptions } from "../../src/adapters/base.js";
 import type { AcpAgentConfig, AcpPromptResult } from "../../src/config/types.js";
 import { createMockAgent } from "../helpers/mock-acp-server.js";
@@ -8,9 +8,9 @@ import type { Logger } from "../../src/logger.js";
 /** Noop logger for tests */
 function noopLogger(): Logger {
   return {
-    info: mock(),
-    error: mock(),
-    debug: mock(),
+    info: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
   };
 }
 

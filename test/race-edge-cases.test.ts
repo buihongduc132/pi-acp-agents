@@ -4,7 +4,7 @@
  * EC-1 (CRITICAL): race() must timeout when all agents hang simultaneously.
  * EC-2 (HIGH): race() must cancel losing agents when one wins.
  */
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
 	AliasResolver,
 	AllAgentsFailedError,
