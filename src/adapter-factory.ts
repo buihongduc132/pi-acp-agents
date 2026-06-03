@@ -1,9 +1,9 @@
 /**
- * pi-acp-agents — Adapter factory
+ * pi-acp-agents — Adapter factory with mode-based routing.
  *
- * Routes adapter creation based on agent config:
- * - mode === 'acpx' → AcpxAdapter (CLI delegation)
- * - mode === 'direct' or undefined → dedicated adapter (gemini/opencode/codex) or CustomAcpAdapter
+ * Routing priority:
+ * 1. mode === 'acpx' → AcpxAdapter (CLI delegation)
+ * 2. mode === 'direct' or undefined → name-based routing to dedicated adapters
  */
 
 import type { AcpAgentAdapter } from "./adapters/base.js";
@@ -26,17 +26,12 @@ export function createAdapter(
 ): AcpAgentAdapter {
 	const sharedOpts = { onActivity: adapterOpts?.onActivity };
 
-	// ACPX mode: delegate to acpx CLI
+	// Mode-based routing: acpx mode always routes to AcpxAdapter
 	if (agentConfig.mode === "acpx") {
-		return new AcpxAdapter({
-			config: { ...agentConfig, agentName: agentConfig.agentName ?? agentName },
-			cwd,
-			agentName,
-			...sharedOpts,
-		});
+		return new AcpxAdapter({ config: agentConfig, cwd, agentName, ...sharedOpts });
 	}
 
-	// Direct mode (or default): use dedicated adapter or fallback to custom
+	// Direct mode (or undefined/default) → name-based routing
 	switch (agentName) {
 		case "gemini":
 			return new GeminiAcpAdapter({ config: agentConfig, cwd, ...sharedOpts });

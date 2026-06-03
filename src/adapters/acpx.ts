@@ -1,157 +1,153 @@
 /**
- * pi-acp-agents — ACPX CLI adapter
+ * pi-acp-agents — ACPX CLI adapter.
  *
- * Runs agent sessions via the `acpx` CLI tool instead of direct subprocess
- * management. Supports initialize, prompt, cancel, and dispose via CLI calls.
+ * Delegates ACP agent interaction to the `acpx` CLI instead of managing
+ * a subprocess directly. Session lifecycle is handled via CLI commands:
+ *   - spawn  → acpx sessions create
+ *   - prompt → acpx sessions prompt
+ *   - cancel → acpx sessions cancel
+ *   - dispose → acpx sessions close
  */
-import { execFile } from "node:child_process";
-import { AcpAgentAdapter, type AcpAdapterOptions } from "./base.js";
-import type { AcpPromptResult } from "../config/types.js";
+import { spawnSync } from "node:child_process";
+import type { AcpAdapterOptions, AcpPromptResult } from "../config/types.js";
 
-export class AcpxAdapter extends AcpAgentAdapter {
-	private acpxSessionId: string | null = null;
-	private acpxAgentName: string;
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
-	get name(): string {
-		return "acpx";
-	}
+const DEFAULT_TIMEOUT_SEC = 3600; // 1 hour
+const ACX_BINARY = "acpx";
+
+// ---------------------------------------------------------------------------
+// Internal state
+// ---------------------------------------------------------------------------
+
+interface AcpxSessionState {
+	sessionId: string | null;
+	connected: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Adapter
+// ---------------------------------------------------------------------------
+
+export class AcpxAdapter {
+	public readonly name = "acpx";
+	private state: AcpxSessionState = { sessionId: null, connected: false };
+	private cwd: string;
+	private agentName: string;
 
 	constructor(opts: AcpAdapterOptions) {
-		super(opts);
-		// Store the agent name for acpx session creation.
-		// Can come from opts.agentName (adapter-level) or opts.config.agentName (config-level).
-		this.acpxAgentName = opts.agentName ?? (opts.config as Record<string, unknown>).agentName as string | undefined ?? this.name;
+		this.cwd = opts.cwd ?? process.cwd();
+		this.agentName = opts.agentName ?? (opts.config.command
+			? opts.config.command.split("/").pop() ?? "acpx"
+			: "acpx");
 	}
 
-	/** Spawn: create an acpx session and capture its ID */
-	override async spawn(): Promise<void> {
-		const args = ["sessions", "create", this.acpxAgentName, "--format", "json"];
+	// -----------------------------------------------------------------------
+	// Public API — matches AcpAgentAdapter surface
+	// -----------------------------------------------------------------------
 
-		const stdout = await this.execAcpx(args);
-		const parsed = JSON.parse(stdout) as Record<string, unknown>;
-
-		const sessionId = parsed.sessionId as string | undefined;
-		if (!sessionId) {
-			throw new Error(`acpx sessions create returned no sessionId: ${stdout}`);
+	async spawn(): Promise<void> {
+		const result = this._runAcpx(["sessions", "create", this.agentName, "--format", "json"]);
+		if (result.status !== 0) {
+			const err = result.stderr?.trim() || "acpx sessions create failed";
+			throw new Error(`AcpxAdapter spawn failed: ${err}`);
 		}
-		this.acpxSessionId = sessionId;
+		const parsed = JSON.parse(result.stdout);
+		this.state.sessionId = parsed.sessionId ?? null;
+		this.state.connected = true;
 	}
 
-	/** Send a prompt via acpx CLI and parse the response */
-	override async prompt(message: string): Promise<AcpPromptResult> {
-		if (!this.acpxSessionId) {
+	async initialize(): Promise<void> {
+		// acpx manages its own init; no separate handshake needed
+		if (!this.state.connected) {
 			throw new Error("Not spawned — call spawn() first");
 		}
+	}
 
-		const timeoutSec = this.config.stallTimeoutMs
-			? Math.ceil(this.config.stallTimeoutMs / 1000)
-			: undefined;
+	async newSession(_cwd?: string): Promise<string> {
+		if (!this.state.connected) throw new Error("Not spawned");
+		// acpx creates a new session per spawn; return current ID
+		if (!this.state.sessionId) {
+			throw new Error("No session ID after spawn");
+		}
+		return this.state.sessionId;
+	}
 
-		const args: string[] = [
-			"prompt",
-			"--session",
-			this.acpxSessionId,
-			"--format",
-			"json",
+	async prompt(message: string): Promise<AcpPromptResult> {
+		if (!this.state.connected) throw new Error("Not spawned — call spawn() first");
+		if (!this.state.sessionId) throw new Error("No session ID");
+
+		const timeout = DEFAULT_TIMEOUT_SEC;
+		const args = [
+			"sessions", "prompt",
+			"--session", this.state.sessionId,
+			"--format", "json",
 			"--approve-all",
+			"--timeout", String(timeout),
+			"--",
+			message,
 		];
-
-		if (timeoutSec) {
-			args.push("--timeout", String(timeoutSec));
+		const result = this._runAcpx(args);
+		if (result.status !== 0) {
+			const err = result.stderr?.trim() || "acpx prompt failed";
+			throw new Error(`AcpxAdapter prompt failed: ${err}`);
 		}
-
-		if (this.cwd) {
-			args.push("--cwd", this.cwd);
-		}
-
-		// Append the prompt message as the last argument
-		args.push("--", message);
-
-		const stdout = await this.execAcpx(args);
-		const parsed = JSON.parse(stdout) as Record<string, unknown>;
-
-		if (parsed.error) {
-			throw new Error(String(parsed.error));
-		}
-
+		const parsed = JSON.parse(result.stdout);
 		return {
-			text: String(parsed.text ?? ""),
-			stopReason: String(parsed.stopReason ?? "unknown"),
-			sessionId: String(parsed.sessionId ?? this.acpxSessionId),
+			text: parsed.text ?? "",
+			stopReason: parsed.stopReason ?? parsed.stop_reason ?? "end_turn",
+			sessionId: parsed.sessionId ?? parsed.session_id ?? this.state.sessionId!,
 		};
 	}
 
-	/** Cancel the in-flight prompt for the current acpx session */
-	override async cancel(): Promise<void> {
-		if (!this.acpxSessionId) return;
+	async cancel(): Promise<void> {
+		if (!this.state.sessionId) return;
+		this._runAcpx(["sessions", "cancel", "--session", this.state.sessionId]);
+	}
 
-		try {
-			await this.execAcpx(["sessions", "cancel", this.acpxSessionId]);
-		} catch {
-			// Best-effort: cancel is not critical
+	async loadSession(sessionId: string): Promise<string> {
+		this.state.sessionId = sessionId;
+		this.state.connected = true;
+		return sessionId;
+	}
+
+	async setModel(_modelId: string): Promise<void> {
+		// acpx doesn't support per-session model switching via CLI
+		// Model is configured at the acpx profile level
+	}
+
+	async setMode(_modeId: string): Promise<void> {
+		// acpx doesn't support per-session mode switching via CLI
+	}
+
+	getSessionId(): string | null {
+		return this.state.sessionId;
+	}
+
+	get connected(): boolean {
+		return this.state.connected;
+	}
+
+	dispose(): void {
+		if (this.state.sessionId) {
+			this._runAcpx(["sessions", "close", this.state.sessionId]);
 		}
+		this.state.sessionId = null;
+		this.state.connected = false;
 	}
 
-	/** Close the acpx session and clean up */
-	override dispose(): void {
-		if (this.acpxSessionId) {
-			const sid = this.acpxSessionId;
-			this.acpxSessionId = null;
-			// Fire-and-forget via execFile (avoids execFileSync which is harder to mock in tests)
-			execFile(
-				"acpx",
-				["sessions", "close", sid],
-				{ timeout: 10_000, cwd: this.cwd },
-				() => { /* best-effort: errors are silently ignored */ },
-			);
-		}
-		// Also call base dispose for any client cleanup
-		super.dispose();
-	}
+	// -----------------------------------------------------------------------
+	// Internal
+	// -----------------------------------------------------------------------
 
-	/** Override connected to reflect acpx session state */
-	override get connected(): boolean {
-		return this.acpxSessionId !== null;
-	}
-
-	/** Override getSessionId to return acpx session id */
-	override getSessionId(): string | null {
-		return this.acpxSessionId;
-	}
-
-	// -------------------------------------------------------------------------
-	// Internal helpers
-	// -------------------------------------------------------------------------
-
-	private execAcpx(args: string[]): Promise<string> {
-		return new Promise<string>((resolve, reject) => {
-			execFile(
-				"acpx",
-				args,
-				{ timeout: this.config.stallTimeoutMs ?? 3_600_000, cwd: this.cwd },
-				(err, stdout, _stderr) => {
-					if (err) {
-						reject(err);
-					} else {
-						resolve(stdout.trim());
-					}
-				},
-			);
+	private _runAcpx(args: string[]) {
+		return spawnSync(ACX_BINARY, args, {
+			cwd: this.cwd,
+			encoding: "utf-8",
+			timeout: 120_000, // 2 min for CLI itself; prompt timeout is passed to acpx
+			maxBuffer: 10 * 1024 * 1024, // 10 MB
 		});
-	}
-
-	private execAcpxSync(args: string[]): string {
-		// Use execFile wrapped in sync promise for testability (avoids execFileSync which is harder to mock)
-		const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
-		try {
-			return execFileSync("acpx", args, {
-				timeout: 10_000,
-				cwd: this.cwd,
-				encoding: "utf-8",
-			}).trim();
-		} catch (err: unknown) {
-			// Best-effort: dispose should not throw
-			return "";
-		}
 	}
 }

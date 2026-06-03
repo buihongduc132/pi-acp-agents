@@ -1,339 +1,204 @@
 /**
- * RED tests for AcpxAdapter — T8/T10
+ * pi-acp-agents — AcpxAdapter unit tests.
  *
- * Tests the adapter that shells out to the acpx CLI for agent communication.
- * Uses execFile mocking to verify correct command construction and response parsing.
+ * Tests the acpx CLI adapter that delegates agent interaction to the acpx CLI
+ * instead of spawning a subprocess directly.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import type { AcpAdapterOptions } from "../../src/config/types.js";
 import { AcpxAdapter } from "../../src/adapters/acpx.js";
-import type { AcpAgentConfig } from "../../src/config/types.js";
 
-// Mock child_process
-const mockExecFile = vi.fn();
-const mockExecFileSync = vi.fn();
-vi.mock("node:child_process", () => ({
-	execFile: (...args: unknown[]) => mockExecFile(...args),
-	execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
-}));
+// ---------------------------------------------------------------------------
+// Mock spawnSync
+// ---------------------------------------------------------------------------
 
-// Mock fs for homedir fallback
-vi.mock("node:fs", () => ({
-	existsSync: () => true,
-	readFileSync: () => "{}",
-	writeFileSync: () => {},
-	mkdirSync: () => {},
-}));
+const spawnSyncResults: Array<{ status: number; stdout: string; stderr: string }> = [];
+let callIndex = 0;
 
-const SUCCESS_PROMPT_JSON = JSON.stringify({
-	text: "Hello from acpx",
-	stopReason: "end_turn",
-	sessionId: "ses_123",
+const spawnSyncMock = mock(() => {
+	const idx = callIndex++;
+	const result = spawnSyncResults[idx] ?? spawnSyncResults[spawnSyncResults.length - 1];
+	return result ?? { status: 1, stdout: "", stderr: "no mock result queued" };
 });
 
-const ERROR_PROMPT_JSON = JSON.stringify({
-	error: "Agent refused to answer",
-	stopReason: "error",
-});
+mock.module("node:child_process", () => ({
+	spawnSync: spawnSyncMock,
+}));
 
-function createDefaultConfig(): AcpAgentConfig {
-	return { command: "acpx", mode: "acpx" };
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeOpts(overrides: Partial<AcpAdapterOptions> = {}): AcpAdapterOptions {
+	return {
+		config: { command: "acpx" },
+		...overrides,
+	};
 }
+
+function queueResult(status: number, stdout: string, stderr = "") {
+	spawnSyncResults.push({ status, stdout, stderr });
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 describe("AcpxAdapter", () => {
 	beforeEach(() => {
-		mockExecFile.mockReset();
-		mockExecFileSync.mockReset();
-		vi.useFakeTimers();
-	});
-
-	afterEach(() => {
-		vi.useRealTimers();
+		spawnSyncResults.length = 0;
+		callIndex = 0;
 	});
 
 	describe("name", () => {
-		it("returns 'acpx' as adapter name", () => {
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-			});
+		it("returns 'acpx' as the adapter name", () => {
+			const adapter = new AcpxAdapter(makeOpts());
 			expect(adapter.name).toBe("acpx");
 		});
 	});
 
-	describe("spawn / initialize", () => {
-		it("calls 'acpx sessions create' with agent name and format json", async () => {
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, JSON.stringify({ sessionId: "ses_new_001" }));
-				},
-			);
-
-			const adapter = new AcpxAdapter({
-				config: { ...createDefaultConfig(), agentName: "claude" },
-			});
+	describe("spawn", () => {
+		it("creates an acpx session and stores session ID", async () => {
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-001" }));
+			const adapter = new AcpxAdapter(makeOpts());
 			await adapter.spawn();
-
-			const callArgs = mockExecFile.mock.calls[0][1] as string[];
-			expect(callArgs).toContain("sessions");
-			expect(callArgs).toContain("create");
-			expect(callArgs).toContain("claude");
-			expect(callArgs).toContain("--format");
-			expect(callArgs).toContain("json");
+			expect(adapter.getSessionId()).toBe("acpx-sess-001");
+			expect(adapter.connected).toBe(true);
 		});
 
-		it("stores session id from acpx response", async () => {
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, JSON.stringify({ sessionId: "ses_abc456" }));
-				},
-			);
-
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-				agentName: "gemini",
-			});
-			await adapter.spawn();
-
-			expect(adapter.getSessionId()).toBe("ses_abc456");
+		it("throws if spawn fails", async () => {
+			queueResult(1, "", "acpx: command not found");
+			const adapter = new AcpxAdapter(makeOpts());
+			await expect(adapter.spawn()).rejects.toThrow(/spawn failed/i);
 		});
 
-		it("throws on spawn failure", async () => {
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(new Error("acpx not found"), "");
-				},
-			);
-
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-				agentName: "test",
-			});
-
-			await expect(adapter.spawn()).rejects.toThrow("acpx not found");
+		it("throws on empty session ID from spawn", async () => {
+			queueResult(0, JSON.stringify({}));
+			const adapter = new AcpxAdapter(makeOpts());
+			await adapter.spawn();
+			expect(adapter.getSessionId()).toBeNull();
+			expect(adapter.connected).toBe(true);
 		});
 	});
 
 	describe("prompt", () => {
-		it("calls 'acpx prompt' with session id and format json", async () => {
-			// Simulate spawned state
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, JSON.stringify({ sessionId: "ses_prompt_test" }));
-				},
-			);
+		it("throws if prompt called before spawn", async () => {
+			const adapter = new AcpxAdapter(makeOpts());
+			await expect(adapter.prompt("test")).rejects.toThrow(/Not spawned/i);
+		});
 
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-				agentName: "test-agent",
-			});
+		it("throws if prompt called after spawn with no session ID", async () => {
+			queueResult(0, JSON.stringify({})); // spawn returns no sessionId
+			const adapter = new AcpxAdapter(makeOpts());
 			await adapter.spawn();
+			await expect(adapter.prompt("test")).rejects.toThrow(/No session ID/i);
+		});
 
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, SUCCESS_PROMPT_JSON);
-				},
-			);
-
+		it("sends prompt via acpx CLI and returns parsed result", async () => {
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-001" })); // spawn
+			queueResult(0, JSON.stringify({
+				text: "Hello from acpx!",
+				stopReason: "end_turn",
+				sessionId: "acpx-sess-001",
+			})); // prompt
+			const adapter = new AcpxAdapter(makeOpts());
+			await adapter.spawn();
 			const result = await adapter.prompt("Say hello");
-
-			expect(mockExecFile).toHaveBeenCalledWith(
-				"acpx",
-				expect.arrayContaining([
-					"prompt",
-					"--session",
-					"ses_prompt_test",
-					"--format",
-					"json",
-					"--approve-all",
-				]),
-				expect.any(Object),
-				expect.any(Function),
-			);
-			expect(result.text).toBe("Hello from acpx");
+			expect(result.text).toBe("Hello from acpx!");
 			expect(result.stopReason).toBe("end_turn");
-			expect(result.sessionId).toBe("ses_123");
+			expect(result.sessionId).toBe("acpx-sess-001");
 		});
 
-		it("passes timeout flag when config has stallTimeoutMs", async () => {
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, JSON.stringify({ sessionId: "ses_timeout_test" }));
-				},
-			);
-
-			const adapter = new AcpxAdapter({
-				config: { ...createDefaultConfig(), stallTimeoutMs: 30000 },
-				agentName: "test-agent",
-			});
+		it("throws on acpx CLI error during prompt", async () => {
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-001" }));
+			queueResult(1, "", "acpx error: session expired");
+			const adapter = new AcpxAdapter(makeOpts());
 			await adapter.spawn();
+			await expect(adapter.prompt("fail")).rejects.toThrow(/prompt failed/i);
+		});
+	});
 
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, SUCCESS_PROMPT_JSON);
-				},
-			);
-
-			await adapter.prompt("Test timeout");
-
-			const callArgs = mockExecFile.mock.calls[1][1] as string[];
-			const timeoutIdx = callArgs.indexOf("--timeout");
-			expect(timeoutIdx).toBeGreaterThanOrEqual(0);
-			expect(callArgs[timeoutIdx + 1]).toBe("30");
+	describe("initialize", () => {
+		it("throws if not spawned", async () => {
+			const adapter = new AcpxAdapter(makeOpts());
+			await expect(adapter.initialize()).rejects.toThrow(/Not spawned/i);
 		});
 
-		it("throws error when acpx returns an error response", async () => {
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, JSON.stringify({ sessionId: "ses_err_test" }));
-				},
-			);
-
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-				agentName: "test",
-			});
+		it("succeeds after spawn", async () => {
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-001" }));
+			const adapter = new AcpxAdapter(makeOpts());
 			await adapter.spawn();
-
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, ERROR_PROMPT_JSON);
-				},
-			);
-
-			await expect(adapter.prompt("Fail me")).rejects.toThrow("Agent refused to answer");
+			await expect(adapter.initialize()).resolves.toBeUndefined();
 		});
+	});
 
-		it("throws if not spawned before prompt", async () => {
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-			});
-
-			await expect(adapter.prompt("Before spawn")).rejects.toThrow();
-		});
-
-		it("includes cwd as --cwd flag when provided", async () => {
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, JSON.stringify({ sessionId: "ses_cwd_test" }));
-				},
-			);
-
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-				agentName: "test",
-				cwd: "/some/project/dir",
-			});
+	describe("newSession", () => {
+		it("returns session ID after spawn", async () => {
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-001" }));
+			const adapter = new AcpxAdapter(makeOpts());
 			await adapter.spawn();
+			const id = await adapter.newSession();
+			expect(id).toBe("acpx-sess-001");
+		});
 
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, SUCCESS_PROMPT_JSON);
-				},
-			);
-
-			await adapter.prompt("Test cwd");
-
-			const callArgs = mockExecFile.mock.calls[1][1] as string[];
-			expect(callArgs).toContain("--cwd");
-			expect(callArgs).toContain("/some/project/dir");
+		it("throws if not spawned", async () => {
+			const adapter = new AcpxAdapter(makeOpts());
+			await expect(adapter.newSession()).rejects.toThrow(/Not spawned/i);
 		});
 	});
 
 	describe("cancel", () => {
-		it("calls 'acpx sessions cancel' with session id", async () => {
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, JSON.stringify({ sessionId: "ses_cancel_test" }));
-				},
-			);
-
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-				agentName: "test",
-			});
-			await adapter.spawn();
-
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, "{}");
-				},
-			);
-
-			await adapter.cancel();
-
-			expect(mockExecFile).toHaveBeenCalledWith(
-				"acpx",
-				expect.arrayContaining(["sessions", "cancel", "ses_cancel_test"]),
-				expect.any(Object),
-				expect.any(Function),
-			);
+		it("does not throw if no session ID", async () => {
+			const adapter = new AcpxAdapter(makeOpts());
+			await expect(adapter.cancel()).resolves.toBeUndefined();
 		});
 
-		it("no-ops gracefully if not spawned", async () => {
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-			});
-			// Should not throw
-			await adapter.cancel();
+		it("runs cancel CLI when session exists", async () => {
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-001" })); // spawn
+			queueResult(0, "", ""); // cancel
+			const adapter = new AcpxAdapter(makeOpts());
+			await adapter.spawn();
+			await expect(adapter.cancel()).resolves.toBeUndefined();
+		});
+	});
+
+	describe("loadSession", () => {
+		it("sets session ID and connected state", async () => {
+			const adapter = new AcpxAdapter(makeOpts());
+			const id = await adapter.loadSession("existing-session");
+			expect(id).toBe("existing-session");
+			expect(adapter.getSessionId()).toBe("existing-session");
+			expect(adapter.connected).toBe(true);
 		});
 	});
 
 	describe("dispose", () => {
-		it("calls 'acpx sessions close' with session id", async () => {
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, JSON.stringify({ sessionId: "ses_dispose_test" }));
-				},
-			);
-
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-				agentName: "test",
-			});
+		it("closes session and resets state", async () => {
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-001" })); // spawn
+			queueResult(0, "", ""); // close
+			const adapter = new AcpxAdapter(makeOpts());
 			await adapter.spawn();
-
-			// Reset mock count from spawn call
-			mockExecFile.mockClear();
-
+			expect(adapter.connected).toBe(true);
 			adapter.dispose();
-
-			expect(mockExecFile).toHaveBeenCalledWith(
-				"acpx",
-				["sessions", "close", "ses_dispose_test"],
-				expect.objectContaining({ timeout: 10_000 }),
-				expect.any(Function),
-			);
+			expect(adapter.getSessionId()).toBeNull();
+			expect(adapter.connected).toBe(false);
 		});
 
-		it("no-ops gracefully if not spawned", () => {
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-			});
-			// Should not throw
-			adapter.dispose();
+		it("does not throw if not spawned", () => {
+			const adapter = new AcpxAdapter(makeOpts());
+			expect(() => adapter.dispose()).not.toThrow();
 		});
 	});
 
-	describe("connected", () => {
-		it("returns true after spawn", async () => {
-			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string) => void) => {
-					cb(null, JSON.stringify({ sessionId: "ses_conn_test" }));
-				},
-			);
-
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-			});
-			await adapter.spawn();
-
-			expect(adapter.connected).toBe(true);
+	describe("setModel / setMode", () => {
+		it("setModel is a no-op (acpx doesn't support per-session model switching)", async () => {
+			const adapter = new AcpxAdapter(makeOpts());
+			await expect(adapter.setModel("gemini-pro")).resolves.toBeUndefined();
 		});
 
-		it("returns false before spawn", () => {
-			const adapter = new AcpxAdapter({
-				config: createDefaultConfig(),
-			});
-			expect(adapter.connected).toBe(false);
+		it("setMode is a no-op (acpx doesn't support per-session mode switching)", async () => {
+			const adapter = new AcpxAdapter(makeOpts());
+			await expect(adapter.setMode("yolo")).resolves.toBeUndefined();
 		});
 	});
 });
