@@ -152,7 +152,7 @@ function createActionMenu(
 
 	function initEditFields(): void {
 		commandInput = new Input();
-		commandInput.setValue(agent.command);
+		commandInput.setValue(agent.command ?? "");
 		commandInput.focused = true;
 		argsInput = new Input();
 		argsInput.setValue((agent.args ?? []).join(", "));
@@ -266,7 +266,7 @@ function createAddSubmenu(
 	nameInput.focused = true;
 
 	const commandInput = new Input();
-	commandInput.setValue(preset ? preset.config.command : "");
+	commandInput.setValue(preset?.config.command ?? "");
 
 	const argsInput = new Input();
 	argsInput.setValue(preset ? (preset.config.args ?? []).join(", ") : "");
@@ -337,6 +337,7 @@ function handleSubmenuResult(payload: string, configRef: { config: AcpConfig }):
 	try {
 		parsed = JSON.parse(payload);
 	} catch {
+		// Invalid JSON payload from submenu — return false
 		return false;
 	}
 
@@ -363,7 +364,10 @@ function handleSubmenuResult(payload: string, configRef: { config: AcpConfig }):
 			try {
 				configRef.config = setDefaultAgent(configRef.config, parsed.agent);
 				saveConfig(configRef.config);
-			} catch { /* ignore */ }
+	} catch (e) {
+			/* setDefault may fail if agent removed */
+			return true;
+		}
 			return true;
 		}
 		case "add": {
@@ -415,7 +419,7 @@ export async function openAgentConfigTUI(ui: SettingsUI): Promise<void> {
 						} else {
 							try {
 								configRef.config = setDefaultAgent(configRef.config, newValue);
-							} catch { return; }
+						} catch { /* setDefault may fail */ return; }
 						}
 						saveConfig(configRef.config);
 						rebuildList();

@@ -48,7 +48,7 @@ export interface AcpWidgetActivity {
 	activeCompares: number;
 	delegations: AcpWidgetDelegation[];
 	/** Capped at 20 entries — most recent last. */
-	delegationHistory: AcpDelegationHistoryEntry[];
+	delegationHistory?: AcpDelegationHistoryEntry[];
 	lastError?: string;
 }
 

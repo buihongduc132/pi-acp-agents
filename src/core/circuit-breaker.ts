@@ -38,7 +38,9 @@ export class AcpCircuitBreaker {
 		private maxFailures = 3,
 		private resetTimeoutMs = 60_000,
 		private stallTimeoutMs = 3_600_000, // 1 hour default
-	) {}
+	) {
+		// Intentional no-op: defaults are set via parameter properties
+	}
 
 	get state(): CircuitState {
 		return this._state;
@@ -121,10 +123,7 @@ export class AcpCircuitBreaker {
 			const effectiveTimeout = opts?.timeoutMs ?? this.stallTimeoutMs;
 			const raceResult = await this.executeWithStallTimeout(fn, {
 				stallTimeoutMs: effectiveTimeout,
-				onCancel: async () => {
-					// Cancel by throwing a timeout error
-					throw new Error(`Operation stalled after ${effectiveTimeout}ms`);
-				},
+				onCancel: () => Promise.reject(new Error(`Operation stalled after ${effectiveTimeout}ms`)),
 			});
 
 			// Check if we timed out

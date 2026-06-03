@@ -12,6 +12,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 // ── Tool names ──────────────────────────────────────────
 
@@ -123,7 +126,9 @@ function loadJsonLike(path: string): AcpToolSettingsInput | null {
 		const stripped = raw.replace(/^\s*\/\/.*$/gm, "").trim();
 		if (!stripped) return null;
 		return JSON.parse(stripped) as AcpToolSettingsInput;
-	} catch {
+	} catch (e) {
+		// JSON parse failed for settings file — return null to use defaults
+		log.debug("settings loadJsonLike parse failed", e);
 		return null;
 	}
 }

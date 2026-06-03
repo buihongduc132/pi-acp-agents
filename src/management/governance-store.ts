@@ -1,5 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { ensureRuntimeDir } from "./runtime-paths.js";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 export interface PlanApprovalRequest {
   agent: string;
@@ -101,8 +104,9 @@ export class GovernanceStore {
         return structuredClone(DEFAULT_PAYLOAD);
       }
       return JSON.parse(readFileSync(paths.governanceFile, "utf-8")) as GovernancePayload;
-    } catch {
+    } catch (e) {
       // EACCES, corrupt file, etc — degrade gracefully, don't crash the extension
+      log.debug("governance-store read failed", e);
       return structuredClone(DEFAULT_PAYLOAD);
     }
   }
@@ -111,8 +115,9 @@ export class GovernanceStore {
     try {
       const paths = ensureRuntimeDir(this.rootDir);
       writeFileSync(paths.governanceFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
-    } catch {
+    } catch (e) {
       // EACCES or other FS error — silently degrade. Governance is non-critical state.
+      log.debug("governance-store write failed", e);
     }
   }
 }

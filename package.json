@@ -14,6 +14,14 @@
     "pi-coding-agent"
   ],
   "type": "module",
+  "main": "./index.ts",
+  "types": "./src/public-api.ts",
+  "exports": {
+    ".": {
+      "types": "./src/public-api.ts",
+      "import": "./index.ts"
+    }
+  },
   "license": "MIT",
   "author": "walodayeet",
   "repository": {

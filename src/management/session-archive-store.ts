@@ -2,6 +2,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AcpArchivedSessionMetadata, AcpSessionHandle } from "../config/types.js";
 import { ensureRuntimeDir } from "./runtime-paths.js";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 interface ArchivePayload {
   sessions: AcpArchivedSessionMetadataRecord[];
@@ -66,7 +69,9 @@ export class SessionArchiveStore {
     }
     try {
       return JSON.parse(readFileSync(this.filePath, "utf-8")) as ArchivePayload;
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
+      log.debug("session-archive-store read failed", e);
       return structuredClone(DEFAULT_PAYLOAD);
     }
   }
@@ -74,8 +79,10 @@ export class SessionArchiveStore {
   private writeRaw(payload: ArchivePayload): void {
     try {
       writeFileSync(this.filePath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
       // EACCES or other FS error — silently degrade.
+      log.debug("session-archive-store write failed", e);
     }
   }
 

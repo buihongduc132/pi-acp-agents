@@ -4,6 +4,7 @@
 import { AcpAgentAdapter } from "./base.js";
 import type { AcpAgentConfig } from "../config/types.js";
 import type { Logger } from "../logger.js";
+import { createNoopLogger } from "../logger.js";
 import { execSync } from "node:child_process";
 
 export interface GeminiAdapterOptions {
@@ -45,7 +46,8 @@ export class GeminiAcpAdapter extends AcpAgentAdapter {
       execSync("which gemini", { stdio: "pipe" });
       return true;
     } catch (err) {
-      console.debug("gemini not available:", err);
+      // gemini CLI not found on PATH
+      createNoopLogger().debug("gemini not available", err);
       return false;
     }
   }
@@ -56,7 +58,8 @@ export class GeminiAcpAdapter extends AcpAgentAdapter {
       const output = execSync("gemini --version", { encoding: "utf-8", stdio: "pipe" });
       return output.trim();
     } catch (err) {
-      console.debug("gemini version check failed:", err);
+      // gemini version check failed
+      createNoopLogger().debug("gemini version check failed", err);
       return null;
     }
   }

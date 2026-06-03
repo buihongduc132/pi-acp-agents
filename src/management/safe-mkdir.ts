@@ -11,6 +11,9 @@
 // @ts-nocheck
 
 import { mkdirSync, statSync } from "node:fs";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 /**
  * Create a directory with current-user ownership guarantee.
@@ -39,8 +42,9 @@ export function safeMkdir(
 				`Fix: sudo chown -R $(whoami) ${dirPath}`,
 			);
 		}
-	} catch {
+	} catch (e) {
 		// stat failed — dir may not exist yet, harmless
+		log.debug("safe-mkdir stat failed", e);
 	}
 }
 
@@ -63,7 +67,8 @@ export function checkDirOwnership(dirPath: string): {
 			};
 		}
 		return { ok: true };
-	} catch {
+	} catch (e) {
+		log.debug("safe-mkdir checkDirOwnership stat failed", e);
 		return {
 			ok: false,
 			reason: `cannot stat ${dirPath}`,

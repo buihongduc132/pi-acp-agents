@@ -10,7 +10,10 @@
 import { AcpAgentAdapter } from "./base.js";
 import type { AcpAgentConfig } from "../config/types.js";
 import type { Logger } from "../logger.js";
+import { createNoopLogger } from "../logger.js";
 import { execSync } from "node:child_process";
+
+const log = createNoopLogger();
 
 export interface CodexAdapterOptions {
 	config?: Partial<AcpAgentConfig>;
@@ -50,7 +53,9 @@ export class CodexAcpAdapter extends AcpAgentAdapter {
 		try {
 			execSync("which codex-acp", { stdio: "pipe" });
 			return true;
-		} catch {
+		} catch (e) {
+			// codex-acp binary not found on PATH
+			log.debug("codex-acp not found", e);
 			return false;
 		}
 	}
@@ -63,7 +68,9 @@ export class CodexAcpAdapter extends AcpAgentAdapter {
 				stdio: "pipe",
 			});
 			return output.trim();
-		} catch {
+		} catch (e) {
+			// codex-acp version check failed
+			log.debug("codex-acp version check failed", e);
 			return null;
 		}
 	}

@@ -10,6 +10,9 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 import type { AcpAgentConfig, AcpAliasConfig, AcpConfig, LegacyAcpConfig } from "./types.js";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 const CONFIG_PATH = join(homedir(), ".pi", "acp-agents", "config.json");
 
@@ -33,14 +36,14 @@ export const AGENT_PRESETS: Record<string, () => AcpAgentConfig | null> = {
 		try {
 			execSync("which gemini", { stdio: "pipe" });
 			return { command: "gemini", args: ["--acp"] };
-		} catch { return null; }
+		} catch (e) { /* gemini not found on PATH */ log.debug("gemini preset not found", e); return null; }
 	},
 	opencode: () => {
 		for (const cmd of ["opencode", "ocxo"]) {
 			try {
 				execSync(`which ${cmd}`, { stdio: "pipe" });
 				return { command: cmd, args: ["acp"] };
-			} catch { continue; }
+			} catch (e) { /* binary not found on PATH */ log.debug(`opencode preset '${cmd}' not found`, e); continue; }
 		}
 		return null;
 	},
@@ -48,7 +51,7 @@ export const AGENT_PRESETS: Record<string, () => AcpAgentConfig | null> = {
 		try {
 			execSync("which codex-acp", { stdio: "pipe" });
 			return { command: "codex-acp", args: [] };
-		} catch { return null; }
+		} catch (e) { /* codex-acp not found on PATH */ log.debug("codex-acp preset not found", e); return null; }
 	},
 };
 
@@ -212,11 +215,13 @@ export function loadConfig(configPath?: string): AcpConfig {
 		if (needsMigration) {
 			try {
 				writeFileSync(path, JSON.stringify(migrated, null, 2) + "\n");
-			} catch { /* best-effort */ }
+			} catch (e) { log.debug("config migration write failed", e); /* best-effort */ }
 		}
 
 		return validateConfig(migrated);
-	} catch {
+	} catch (e) {
+		// Config file corrupt or unreadable — fall back to defaults
+		log.debug("config load failed, using defaults", e);
 		return structuredClone(DEFAULT_CONFIG);
 	}
 }
@@ -231,8 +236,9 @@ export function saveConfig(config: AcpConfig, configPath?: string): void {
 		}
 		const data = JSON.stringify(config, null, 2) + "\n";
 		writeFileSync(path, data, "utf-8");
-	} catch {
+	} catch (e) {
 		// EACCES or other FS error — silently degrade. Config changes are non-critical.
+		log.debug("config save failed", e);
 	}
 }
 

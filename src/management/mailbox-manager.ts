@@ -1,5 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { ensureRuntimeDir } from "./runtime-paths.js";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 export interface MailMessage {
   id: string;
@@ -72,7 +75,9 @@ export class MailboxManager {
         return structuredClone(DEFAULT_PAYLOAD);
       }
       return JSON.parse(readFileSync(paths.mailboxesFile, "utf-8")) as MailboxPayload;
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
+      log.debug("mailbox-manager read failed", e);
       return structuredClone(DEFAULT_PAYLOAD);
     }
   }
@@ -81,8 +86,10 @@ export class MailboxManager {
     try {
       const paths = ensureRuntimeDir(this.rootDir);
       writeFileSync(paths.mailboxesFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
       // EACCES or other FS error — silently degrade. Mailboxes are non-critical runtime state.
+      log.debug("mailbox-manager write failed", e);
     }
   }
 }
