@@ -1,0 +1,45 @@
+{
+  "name": "pi-acp-advanced",
+  "version": "0.1.0",
+  "description": "Extension for pi-acp-agents: multi-agent coordination, task management, async delegation",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "pi-coding-agent",
+    "acp",
+    "multi-agent",
+    "coordination"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "author": "walodayeet",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/buihongduc132/pi-acp-agents.git"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "dependencies": {
+    "pi-acp-agents": "file:../..",
+    "pi-acp-types": "workspace:*",
+    "typebox": "^1.1.37"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.73.0",
+    "@mariozechner/pi-tui": "^0.73.0",
+    "@types/node": "^22.0.0",
+    "vitest": "^4.1.5",
+    "typescript": "^6.0.3"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
