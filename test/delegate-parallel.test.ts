@@ -4,19 +4,19 @@
  * Tests the Promise.all style parallel delegation with per-agent progress
  * tracking in the widget.
  *
- * Strategy: Follow level3-tool-execution.test.ts pattern — mock the
- * AgentCoordinator, load the extension, call tool execute.
+ * Strategy: Mock the AgentCoordinator via bun:test mock.module, load the
+ * extension, call tool execute.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, mock, afterEach } from "bun:test";
 
 const mockDelegate = vi.fn();
 let runtimeDir = "";
 
-vi.mock("../src/config/config.js", () => ({
-  loadConfig: vi.fn(() => ({
+function makeConfigMock() {
+  return {
     agent_servers: {
       gemini: { command: "gemini", args: ["--acp"] },
       claude: { command: "claude", args: ["--acp"] },
@@ -34,10 +34,14 @@ vi.mock("../src/config/config.js", () => ({
       requireProviderPrefix: false,
     },
     runtimeDir,
-  })),
+  };
+}
+
+mock.module("../src/config/config.js", () => ({
+  loadConfig: vi.fn(() => makeConfigMock()),
 }));
 
-vi.mock("../src/coordination/coordinator.js", () => ({
+mock.module("../src/coordination/coordinator.js", () => ({
   AgentCoordinator: class MockAgentCoordinator {
     delegate = mockDelegate;
     broadcast = vi.fn();
@@ -48,7 +52,7 @@ vi.mock("../src/coordination/coordinator.js", () => ({
   },
 }));
 
-vi.mock("../src/adapter-factory.js", () => ({
+mock.module("../src/adapter-factory.js", () => ({
   createAdapter: vi.fn(() => ({
     spawn: vi.fn(),
     initialize: vi.fn(),
@@ -89,20 +93,19 @@ function createMockCtx() {
   };
 }
 
-async function loadParallelTool() {
-  vi.resetModules();
-  const mockPi = createMockPi();
-  const mod = await import("../index.js");
-  mod.default(mockPi as any);
-  return mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
-}
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("acp_delegate_parallel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDelegate.mockReset();
     runtimeDir = uniqueRuntimeDir();
+  });
+
+  afterEach(() => {
+    if (runtimeDir) {
+      try { rmSync(runtimeDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
   });
 
   // Test 1: Parallel delegate calls beginWidgetActivity per agent
@@ -113,7 +116,10 @@ describe("acp_delegate_parallel", () => {
       stopReason: "end_turn",
     });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     const result = await tool.execute(
       "tc1",
@@ -136,8 +142,6 @@ describe("acp_delegate_parallel", () => {
 
   // Test 2: Each agent gets its own onProgress callback
   it("fires onProgress independently per agent", async () => {
-    let progressCalls: Array<{ agent: string; phase: string }> = [];
-
     mockDelegate.mockImplementation(async (agent: string, _msg: string, _cwd: string, onProgress?: Function) => {
       if (onProgress) {
         onProgress({ agentName: agent, phase: "spawning", durationMs: 100, lastActivityAt: Date.now() });
@@ -146,7 +150,10 @@ describe("acp_delegate_parallel", () => {
       return { text: `response from ${agent}`, sessionId: `sid-${agent}`, stopReason: "end_turn" };
     });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     const result = await tool.execute(
       "tc2",
@@ -176,7 +183,10 @@ describe("acp_delegate_parallel", () => {
       });
     });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
 
     // Start the parallel execution (don't await yet)
@@ -192,7 +202,6 @@ describe("acp_delegate_parallel", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Widget should have been refreshed with delegations
-    // setWidget is called by beginWidgetActivity → refreshWidget
     expect(ctx.ui.setWidget).toHaveBeenCalled();
 
     // Resolve all delegates
@@ -212,7 +221,10 @@ describe("acp_delegate_parallel", () => {
       stopReason: "end_turn",
     });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     await tool.execute(
       "tc4",
@@ -222,10 +234,8 @@ describe("acp_delegate_parallel", () => {
       ctx,
     );
 
-    // After completion, widgetActivity.delegations should be empty
-    // We can't directly inspect widgetActivity, but setWidget should have been called
-    // with the final state (no delegations)
-    const lastCallIdx = ctx.ui.setWidget.mock.calls.length - 1;
+    // After completion, setWidget should have been called
+    const lastCallIdx = (ctx.ui.setWidget as any).mock.calls.length - 1;
     expect(lastCallIdx).toBeGreaterThanOrEqual(0);
   });
 
@@ -236,7 +246,10 @@ describe("acp_delegate_parallel", () => {
       .mockRejectedValueOnce(new Error("claude crashed"))
       .mockResolvedValueOnce({ text: "codex response", sessionId: "sid-c", stopReason: "end_turn" });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     const result = await tool.execute(
       "tc5",
@@ -281,11 +294,13 @@ describe("acp_delegate_parallel", () => {
       stopReason: "end_turn",
     });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
 
     const controller = new AbortController();
-    // Don't abort yet — just verify signal is passed through
 
     const result = await tool.execute(
       "tc6",
@@ -306,7 +321,10 @@ describe("acp_delegate_parallel", () => {
       .mockResolvedValueOnce({ text: "alpha", sessionId: "sid-a", stopReason: "end_turn" })
       .mockResolvedValueOnce({ text: "beta", sessionId: "sid-b", stopReason: "end_turn" });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     const result = await tool.execute(
       "tc7",
@@ -337,7 +355,10 @@ describe("acp_delegate_parallel", () => {
 
   // Test 8: Validates agents array is not empty
   it("returns error when agents array is empty", async () => {
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     const result = await tool.execute(
       "tc8",
@@ -362,7 +383,10 @@ describe("acp_delegate_parallel", () => {
       return { text: `${agent} done`, sessionId: `sid-${agent}`, stopReason: "end_turn" };
     });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     await tool.execute(
       "tc9",
@@ -375,7 +399,7 @@ describe("acp_delegate_parallel", () => {
     // _onUpdate should have been called for each agent's progress
     expect(onUpdate).toHaveBeenCalled();
     // At least 2 calls (one per agent progress)
-    expect(onUpdate.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect((onUpdate as any).mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   // Test 10: Successful delegation recorded in widget delegationHistory
@@ -386,7 +410,10 @@ describe("acp_delegate_parallel", () => {
       stopReason: "end_turn",
     });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     const result = await tool.execute(
       "tc10",
@@ -418,7 +445,10 @@ describe("acp_delegate_parallel", () => {
       .mockResolvedValueOnce({ text: "ok", sessionId: "sid-1", stopReason: "end_turn" })
       .mockRejectedValueOnce(new Error("agent crashed"));
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     const result = await tool.execute(
       "tc11",
@@ -453,7 +483,10 @@ describe("acp_delegate_parallel", () => {
       .mockRejectedValueOnce(new Error("beta failed"))
       .mockResolvedValueOnce({ text: "gamma", sessionId: "sid-c", stopReason: "end_turn" });
 
-    const tool = await loadParallelTool();
+    const mockPi = createMockPi();
+    const mod = await import("../index.js");
+    mod.default(mockPi as any);
+    const tool = mockPi.tools.find((t: any) => t.name === "acp_delegate_parallel");
     const ctx = createMockCtx();
     const result = await tool.execute(
       "tc12",

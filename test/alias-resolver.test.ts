@@ -4,7 +4,7 @@
  * Tests the AliasResolver and its integration with AgentCoordinator.
  * All tests should FAIL until the implementation is written.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, mock } from "bun:test";
 import {
 	AliasResolver,
 	AllAgentsFailedError,
@@ -17,7 +17,7 @@ import type { AcpConfig, AcpAliasConfig, AcpPromptResult } from "../src/config/t
 import { createAdapter } from "../src/adapter-factory.js";
 
 // Mock adapter factory for coordinator integration tests
-vi.mock("../src/adapter-factory.js", () => ({
+mock.module("../src/adapter-factory.js", () => ({
 	createAdapter: vi.fn(),
 	isKnownAdapter: vi.fn(),
 }));
@@ -388,7 +388,7 @@ describe("AliasResolver", () => {
 
 describe("AgentCoordinator with aliases", () => {
 	beforeEach(() => {
-		vi.mocked(createAdapter).mockReturnValue(createMockAdapter() as any);
+		(createAdapter as ReturnType<typeof vi.fn>).mockReturnValue(createMockAdapter() as any);
 	});
 
 	// We mock the adapter factory so no real subprocesses are spawned.
