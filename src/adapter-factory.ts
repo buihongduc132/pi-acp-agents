@@ -28,7 +28,7 @@ export function createAdapter(
 
 	// Mode-based routing: acpx mode always routes to AcpxAdapter
 	if (agentConfig.mode === "acpx") {
-		return new AcpxAdapter({ config: agentConfig, cwd, agentName, ...sharedOpts });
+		return new AcpxAdapter({ config: agentConfig, cwd, agentName, ...sharedOpts }) as unknown as AcpAgentAdapter;
 	}
 
 	// Direct mode (or undefined/default) → name-based routing

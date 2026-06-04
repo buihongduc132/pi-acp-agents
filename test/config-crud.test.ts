@@ -241,7 +241,7 @@ describe("Config CRUD", () => {
 				expect(p).toHaveProperty("config");
 				expect(p.config).toHaveProperty("command");
 				expect(typeof p.config.command).toBe("string");
-				expect(p.config.command.length).toBeGreaterThan(0);
+				expect((p.config.command ?? "").length).toBeGreaterThan(0);
 			}
 		});
 	});

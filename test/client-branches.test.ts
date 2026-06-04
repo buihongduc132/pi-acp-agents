@@ -8,7 +8,7 @@ import { Readable, Writable, EventEmitter } from "node:stream";
 
 // Mock child_process
 const { mockSpawn } = vi.hoisted(() => ({
-	mockSpawn: vi.fn((...args: any[]) => {
+	mockSpawn: vi.fn<(...args: any[]) => any>(() => {
 		throw new Error("spawn ENOENT");
 	}),
 }));

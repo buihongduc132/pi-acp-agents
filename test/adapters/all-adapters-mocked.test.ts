@@ -10,7 +10,7 @@ import { OpenCodeAcpAdapter } from "../../src/adapters/opencode.js";
 
 import { execSync } from "node:child_process";
 
-const mockExec = execSync as ReturnType<typeof mock>;
+const mockExec = execSync as ReturnType<typeof vi.fn>;
 
 describe("adapters/gemini (mocked)", () => {
 	beforeEach(() => {

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 const TEST_DIR = join(tmpdir(), `acp-presets-test-${process.pid}`);
 
 // Mock node:child_process for execSync
-const mockExecSync = vi.fn((cmd: string) => {
+const mockExecSync = vi.fn<(cmd: string) => any>(() => {
 	throw new Error("not found");
 });
 vi.mock("node:child_process", () => ({

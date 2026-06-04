@@ -42,7 +42,7 @@ export async function handleAgentsCommand(
 	if (subcommand === "config") {
 		const { openAgentConfigTUI } = await import("./agent-config-tui.js");
 		try {
-			await openAgentConfigTUI(ctx.ui as SettingsUI);
+			await openAgentConfigTUI(ctx.ui as unknown as SettingsUI);
 		} catch (e) {
 			ctx.ui.notify("Failed to open agent config TUI.", "error");
 		}
