@@ -12,6 +12,9 @@
     "coordination"
   ],
   "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": ["src/", "skills/", "README.md", "LICENSE"],
   "license": "MIT",
   "author": "walodayeet",
   "repository": {
@@ -24,7 +27,7 @@
     ]
   },
   "dependencies": {
-    "pi-acp-agents": "file:../..",
+    "pi-acp-agents": "^0.3.0",
     "pi-acp-types": "workspace:*",
     "typebox": "^1.1.37"
   },

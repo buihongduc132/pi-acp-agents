@@ -1,6 +1,6 @@
 {
   "name": "pi-acp-agents",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Pi extension: ACP agent client — spawn and control ACP-compatible agents (Gemini CLI, etc.) from within pi",
   "keywords": [
     "pi-package",
@@ -20,6 +20,10 @@
     ".": {
       "types": "./src/public-api.ts",
       "import": "./index.ts"
+    },
+    "./api": {
+      "types": "./src/public-api.ts",
+      "import": "./src/public-api.ts"
     }
   },
   "license": "MIT",
