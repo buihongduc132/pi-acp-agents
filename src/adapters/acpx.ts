@@ -49,13 +49,28 @@ export class AcpxAdapter {
 	// -----------------------------------------------------------------------
 
 	async spawn(): Promise<void> {
-		const result = this._runAcpx(["sessions", "create", this.agentName, "--format", "json"]);
+		let result: ReturnType<typeof spawnSync>;
+		try {
+			result = this._runAcpx(["sessions", "create", this.agentName, "--format", "json"]);
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			throw new Error(`AcpxAdapter spawn failed: ${msg}`);
+		}
+		if (result.error) {
+			throw new Error(`AcpxAdapter spawn failed: ${result.error.message}`);
+		}
 		if (result.status !== 0) {
-			const err = result.stderr?.trim() || "acpx sessions create failed";
+			const err = String(result.stderr ?? "").trim() || "acpx sessions create failed";
 			throw new Error(`AcpxAdapter spawn failed: ${err}`);
 		}
-		const parsed = JSON.parse(result.stdout);
-		this.state.sessionId = parsed.sessionId ?? null;
+		let parsed: Record<string, unknown>;
+		try {
+			parsed = JSON.parse(String(result.stdout));
+		} catch {
+			throw new Error(`AcpxAdapter spawn failed: invalid JSON response`);
+		}
+		const sessionId = parsed["sessionId"];
+		this.state.sessionId = typeof sessionId === "string" ? sessionId : null;
 		this.state.connected = true;
 	}
 
@@ -89,22 +104,47 @@ export class AcpxAdapter {
 			"--",
 			message,
 		];
-		const result = this._runAcpx(args);
+		let result: ReturnType<typeof spawnSync>;
+		try {
+			result = this._runAcpx(args);
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			throw new Error(`AcpxAdapter prompt failed: ${msg}`);
+		}
+		if (result.error) {
+			throw new Error(`AcpxAdapter prompt failed: ${result.error.message}`);
+		}
 		if (result.status !== 0) {
-			const err = result.stderr?.trim() || "acpx prompt failed";
+			const err = String(result.stderr ?? "").trim() || "acpx prompt failed";
 			throw new Error(`AcpxAdapter prompt failed: ${err}`);
 		}
-		const parsed = JSON.parse(result.stdout);
+		let parsed: Record<string, unknown>;
+		try {
+			parsed = JSON.parse(String(result.stdout));
+		} catch {
+			throw new Error(`AcpxAdapter prompt failed: invalid JSON response`);
+		}
+		const text = typeof parsed["text"] === "string" ? parsed["text"] : "";
+		const stopReason = typeof parsed["stopReason"] === "string"
+			? parsed["stopReason"]
+			: typeof parsed["stop_reason"] === "string" ? parsed["stop_reason"] : "end_turn";
+		const sessionId = typeof parsed["sessionId"] === "string"
+			? parsed["sessionId"]
+			: typeof parsed["session_id"] === "string" ? parsed["session_id"] : this.state.sessionId!;
 		return {
-			text: parsed.text ?? "",
-			stopReason: parsed.stopReason ?? parsed.stop_reason ?? "end_turn",
-			sessionId: parsed.sessionId ?? parsed.session_id ?? this.state.sessionId!,
+			text,
+			stopReason,
+			sessionId,
 		};
 	}
 
 	async cancel(): Promise<void> {
 		if (!this.state.sessionId) return;
-		this._runAcpx(["sessions", "cancel", "--session", this.state.sessionId]);
+		try {
+			this._runAcpx(["sessions", "cancel", "--session", this.state.sessionId]);
+		} catch {
+			// best-effort — cancel must not throw
+		}
 	}
 
 	async loadSession(sessionId: string): Promise<string> {
@@ -132,7 +172,11 @@ export class AcpxAdapter {
 
 	dispose(): void {
 		if (this.state.sessionId) {
-			this._runAcpx(["sessions", "close", this.state.sessionId]);
+			try {
+				this._runAcpx(["sessions", "close", this.state.sessionId]);
+			} catch {
+				// best-effort — dispose must not throw
+			}
 		}
 		this.state.sessionId = null;
 		this.state.connected = false;

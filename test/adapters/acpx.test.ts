@@ -11,26 +11,40 @@ import { AcpxAdapter } from "../../src/adapters/acpx.js";
 // ---------------------------------------------------------------------------
 // Mock spawnSync — shared mutable state in vi.hoisted for mock factory access
 // ---------------------------------------------------------------------------
-const { spawnSyncMock, queueResult, resetMockState } = vi.hoisted(() => {
-	const spawnSyncResults: Array<{ status: number; stdout: string; stderr: string }> = [];
+type MockAction =
+	| { type: 'return'; result: { status: number; stdout: string; stderr: string; error?: Error } }
+	| { type: 'throw'; error: Error };
+
+const { spawnSyncMock, queueResult, queueThrow, queueErrorResult, resetMockState } = vi.hoisted(() => {
+	const actions: MockAction[] = [];
 	let callIndex = 0;
 
 	const spawnSyncMock = vi.fn(() => {
 		const idx = callIndex++;
-		const result = spawnSyncResults[idx] ?? spawnSyncResults[spawnSyncResults.length - 1];
-		return result ?? { status: 1, stdout: "", stderr: "no mock result queued" };
+		const action = actions[idx];
+		if (!action) return { status: 1, stdout: "", stderr: "no mock result queued" };
+		if (action.type === 'throw') throw action.error;
+		return action.result;
 	});
 
 	function queueResult(status: number, stdout: string, stderr = "") {
-		spawnSyncResults.push({ status, stdout, stderr });
+		actions.push({ type: 'return', result: { status, stdout, stderr } });
+	}
+
+	function queueThrow(error: Error) {
+		actions.push({ type: 'throw', error });
+	}
+
+	function queueErrorResult(status: number, stdout: string, stderr: string, error: Error) {
+		actions.push({ type: 'return', result: { status, stdout, stderr, error } });
 	}
 
 	function resetMockState() {
-		spawnSyncResults.length = 0;
+		actions.length = 0;
 		callIndex = 0;
 	}
 
-	return { spawnSyncMock, queueResult, resetMockState };
+	return { spawnSyncMock, queueResult, queueThrow, queueErrorResult, resetMockState };
 });
 
 vi.mock("node:child_process", () => ({
@@ -208,6 +222,89 @@ describe("AcpxAdapter", () => {
 		it("setMode is a no-op (acpx doesn't support per-session mode switching)", async () => {
 			const adapter = new AcpxAdapter(makeOpts());
 			await expect(adapter.setMode("yolo")).resolves.toBeUndefined();
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// TDD RED tests — error handling and crash safety
+	// These tests SHOULD FAIL because the implementation lacks try/catch.
+	// After fixing acpx.ts, these should all turn GREEN.
+	// -----------------------------------------------------------------------
+
+	describe("error handling and crash safety", () => {
+
+		it("dispose() catches spawnSync errors gracefully", async () => {
+			// Spawn succeeds, then dispose's spawnSync (close) throws ENOENT
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-err" }));
+			queueThrow(new Error("ENOENT: acpx binary not found"));
+			const adapter = new AcpxAdapter(makeOpts());
+			await adapter.spawn();
+			expect(adapter.connected).toBe(true);
+
+			// dispose MUST NOT throw — it should swallow the error and still clean up
+			expect(() => adapter.dispose()).not.toThrow();
+			expect(adapter.getSessionId()).toBeNull();
+			expect(adapter.connected).toBe(false);
+		});
+
+		it("spawn() catches JSON parse errors", async () => {
+			// spawnSync returns status 0 but stdout is not valid JSON
+			queueResult(0, "not json at all");
+			const adapter = new AcpxAdapter(makeOpts());
+
+			// spawn should throw a wrapped error mentioning 'AcpxAdapter',
+			// not a raw SyntaxError from JSON.parse
+			await expect(adapter.spawn()).rejects.toThrow(/AcpxAdapter/i);
+		});
+
+		it("prompt() catches spawnSync throws", async () => {
+			// spawn succeeds, then prompt's spawnSync throws
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-throw" }));
+			queueThrow(new Error("spawnSync crashed: SIGKILL"));
+			const adapter = new AcpxAdapter(makeOpts());
+			await adapter.spawn();
+
+			// prompt should throw a wrapped error mentioning AcpxAdapter,
+			// not the raw spawnSync error
+			await expect(adapter.prompt("test")).rejects.toThrow(/AcpxAdapter prompt failed/i);
+		});
+
+		it("cancel() catches spawnSync errors gracefully", async () => {
+			// spawn succeeds, then cancel's spawnSync throws
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-cancel" }));
+			queueThrow(new Error("ENOENT: acpx not found"));
+			const adapter = new AcpxAdapter(makeOpts());
+			await adapter.spawn();
+
+			// cancel MUST NOT throw — best-effort, swallow the error
+			await expect(adapter.cancel()).resolves.toBeUndefined();
+		});
+
+		it("dispose() does not throw when acpx close returns error status", async () => {
+			// spawn succeeds, close returns status 1 (error)
+			queueResult(0, JSON.stringify({ sessionId: "acpx-sess-close-err" }));
+			queueResult(1, "", "close failed: session not found");
+			const adapter = new AcpxAdapter(makeOpts());
+			await adapter.spawn();
+
+			// dispose must not throw and must still clean up state
+			expect(() => adapter.dispose()).not.toThrow();
+			expect(adapter.getSessionId()).toBeNull();
+			expect(adapter.connected).toBe(false);
+		});
+
+		it("_runAcpx handles result.error from spawnSync", async () => {
+			// spawnSync returns { status: 0, error: Error } — child process killed
+			queueErrorResult(
+				0,
+				"",
+				"",
+				new Error("Child process killed by signal SIGTERM"),
+			);
+			const adapter = new AcpxAdapter(makeOpts());
+
+			// spawn should surface the spawnSync error, not silently succeed
+			await expect(adapter.spawn()).rejects.toThrow(/SIGTERM|signal|killed/i);
 		});
 	});
 });

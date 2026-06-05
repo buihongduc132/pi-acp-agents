@@ -71,7 +71,9 @@ export class AgentCoordinator {
       try {
         adapter.cancel();
       } catch { /* best-effort */ }
-      adapter.dispose();
+      try {
+        adapter.dispose();
+      } catch { /* best-effort — dispose must not throw */ }
       const err = new DOMException("Operation cancelled", "AbortError");
       onProgress?.({ agentName, phase: "error" });
       throw err;
@@ -137,11 +139,19 @@ export class AgentCoordinator {
       });
     };
 
-    // Abort handler: cancel + dispose
+    // Abort handler: cancel + dispose + reject pending prompt
+    let abortReject: ((err: Error) => void) | null = null;
+    const abortPromise = new Promise<never>((_, reject) => {
+      abortReject = reject;
+    });
+    // Safety: prevent unhandled rejection if abort fires after race settles
+    abortPromise.catch(() => {});
+
     const onAbort = () => {
       try { adapter.cancel(); } catch { /* best-effort */ }
-      adapter.dispose();
+      try { adapter.dispose(); } catch { /* best-effort — dispose must not throw */ }
       emitProgress("error");
+      abortReject?.(new DOMException("Operation cancelled", "AbortError"));
     };
 
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -153,10 +163,13 @@ export class AgentCoordinator {
       await adapter.initialize();
       await adapter.newSession(effectiveCwd);
       emitProgress("prompting");
-      return await adapter.prompt(message);
+      const promptPromise = adapter.prompt(message);
+      // Prevent unhandled rejection if abort wins the race
+      promptPromise.catch(() => {});
+      return await Promise.race([promptPromise, abortPromise]);
     } finally {
       signal?.removeEventListener("abort", onAbort);
-      adapter.dispose();
+      try { adapter.dispose(); } catch { /* best-effort — dispose must not mask errors */ }
     }
   }
 
