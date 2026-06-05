@@ -111,6 +111,11 @@ export interface AcpArchivedSessionMetadata {
 	closeReason?: string;
 	model?: string;
 	mode?: string;
+	/** Loadability tracking — whether this archived session can be successfully resumed */
+	loadStatus?: "loadable" | "unloadable" | "unknown";
+	lastLoadAttemptAt?: string;
+	lastLoadError?: string;
+	loadAttemptCount?: number;
 }
 
 /** Internal handle kept by SessionManager. Also satisfies HealthMonitorable. */

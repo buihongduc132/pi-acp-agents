@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import type { AgentToolResult, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { type AcpWidgetState, createAcpWidget } from "./src/acp-widget.js";
@@ -136,7 +137,7 @@ export default function (pi: ExtensionAPI) {
     return sessionMgr.get(sessionId) ?? getArchivedSession(sessionId);
   }
 
-  function resolveSessionTarget(params: { session_id?: string; session_name?: string }): {
+  function resolveSessionTarget(params: { session_id?: string; session_name?: string; agent?: string }): {
     sessionId?: string;
     sessionName?: string;
     metadata?: AcpArchivedSessionMetadata | AcpSessionHandle;
@@ -152,6 +153,21 @@ export default function (pi: ExtensionAPI) {
       }
       throw new Error(`session_id "${sessionId}" does not match session_name "${sessionName}".`);
     }
+
+    // Agent validation: cross-check params.agent against archive metadata
+    const resolvedTarget = byId ?? byName;
+    if (resolvedTarget && params.agent) {
+      const archivedAgent = resolvedTarget.agentName;
+      if (archivedAgent && archivedAgent !== params.agent) {
+        const targetLabel = sessionName ?? sessionId ?? "unknown";
+        throw new Error(
+          `Session "${targetLabel}" was created with agent "${archivedAgent}". ` +
+          `Cannot resume with agent "${params.agent}". ` +
+          `Omit the agent parameter to resume with the original agent.`,
+        );
+      }
+    }
+
     if (sessionId) {
       return { sessionId, sessionName: byId?.sessionName ?? sessionNameStore.getName(sessionId) ?? sessionName, metadata: byId };
     }
@@ -163,8 +179,8 @@ export default function (pi: ExtensionAPI) {
 
   const monitor = new HealthMonitor({
     intervalMs: config.healthCheckIntervalMs ?? 5_000,
-    staleTimeoutMs: config.staleTimeoutMs ?? 3_600_000,
-    needsAttentionMs: config.needsAttentionMs ?? 60_000,
+    staleTimeoutMs: config.staleTimeoutMs ?? 600_000,
+    needsAttentionMs: config.needsAttentionMs ?? 120_000,
     autoInterruptMs: config.autoInterruptMs ?? 300_000,
     interruptGraceMs: config.interruptGraceMs ?? 10_000,
     async onNeedsAttention(sessionId: string) {
@@ -180,7 +196,7 @@ export default function (pi: ExtensionAPI) {
 
       // Check if this is a prompt stall (activity-based) vs idle stale
       const isPromptStall = handle.isPrompting === true;
-      const closeReason = getSessionAutoCloseReason(handle, config.staleTimeoutMs ?? 3_600_000);
+      const closeReason = getSessionAutoCloseReason(handle, config.staleTimeoutMs ?? 600_000);
 
       if (isPromptStall) {
         // Escalation: cancel → grace → kill
@@ -219,7 +235,7 @@ export default function (pi: ExtensionAPI) {
         ? "error"
         : busySessions.get(s.sessionId)
           ? "active"
-          : getSessionAutoCloseReason(s, config.staleTimeoutMs ?? 3_600_000)
+          : getSessionAutoCloseReason(s, config.staleTimeoutMs ?? 600_000)
             ? "stale"
             : "idle",
       lastActivityAt: s.lastActivityAt,
@@ -292,9 +308,15 @@ export default function (pi: ExtensionAPI) {
     sessionName?: string,
   ): AcpSessionHandle {
     const now = metadata?.createdAt ?? new Date();
+    // Phase 3.1: Append random hex suffix to prevent name collisions across agents
+    let resolvedSessionName = sessionName ?? metadata?.sessionName ?? sessionNameStore.getName(sessionId);
+    if (resolvedSessionName) {
+      const suffix = randomBytes(2).toString("hex"); // 4 hex chars
+      resolvedSessionName = `${resolvedSessionName}-${suffix}`;
+    }
     const handle: AcpSessionHandle = {
       sessionId,
-      sessionName: sessionName ?? metadata?.sessionName ?? sessionNameStore.getName(sessionId),
+      sessionName: resolvedSessionName,
       agentName,
       cwd,
       createdAt: now,
@@ -453,49 +475,91 @@ export default function (pi: ExtensionAPI) {
         if (target.sessionId && target.metadata) {
           // Auto-reload archived session if it exists
           const archived = target.metadata;
-            const agentCfg = getAgentConfigOrThrow(agentName);
-            const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
+
+          // Phase 3.4: Skip loadSession for known-unloadable sessions
+          if (archived.loadStatus === "unloadable" && (archived.loadAttemptCount ?? 0) >= 3) {
+            // Permanently unloadable — go straight to fresh session with warning
+            const freshAgentCfg = getAgentConfigOrThrow(agentName);
+            const freshAdapter = createAdapter(agentName, freshAgentCfg, config, params.cwd ?? ctx.cwd, {
               onActivity: (sid) => monitor.touch(sid),
             });
             try {
-              await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_spawn(archived:${target.sessionId})`);
-              await adapter.initialize();
+              await withTimeoutMs(freshAdapter.spawn(), config.staleTimeoutMs, `acp_spawn(unloadable:${target.sessionId})`);
+              await freshAdapter.initialize();
+              const freshSessionId = await freshAdapter.newSession(params.cwd ?? ctx.cwd);
+              if (target.sessionName) sessionNameStore.register(target.sessionName, freshSessionId);
+              const handle = makeSessionHandle(freshSessionId, agentName, params.cwd ?? ctx.cwd, freshAdapter, undefined, target.sessionName);
+              handle.busy = true; busySessions.set(freshSessionId, true);
               try {
-                await adapter.loadSession(target.sessionId);
-              } catch (loadErr) {
-                // Archived session cannot be reloaded — fall back to fresh
-                adapter.dispose();
-                const freshAdapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
-                  onActivity: (sid) => monitor.touch(sid),
-                });
-                try {
-                  await withTimeoutMs(freshAdapter.spawn(), config.stallTimeoutMs, `acp_spawn(fresh:${target.sessionId})`);
-                  await freshAdapter.initialize();
-                  const freshSessionId = await freshAdapter.newSession(params.cwd ?? ctx.cwd);
-                  if (target.sessionName) sessionNameStore.register(target.sessionName, freshSessionId);
-                  const handle = makeSessionHandle(freshSessionId, agentName, params.cwd ?? ctx.cwd, freshAdapter, undefined, target.sessionName);
-                  handle.busy = true; busySessions.set(freshSessionId, true);
-                  try {
-                    const pr = (await withTimeoutMs(freshAdapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_prompt(fresh:${freshSessionId})`)) as AcpPromptResult;
-                    markPromptLifecycle(handle, pr);
-                    pr.text = `[warning: archived session could not be reloaded: ${(loadErr as Error).message}]\n${pr.text}`;
-                    return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
-                  } finally {
-                    busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
-                  }
-                } catch (freshErr) { freshAdapter.dispose(); throw freshErr; }
-              }
-              const handle = makeSessionHandle(target.sessionId, agentName, archived.cwd ?? params.cwd ?? ctx.cwd, adapter, undefined, target.sessionName);
-              handle.busy = true; busySessions.set(target.sessionId, true);
-              try {
-                const pr = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_prompt(archived:${target.sessionId})`)) as AcpPromptResult;
+                const pr = (await withTimeoutMs(freshAdapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(unloadable:${freshSessionId})`)) as AcpPromptResult;
                 markPromptLifecycle(handle, pr);
-                return { ...pr, sessionId: target.sessionId, sessionName: handle.sessionName };
+                pr.text = `[WARNING: Previous session could not be recovered. This is an entirely new session with no conversation history. Previous session was marked permanently unloadable after ${archived.loadAttemptCount} failed attempts.]
+${pr.text}`;
+                return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
               } finally {
-                busySessions.delete(target.sessionId); handle.busy = false; archiveSession(handle);
+                busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
               }
-            } catch (err) { adapter.dispose(); throw err; }
-          throw new Error(`Session name "${target.sessionName ?? params.session_name}" refers to archived session "${target.sessionId}". Load it first with acp_session_load or use the raw session_id of a live session.`);
+            } catch (freshErr) { freshAdapter.dispose(); throw freshErr; }
+          }
+
+          const agentCfg = getAgentConfigOrThrow(agentName);
+          const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
+            onActivity: (sid) => monitor.touch(sid),
+          });
+          try {
+            await withTimeoutMs(adapter.spawn(), config.staleTimeoutMs, `acp_spawn(archived:${target.sessionId})`);
+            await adapter.initialize();
+            try {
+              await adapter.loadSession(target.sessionId);
+              // Phase 3.3: Track successful load
+              if (archived) {
+                archived.loadStatus = "loadable";
+                archived.lastLoadAttemptAt = new Date().toISOString();
+                archived.loadAttemptCount = (archived.loadAttemptCount ?? 0) + 1;
+                archiveSession(archived as AcpSessionHandle);
+              }
+            } catch (loadErr) {
+              // Phase 3.3: Track failed load
+              if (archived) {
+                archived.loadStatus = "unloadable";
+                archived.lastLoadAttemptAt = new Date().toISOString();
+                archived.lastLoadError = (loadErr as Error).message;
+                archived.loadAttemptCount = (archived.loadAttemptCount ?? 0) + 1;
+                archiveSession(archived as AcpSessionHandle);
+              }
+              // Archived session cannot be reloaded — fall back to fresh
+              adapter.dispose();
+              const freshAdapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
+                onActivity: (sid) => monitor.touch(sid),
+              });
+              try {
+                await withTimeoutMs(freshAdapter.spawn(), config.staleTimeoutMs, `acp_spawn(fresh:${target.sessionId})`);
+                await freshAdapter.initialize();
+                const freshSessionId = await freshAdapter.newSession(params.cwd ?? ctx.cwd);
+                if (target.sessionName) sessionNameStore.register(target.sessionName, freshSessionId);
+                const handle = makeSessionHandle(freshSessionId, agentName, params.cwd ?? ctx.cwd, freshAdapter, undefined, target.sessionName);
+                handle.busy = true; busySessions.set(freshSessionId, true);
+                try {
+                  const pr = (await withTimeoutMs(freshAdapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(fresh:${freshSessionId})`)) as AcpPromptResult;
+                  markPromptLifecycle(handle, pr);
+                  pr.text = `[WARNING: Previous session could not be recovered. This is an entirely new session with no conversation history. Error: ${(loadErr as Error).message}]
+${pr.text}`;
+                  return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
+                } finally {
+                  busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
+                }
+              } catch (freshErr) { freshAdapter.dispose(); throw freshErr; }
+            }
+            const handle = makeSessionHandle(target.sessionId, agentName, archived.cwd ?? params.cwd ?? ctx.cwd, adapter, undefined, target.sessionName);
+            handle.busy = true; busySessions.set(target.sessionId, true);
+            try {
+              const pr = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(archived:${target.sessionId})`)) as AcpPromptResult;
+              markPromptLifecycle(handle, pr);
+              return { ...pr, sessionId: target.sessionId, sessionName: handle.sessionName };
+            } finally {
+              busySessions.delete(target.sessionId); handle.busy = false; archiveSession(handle);
+            }
+          } catch (err) { adapter.dispose(); throw err; }
         }
         const agentCfg = getAgentConfigOrThrow(agentName);
         const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {

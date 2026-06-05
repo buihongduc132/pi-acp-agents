@@ -456,8 +456,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 				session_name: "research",
 			});
 			expect(r.content[0].text).toBe("response");
-			// Should have registered the session name
-			expect(r.details.sessionName).toBe("research");
+			// Should have registered the session name (with random hex suffix)
+			expect(r.details.sessionName).toMatch(/^research-[0-9a-f]{4}$/);
 		});
 
 		// TODO: implement consolidation first — auto-reload archived sessions
@@ -486,7 +486,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 			});
 			// Should fall back to new session with warning
 			expect(m.ad.newSession).toHaveBeenCalled();
-			expect(r.content[0].text).toContain("warning");
+			expect(r.content[0].text).toContain("WARNING:");
 		});
 
 		// TODO: implement consolidation first — dispose:true param

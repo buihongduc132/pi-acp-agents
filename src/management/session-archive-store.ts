@@ -28,6 +28,10 @@ interface AcpArchivedSessionMetadataRecord {
   closeReason?: string;
   model?: string;
   mode?: string;
+  loadStatus?: "loadable" | "unloadable" | "unknown";
+  lastLoadAttemptAt?: string;
+  lastLoadError?: string;
+  loadAttemptCount?: number;
 }
 
 const DEFAULT_PAYLOAD: ArchivePayload = { sessions: [] };
@@ -101,6 +105,10 @@ export class SessionArchiveStore {
       closeReason: session.closeReason,
       model: session.model,
       mode: session.mode,
+      loadStatus: session.loadStatus,
+      lastLoadAttemptAt: session.lastLoadAttemptAt,
+      lastLoadError: session.lastLoadError,
+      loadAttemptCount: session.loadAttemptCount,
     };
   }
 
@@ -119,6 +127,10 @@ export class SessionArchiveStore {
       closeReason: record.closeReason,
       model: record.model,
       mode: record.mode,
+      loadStatus: record.loadStatus,
+      lastLoadAttemptAt: record.lastLoadAttemptAt,
+      lastLoadError: record.lastLoadError,
+      loadAttemptCount: record.loadAttemptCount,
     };
   }
 }
