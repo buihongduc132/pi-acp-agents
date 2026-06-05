@@ -30,6 +30,19 @@ function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+/** Wrap a promise with a timeout. Throws on expiry with descriptive message. */
+function withTimeoutMs<T>(promise: Promise<T>, ms: number | undefined, label: string): Promise<T> {
+  const effectiveMs = ms ?? 300_000;
+  if (effectiveMs <= 0) return promise;
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${effectiveMs}ms`)), effectiveMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`${label} is required`);
@@ -424,7 +437,7 @@ export default function (pi: ExtensionAPI) {
           archiveSession(handle);
           try {
             const adapter = activeAdapters.get(target.sessionId)!;
-            const promptResult = (await adapter.prompt(params.message)) as AcpPromptResult;
+            const promptResult = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_prompt(reused:${target.sessionId})`)) as AcpPromptResult;
             markPromptLifecycle(handle, promptResult);
             eventLog.append("prompt_reused_session", { agentName, sessionId: target.sessionId, sessionName: handle.sessionName });
             return { ...promptResult, sessionId: target.sessionId, sessionName: handle.sessionName };
@@ -445,7 +458,7 @@ export default function (pi: ExtensionAPI) {
               onActivity: (sid) => monitor.touch(sid),
             });
             try {
-              await adapter.spawn();
+              await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_spawn(archived:${target.sessionId})`);
               await adapter.initialize();
               try {
                 await adapter.loadSession(target.sessionId);
@@ -456,14 +469,14 @@ export default function (pi: ExtensionAPI) {
                   onActivity: (sid) => monitor.touch(sid),
                 });
                 try {
-                  await freshAdapter.spawn();
+                  await withTimeoutMs(freshAdapter.spawn(), config.stallTimeoutMs, `acp_spawn(fresh:${target.sessionId})`);
                   await freshAdapter.initialize();
                   const freshSessionId = await freshAdapter.newSession(params.cwd ?? ctx.cwd);
                   if (target.sessionName) sessionNameStore.register(target.sessionName, freshSessionId);
                   const handle = makeSessionHandle(freshSessionId, agentName, params.cwd ?? ctx.cwd, freshAdapter, undefined, target.sessionName);
                   handle.busy = true; busySessions.set(freshSessionId, true);
                   try {
-                    const pr = (await freshAdapter.prompt(params.message)) as AcpPromptResult;
+                    const pr = (await withTimeoutMs(freshAdapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_prompt(fresh:${freshSessionId})`)) as AcpPromptResult;
                     markPromptLifecycle(handle, pr);
                     pr.text = `[warning: archived session could not be reloaded: ${(loadErr as Error).message}]\n${pr.text}`;
                     return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
@@ -475,7 +488,7 @@ export default function (pi: ExtensionAPI) {
               const handle = makeSessionHandle(target.sessionId, agentName, archived.cwd ?? params.cwd ?? ctx.cwd, adapter, undefined, target.sessionName);
               handle.busy = true; busySessions.set(target.sessionId, true);
               try {
-                const pr = (await adapter.prompt(params.message)) as AcpPromptResult;
+                const pr = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_prompt(archived:${target.sessionId})`)) as AcpPromptResult;
                 markPromptLifecycle(handle, pr);
                 return { ...pr, sessionId: target.sessionId, sessionName: handle.sessionName };
               } finally {
@@ -489,7 +502,7 @@ export default function (pi: ExtensionAPI) {
           onActivity: (sid) => monitor.touch(sid),
         });
         try {
-          await adapter.spawn();
+          await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_spawn(new:${agentName})`);
           await adapter.initialize();
           const sessionId = await adapter.newSession(params.cwd ?? ctx.cwd);
           if (params.model) await adapter.setModel(params.model);
@@ -506,7 +519,7 @@ export default function (pi: ExtensionAPI) {
           monitor.markPromptStart(sessionId);
           archiveSession(handle);
           try {
-            const promptResult = (await adapter.prompt(params.message)) as AcpPromptResult;
+            const promptResult = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_prompt(new:${sessionId})`)) as AcpPromptResult;
             markPromptLifecycle(handle, promptResult);
             eventLog.append("prompt_new_session", { agentName, sessionId, sessionName: handle.sessionName });
             return { ...promptResult, sessionId, sessionName: handle.sessionName };

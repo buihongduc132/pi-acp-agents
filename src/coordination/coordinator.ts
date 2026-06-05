@@ -9,6 +9,19 @@ import { createAdapter } from "../adapter-factory.js";
 import { AliasResolver } from "./alias-resolver.js";
 import type { AcpConfig, AcpPromptResult } from "../config/types.js";
 
+/** Wrap a promise with a timeout. Throws on expiry with descriptive message. */
+function withTimeoutMs<T>(promise: Promise<T>, ms: number | undefined, label: string): Promise<T> {
+  const effectiveMs = ms ?? 300_000;
+  if (effectiveMs <= 0) return promise;
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${effectiveMs}ms`)), effectiveMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /** Progress update during delegation */
 export interface AcpDelegateProgress {
   agentName: string;
@@ -158,7 +171,7 @@ export class AgentCoordinator {
 
     try {
       emitProgress("spawning");
-      await adapter.spawn();
+      await withTimeoutMs(adapter.spawn(), this.config.stallTimeoutMs, `acp_spawn(delegate:${agentName})`);
       emitProgress("initializing");
       await adapter.initialize();
       await adapter.newSession(effectiveCwd);
