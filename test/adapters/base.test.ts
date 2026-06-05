@@ -124,5 +124,27 @@ describe("adapters/base", () => {
       adapter.dispose();
       expect(adapter["client"]).toBeNull();
     });
+
+    it("dispose does not throw when client.dispose() throws", () => {
+      class SimpleAdapter extends AcpAgentAdapter {
+        get name() { return "simple"; }
+      }
+
+      const adapter = new SimpleAdapter({
+        config: { command: "test" },
+        clientInfo: { name: "test", version: "0.1.0" },
+        logger: noopLogger(),
+      });
+
+      // Simulate a client that throws on dispose
+      const badClient = {
+        dispose: () => { throw new Error("dispose boom"); },
+      } as any;
+      adapter["client"] = badClient;
+
+      // dispose must not throw — best-effort cleanup
+      expect(() => adapter.dispose()).not.toThrow();
+      expect(adapter["client"]).toBeNull();
+    });
   });
 });
