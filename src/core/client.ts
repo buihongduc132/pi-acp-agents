@@ -5,6 +5,7 @@
  * Maintains one persistent connection; collects text per-prompt via an accumulator.
  */
 import { type ChildProcess, spawn } from "node:child_process";
+import { platform } from "node:os";
 import { Readable, Writable } from "node:stream";
 
 /**
@@ -167,6 +168,7 @@ export class AcpClient {
 				cwd: this.cwd,
 				env: { ...process.env, ...this.config.env },
 				stdio: ["pipe", "pipe", "pipe"],
+				shell: platform() === "win32",
 			});
 		} catch (err: unknown) {
 			throw classifyConnectionError(err, this.agentName, cmd);
