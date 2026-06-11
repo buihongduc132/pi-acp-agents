@@ -131,7 +131,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Package | @walodayeet/pi-acp-agents |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package | pi-acp-agents |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | ${{ steps.tag.outputs.version }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Tag | ${{ steps.tag.outputs.tag }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Provenance | ✅ Signed |" >> "$GITHUB_STEP_SUMMARY"

@@ -20,3 +20,11 @@ sgconfig.yml
 .bug-hunter/
 bun.lock
 bunfig.toml
+
+# Dev artifacts
+.verify-iteration*.md
+_pi_ralph_*.md
+.worktrees/
+pnpm-lock.yaml
+pnpm-workspace.yaml
+flow/

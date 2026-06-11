@@ -16,7 +16,7 @@
   "types": "src/index.ts",
   "files": ["src/", "skills/", "README.md", "LICENSE"],
   "license": "MIT",
-  "author": "walodayeet",
+  "author": "buihongduc132",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/buihongduc132/pi-acp-agents.git"
