@@ -1,7 +1,8 @@
 /**
  * Circuit breaker + stall timeout + process kill escalation.
  */
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execSync, spawn } from "node:child_process";
+import { platform } from "node:os";
 import type { CircuitState } from "../config/types.js";
 
 export class CircuitOpenError extends Error {
@@ -213,12 +214,30 @@ export class AcpCircuitBreaker {
 	}
 }
 
-/** SIGTERM → SIGKILL escalation */
+/**
+ * On Windows: uses `taskkill /T /F /PID` to kill the entire process tree,
+ * preventing orphaned child processes when `shell: true` was used in spawn().
+ * On non-Windows: standard SIGTERM → SIGKILL escalation (unchanged).
+ */
 export function killWithEscalation(
 	proc: ChildProcess,
 	escalationMs = 5000,
 ): void {
 	if (proc.killed) return;
+
+	if (platform() === "win32") {
+		// Windows: process-tree-aware kill via taskkill
+		if (proc.pid != null) {
+			try {
+				execSync(`taskkill /T /F /PID ${proc.pid}`, { stdio: "ignore", timeout: escalationMs });
+			} catch {
+				// process may already be dead — taskkill returns non-zero
+			}
+		}
+		return;
+	}
+
+	// Non-Windows: SIGTERM → SIGKILL escalation
 	try {
 		proc.kill("SIGTERM");
 	} catch {
