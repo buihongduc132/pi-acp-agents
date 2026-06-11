@@ -25,5 +25,4 @@ bunfig.toml
 .verify-iteration*.md
 _pi_ralph_*.md
 .worktrees/
-pnpm-workspace.yaml
 flow/
