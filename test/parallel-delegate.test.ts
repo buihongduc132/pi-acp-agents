@@ -4,12 +4,9 @@
  * Tests that widgetActivity correctly tracks multiple concurrent delegations
  * with independent progress, proper cleanup, and no cross-contamination.
  *
- * Strategy: Test through the widget rendering pipeline.
- * We create AcpWidgetState with multiple delegations and verify:
- *   - All delegations appear in rendered output
- *   - Each delegation shows its own phase
- *   - Cleanup removes only the targeted delegation
- *   - Widget state snapshots are accurate
+ * Strategy: Test state-shape and closure correctness through the widget pipeline.
+ * Compact format does NOT render delegation rows — verify state is correct
+ * and widget renders without error.
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -98,14 +95,11 @@ describe("parallel delegation — widget tracking", () => {
 			"codex",
 		]);
 
-		// Assert widget renders all 3
+		// Compact format: no sessions → header only (no delegation rows rendered)
 		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(1); // header only
 		const joined = lines.join("\n");
-		expect(joined).toContain("gemini");
-		expect(joined).toContain("claude");
-		expect(joined).toContain("codex");
-		// 3 active delegations → widget shows "busy (3)" when total transient > 1
-		expect(joined).toContain("busy (3)");
+		expect(joined).not.toContain("busy (3)");
 	});
 
 	// Test 2: Each delegation updates independently
@@ -126,12 +120,8 @@ describe("parallel delegation — widget tracking", () => {
 		});
 
 		const lines = render(makeDeps(state));
-		const joined = lines.join("\n");
-
-		// Each phase appears in output
-		expect(joined).toContain("spawning");
-		expect(joined).toContain("prompting");
-		expect(joined).toContain("initializing");
+		// Compact format: no sessions → header only, phases not rendered
+		expect(lines.length).toBe(1);
 
 		// Verify each delegation object has its own phase (no cross-contamination)
 		expect(state.activity.delegations[0].phase).toBe("spawning");
@@ -166,16 +156,9 @@ describe("parallel delegation — widget tracking", () => {
 			"codex",
 		]);
 
-		// Widget should show only remaining
+		// Compact format: no sessions → header only
 		const lines = render(makeDeps(state));
-		const joined = lines.join("\n");
-		expect(joined).toContain("gemini");
-		expect(joined).toContain("codex");
-		// claude removed from delegation rows, but still in configured agents list
-		// Check delegation-specific content is gone
-		const delegationLines = lines.filter((l) => l.includes("⟳") || l.includes("⏳"));
-		const delegationText = delegationLines.join("\n");
-		expect(delegationText).not.toContain("claude");
+		expect(lines.length).toBe(1);
 	});
 
 	// Test 4: Widget state snapshot shows all active delegations
@@ -259,18 +242,9 @@ describe("parallel delegation — widget tracking", () => {
 		expect(state2.activity.delegations[0].phase).toBe("prompting");
 		expect(state2.activity.delegations[1].phase).toBe("prompting");
 
-		// Verify widget renders correctly
+		// Compact format: no sessions → header only
 		const lines = render(makeDeps(state2));
-		const joined = lines.join("\n");
-		expect(joined).toContain("claude");
-		expect(joined).toContain("opencode");
-		// Removed agents still appear in "agents: ..." config line.
-		// Check they are absent from delegation rows only.
-		const delegationLines = lines.filter((l) => l.includes("⟳") || l.includes("⏳") || l.includes("✕"));
-		const delegationText = delegationLines.join("\n");
-		expect(delegationText).not.toContain("gemini");
-		expect(delegationText).not.toContain("codex");
-		expect(delegationText).not.toContain("ocxo");
+		expect(lines.length).toBe(1);
 	});
 
 	// Test 6: onProgress updates only the targeted delegation (closure correctness)
@@ -282,13 +256,6 @@ describe("parallel delegation — widget tracking", () => {
 		const delegations = [d1, d2, d3];
 
 		// Simulate what beginWidgetActivity + onProgress closure does:
-		// The pattern in index.ts:
-		//   const delegation = widgetActivity.delegations[widgetActivity.delegations.length - 1];
-		//   const onProgress = (progress) => { delegation.phase = progress.phase; ... }
-		//
-		// For parallel, each delegate call creates its own closure referencing its delegation.
-		// Simulate by creating closures that reference each delegation directly:
-
 		const makeOnProgress = (delegation: AcpWidgetDelegation) => (progress: { phase: string; lastActivityAt: number; text?: string }) => {
 			delegation.phase = progress.phase;
 			delegation.lastActivityAt = new Date(progress.lastActivityAt);
@@ -313,7 +280,7 @@ describe("parallel delegation — widget tracking", () => {
 		expect(d3.phase).toBe("done");
 		expect(d3.text).toBeUndefined();
 
-		// Widget renders the updated states
+		// Compact format: no sessions → header only, phases not rendered
 		const state = makeState({
 			configuredAgentNames: ["gemini", "claude", "codex"],
 			activity: {
@@ -324,11 +291,7 @@ describe("parallel delegation — widget tracking", () => {
 			},
 		});
 		const lines = render(makeDeps(state));
-		const joined = lines.join("\n");
-		expect(joined).toContain("prompting");
-		expect(joined).toContain("initializing");
-		// "done" phase gets ⟳ icon — no special handling, just rendered
-		expect(joined).toContain("done");
+		expect(lines.length).toBe(1); // header only
 	});
 
 	// Test 7: beginWidgetActivity cleanup function removes only its delegation
