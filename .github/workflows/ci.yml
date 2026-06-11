@@ -25,6 +25,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter pi-acp-types run build
       - run: pnpm run typecheck
 
   test:
