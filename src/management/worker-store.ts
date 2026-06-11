@@ -6,7 +6,10 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { ensureRuntimeDir } from "./runtime-paths.js";
+import { createNoopLogger } from "../logger.js";
 import type { AcpWorkerRecord, AcpWorkerStatus } from "../config/types.js";
+
+const log = createNoopLogger();
 
 interface WorkerPayload {
   workers: AcpWorkerRecord[];
@@ -108,7 +111,9 @@ export class WorkerStore {
       const paths = ensureRuntimeDir(this.rootDir);
       if (!existsSync(paths.workersFile)) return structuredClone(DEFAULT_PAYLOAD);
       return JSON.parse(readFileSync(paths.workersFile, "utf-8")) as WorkerPayload;
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
+      log.debug("worker-store read failed", e);
       return structuredClone(DEFAULT_PAYLOAD);
     }
   }
@@ -117,8 +122,10 @@ export class WorkerStore {
     try {
       const paths = ensureRuntimeDir(this.rootDir);
       writeFileSync(paths.workersFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
       // EACCES or other FS error — silently degrade. Workers are non-critical runtime state.
+      log.debug("worker-store write failed", e);
     }
   }
 }

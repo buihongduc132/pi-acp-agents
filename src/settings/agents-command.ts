@@ -12,6 +12,7 @@ import {
 	removeAgentServer,
 	AGENT_PRESETS,
 } from "../config/config.js";
+import type { SettingsUI } from "./agent-config-tui.js";
 
 // Re-export so index.ts can import from here
 export { openAgentConfigTUI } from "./agent-config-tui.js";
@@ -41,8 +42,8 @@ export async function handleAgentsCommand(
 	if (subcommand === "config") {
 		const { openAgentConfigTUI } = await import("./agent-config-tui.js");
 		try {
-			await openAgentConfigTUI((ctx as any).ui);
-		} catch {
+			await openAgentConfigTUI(ctx.ui as unknown as SettingsUI);
+		} catch (e) {
 			ctx.ui.notify("Failed to open agent config TUI.", "error");
 		}
 		return;
@@ -95,7 +96,7 @@ export async function handleAgentsCommand(
 				);
 				return;
 			}
-			command = preset.command;
+			command = preset.command ?? "";
 			args = preset.args ?? [];
 		}
 		try {

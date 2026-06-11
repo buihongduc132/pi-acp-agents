@@ -9,6 +9,19 @@ import { createAdapter } from "../adapter-factory.js";
 import { AliasResolver } from "./alias-resolver.js";
 import type { AcpConfig, AcpPromptResult } from "../config/types.js";
 
+/** Wrap a promise with a timeout. Throws on expiry with descriptive message. */
+function withTimeoutMs<T>(promise: Promise<T>, ms: number | undefined, label: string): Promise<T> {
+  const effectiveMs = ms ?? 300_000;
+  if (effectiveMs <= 0) return promise;
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${effectiveMs}ms`)), effectiveMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /** Progress update during delegation */
 export interface AcpDelegateProgress {
   agentName: string;
@@ -34,11 +47,28 @@ export interface ComparisonResult {
   timestamp: string;
 }
 
+export interface AgentCoordinatorDeps {
+  /** Check if a specific agent's circuit breaker is healthy */
+  isHealthyFn?: (agentName: string) => boolean;
+  /** Record success/failure for circuit breaker tracking */
+  recordSuccessFn?: (agentName: string) => void;
+  recordFailureFn?: (agentName: string) => void;
+}
+
 export class AgentCoordinator {
+  private isHealthyFn: (agentName: string) => boolean;
+  private recordSuccessFn?: (agentName: string) => void;
+  private recordFailureFn?: (agentName: string) => void;
+
   constructor(
     private config: AcpConfig,
     private cwd: string,
-  ) {}
+    deps?: AgentCoordinatorDeps,
+  ) {
+    this.isHealthyFn = deps?.isHealthyFn ?? (() => true);
+    this.recordSuccessFn = deps?.recordSuccessFn;
+    this.recordFailureFn = deps?.recordFailureFn;
+  }
 
   /** Delegate a task to a single agent or alias. Creates a short-lived session. */
   async delegate(
@@ -54,7 +84,9 @@ export class AgentCoordinator {
       try {
         adapter.cancel();
       } catch { /* best-effort */ }
-      adapter.dispose();
+      try {
+        adapter.dispose();
+      } catch { /* best-effort — dispose must not throw */ }
       const err = new DOMException("Operation cancelled", "AbortError");
       onProgress?.({ agentName, phase: "error" });
       throw err;
@@ -63,10 +95,24 @@ export class AgentCoordinator {
     // Check if it's an alias first
     const aliasConfig = this.config.agent_aliases?.[agentName];
     if (aliasConfig) {
+      const isHealthy = this.isHealthyFn;
+      const recordSuccess = this.recordSuccessFn;
+      const recordFailure = this.recordFailureFn;
       const resolver = new AliasResolver(
         { [agentName]: aliasConfig },
-        (name, msg, c) => this.delegateToAgent(name, msg, c, onProgress, signal),
-        () => true, // circuit breaker check — simplified for now
+        async (name, msg, c) => {
+          try {
+            const result = await this.delegateToAgent(name, msg, c, onProgress, signal);
+            recordSuccess?.(name);
+            return result;
+          } catch (err) {
+            recordFailure?.(name);
+            throw err;
+          }
+        },
+        (name) => isHealthy(name),
+        undefined,
+        this.config.raceTimeoutMs ? { raceTimeoutMs: this.config.raceTimeoutMs } : undefined,
       );
       return resolver.resolve(agentName, message, cwd);
     }
@@ -106,26 +152,37 @@ export class AgentCoordinator {
       });
     };
 
-    // Abort handler: cancel + dispose
+    // Abort handler: cancel + dispose + reject pending prompt
+    let abortReject: ((err: Error) => void) | null = null;
+    const abortPromise = new Promise<never>((_, reject) => {
+      abortReject = reject;
+    });
+    // Safety: prevent unhandled rejection if abort fires after race settles
+    abortPromise.catch(() => {});
+
     const onAbort = () => {
       try { adapter.cancel(); } catch { /* best-effort */ }
-      adapter.dispose();
+      try { adapter.dispose(); } catch { /* best-effort — dispose must not throw */ }
       emitProgress("error");
+      abortReject?.(new DOMException("Operation cancelled", "AbortError"));
     };
 
     signal?.addEventListener("abort", onAbort, { once: true });
 
     try {
       emitProgress("spawning");
-      await adapter.spawn();
+      await withTimeoutMs(adapter.spawn(), this.config.stallTimeoutMs, `acp_spawn(delegate:${agentName})`);
       emitProgress("initializing");
       await adapter.initialize();
       await adapter.newSession(effectiveCwd);
       emitProgress("prompting");
-      return await adapter.prompt(message);
+      const promptPromise = adapter.prompt(message);
+      // Prevent unhandled rejection if abort wins the race
+      promptPromise.catch(() => {});
+      return await Promise.race([promptPromise, abortPromise]);
     } finally {
       signal?.removeEventListener("abort", onAbort);
-      adapter.dispose();
+      try { adapter.dispose(); } catch { /* best-effort — dispose must not mask errors */ }
     }
   }
 

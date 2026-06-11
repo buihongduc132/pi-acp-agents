@@ -1,10 +1,10 @@
-# @walodayeet/pi-acp-agents
+# @buihongduc132/pi-acp-agents
 
 > Multi-agent orchestration for pi — spawn, control, and coordinate ACP-compatible agents (Gemini CLI, Claude, Codex, etc.) as first-class tools within the pi coding agent.
 
-[![npm version](https://img.shields.io/npm/v/@walodayeet/pi-acp-agents.svg)](https://www.npmjs.com/package/@walodayeet/pi-acp-agents)
+[![npm version](https://img.shields.io/npm/v/@buihongduc132/pi-acp-agents.svg)](https://www.npmjs.com/package/@buihongduc132/pi-acp-agents)
 [![CI](https://github.com/buihongduc132/pi-acp-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/buihongduc132/pi-acp-agents/actions/workflows/ci.yml)
-[![license](https://img.shields.io/npm/l/@walodayeet/pi-acp-agents.svg)](https://github.com/buihongduc132/pi-acp-agents/blob/main/LICENSE)
+[![license](https://img.shields.io/npm/l/@buihongduc132/pi-acp-agents.svg)](https://github.com/buihongduc132/pi-acp-agents/blob/main/LICENSE)
 
 ---
 
@@ -24,7 +24,7 @@
 ### For Humans
 
 ```bash
-npm install @walodayeet/pi-acp-agents
+npm install @buihongduc132/pi-acp-agents
 ```
 
 ### For AI Agents
@@ -33,7 +33,7 @@ Add to `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "packages": ["npm:@walodayeet/pi-acp-agents"]
+  "packages": ["npm:@buihongduc132/pi-acp-agents"]
 }
 ```
 
@@ -42,19 +42,19 @@ Or install via pi CLI:
 ### Humans
 
 ```bash
-pi install npm:@walodayeet/pi-acp-agents
+pi install npm:@buihongduc132/pi-acp-agents
 ```
 
 Or with npm directly:
 
 ```bash
-npm install @walodayeet/pi-acp-agents
+npm install @buihongduc132/pi-acp-agents
 ```
 
 ### AI Agents (pip install)
 
 ```
-pi install npm:@walodayeet/pi-acp-agents
+pi install npm:@buihongduc132/pi-acp-agents
 ```
 
 ### Git-sourced for pi
@@ -356,4 +356,4 @@ MIT
 
 ## Attribution
 
-This package is a fork of [walodayeet/pi-acp-agents](https://github.com/walodayeet/pi-acp-agents). Forked and maintained by [buihongduc132](https://github.com/buihongduc132).
+Maintained by [buihongduc132](https://github.com/buihongduc132). Forked from [walodayeet/pi-acp-agents](https://github.com/walodayeet/pi-acp-agents).

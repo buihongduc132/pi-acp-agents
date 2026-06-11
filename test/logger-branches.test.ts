@@ -1,18 +1,10 @@
 /**
  * Branch coverage for logger.ts — error paths, mkdirSync failure, appendFileSync failure
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-
-// Keep real fs for most operations, only mock specific functions
-vi.mock("node:fs", async (importOriginal) => {
-	const actual = await importOriginal() as any;
-	return {
-		...actual,
-	};
-});
 
 import { createFileLogger, createNoopLogger } from "../src/logger.js";
 
@@ -31,8 +23,7 @@ describe("logger.ts — branch coverage", () => {
 			const logsDir = join(tempDir, "new-logs");
 			const logger = createFileLogger(logsDir);
 			logger.info("test", { key: "value" });
-			// Verify log was written
-			const { existsSync, readFileSync } = require("node:fs");
+			const { existsSync } = require("node:fs");
 			expect(existsSync(join(logsDir, "main.log"))).toBe(true);
 		});
 

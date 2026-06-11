@@ -14,7 +14,6 @@ const mockExec = execSync as ReturnType<typeof vi.fn>;
 
 describe("adapters/gemini (mocked)", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("isAvailable", () => {
@@ -68,7 +67,6 @@ describe("adapters/gemini (mocked)", () => {
 
 describe("adapters/codex (mocked)", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("isAvailable", () => {
@@ -116,7 +114,6 @@ describe("adapters/codex (mocked)", () => {
 
 describe("adapters/opencode (mocked)", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("isAvailable", () => {

@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { OpenCodeAcpAdapter } from "../src/adapters/opencode.js";
 
-describe.skipIf(!OpenCodeAcpAdapter.isAvailable())("OpenCode ACP live smoke test", () => {
+describe.skipIf(!OpenCodeAcpAdapter.isAvailable() || !process.env.ACP_LIVE_TEST)("OpenCode ACP live smoke test", () => {
 	const adapter = new OpenCodeAcpAdapter({ cwd: "/tmp" });
 
 	it("spawns and initializes ACP connection", async () => {

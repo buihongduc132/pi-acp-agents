@@ -1,5 +1,8 @@
 import { appendFileSync } from "node:fs";
 import { ensureRuntimeDir } from "./runtime-paths.js";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 export interface AcpEventLogEntry {
   timestamp: string;
@@ -19,8 +22,9 @@ export class AcpEventLog {
     try {
       const paths = ensureRuntimeDir(this.rootDir);
       appendFileSync(paths.eventLogFile, JSON.stringify(entry) + "\n", "utf-8");
-    } catch {
+    } catch (e) {
       // EACCES or other FS error — silently degrade. Event log is non-critical.
+      log.debug("event log write failed", e);
     }
     return entry;
   }

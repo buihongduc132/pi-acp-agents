@@ -86,4 +86,62 @@ describe("config", () => {
       expect(config.agent_servers).toEqual({});
     });
   });
+
+  describe("agent_aliases (T3/T6)", () => {
+    it("accepts agent_aliases with failover strategy", () => {
+      const config = validateConfig({
+        agent_servers: { gemini: { command: "gemini" }, claude: { command: "claude" } },
+        agent_aliases: {
+          smart: { agents: ["gemini", "claude"], strategy: "failover" },
+        },
+      });
+      expect(config.agent_aliases?.smart).toBeDefined();
+      expect(config.agent_aliases?.smart.agents).toEqual(["gemini", "claude"]);
+      expect(config.agent_aliases?.smart.strategy).toBe("failover");
+    });
+
+    it("accepts agent_aliases with race strategy", () => {
+      const config = validateConfig({
+        agent_servers: { gemini: { command: "gemini" }, claude: { command: "claude" } },
+        agent_aliases: {
+          fast: { agents: ["gemini", "claude"], strategy: "race" },
+        },
+      });
+      expect(config.agent_aliases?.fast.strategy).toBe("race");
+    });
+
+    it("accepts config without agent_aliases (backward compat)", () => {
+      const config = validateConfig({
+        agent_servers: { gemini: { command: "gemini" } },
+      });
+      expect(config.agent_aliases).toBeUndefined();
+    });
+
+    it("loads agent_aliases from file", () => {
+      const configPath = join(tmpDir, "config.json");
+      writeFileSync(configPath, JSON.stringify({
+        agent_servers: { gemini: { command: "gemini" }, claude: { command: "claude" } },
+        agent_aliases: {
+          smart: { agents: ["gemini", "claude"], strategy: "failover" },
+          fast: { agents: ["gemini"], strategy: "race" },
+        },
+        defaultAgent: "smart",
+      }));
+      const config = loadConfig(configPath);
+      expect(config.agent_aliases?.smart.agents).toEqual(["gemini", "claude"]);
+      expect(config.agent_aliases?.fast.strategy).toBe("race");
+      expect(config.defaultAgent).toBe("smart");
+    });
+
+    it("preserves multiple aliases in config", () => {
+      const config = validateConfig({
+        agent_servers: { a: { command: "a" }, b: { command: "b" }, c: { command: "c" } },
+        agent_aliases: {
+          alias1: { agents: ["a", "b"], strategy: "failover" },
+          alias2: { agents: ["b", "c"], strategy: "race" },
+        },
+      });
+      expect(Object.keys(config.agent_aliases!)).toHaveLength(2);
+    });
+  });
 });

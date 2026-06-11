@@ -53,7 +53,6 @@ function makeOpts(overrides: Partial<AcpAdapterOptions> = {}): AcpAdapterOptions
 
 describe("AcpAgentAdapter (base)", () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("constructor", () => {

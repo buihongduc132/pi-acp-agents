@@ -68,7 +68,6 @@ describe("AcpClient", () => {
 	}
 
 	beforeEach(() => {
-		vi.clearAllMocks();
 		mockSpawn.mockReturnValue(makeFakeProc());
 	});
 

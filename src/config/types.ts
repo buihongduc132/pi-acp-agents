@@ -14,7 +14,10 @@ export interface AcpAliasConfig {
 
 /** Per-agent server configuration (matches Zed's agent_servers entry) */
 export interface AcpAgentConfig {
-	command: string;
+	/** How to connect to this agent: 'direct' (subprocess) or 'acpx' (CLI delegation). Default: 'direct'. */
+	mode?: "direct" | "acpx";
+	/** Required for 'direct' mode. Command to spawn the agent subprocess. */
+	command?: string;
 	args?: string[];
 	env?: Record<string, string>;
 	cwd?: string;
@@ -51,6 +54,8 @@ export interface AcpConfig {
 	interruptGraceMs?: number;     // default: 10_000
 	/** Agent alias definitions for fallback chains */
 	agent_aliases?: Record<string, AcpAliasConfig>;
+	/** Timeout for race strategy in ms (default: 30_000 = 30s) */
+	raceTimeoutMs?: number;
 	runtimeDir?: string;
 	modelPolicy?: {
 		allowedModels?: string[];
@@ -106,6 +111,11 @@ export interface AcpArchivedSessionMetadata {
 	closeReason?: string;
 	model?: string;
 	mode?: string;
+	/** Loadability tracking — whether this archived session can be successfully resumed */
+	loadStatus?: "loadable" | "unloadable" | "unknown";
+	lastLoadAttemptAt?: string;
+	lastLoadError?: string;
+	loadAttemptCount?: number;
 }
 
 /** Internal handle kept by SessionManager. Also satisfies HealthMonitorable. */

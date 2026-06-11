@@ -17,12 +17,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter pi-acp-types run build
+      - run: pnpm run typecheck
 
   test:
     name: Test (Node ${{ matrix.node-version }})
@@ -33,12 +37,15 @@ jobs:
         node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
-      - run: npm ci
-      - run: npm run test:ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:ci
 
   # ── Pack Verification ────────────────────────────────────────
   pack:
@@ -47,11 +54,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: Check package contents
         run: |
           echo "📦 Package tarball contents:"
@@ -89,12 +99,15 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
           registry-url: https://registry.npmjs.org
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
       - name: Determine npm tag
         id: tag
@@ -131,7 +144,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Package | @walodayeet/pi-acp-agents |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Package | pi-acp-agents |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | ${{ steps.tag.outputs.version }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Tag | ${{ steps.tag.outputs.tag }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Provenance | ✅ Signed |" >> "$GITHUB_STEP_SUMMARY"

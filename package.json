@@ -1,6 +1,6 @@
 {
-  "name": "pi-acp-agents",
-  "version": "0.2.2",
+  "name": "@buihongduc132/pi-acp-agents",
+  "version": "0.3.0",
   "description": "Pi extension: ACP agent client — spawn and control ACP-compatible agents (Gemini CLI, etc.) from within pi",
   "keywords": [
     "pi-package",
@@ -14,8 +14,20 @@
     "pi-coding-agent"
   ],
   "type": "module",
+  "main": "./index.ts",
+  "types": "./src/public-api.ts",
+  "exports": {
+    ".": {
+      "types": "./src/public-api.ts",
+      "import": "./index.ts"
+    },
+    "./api": {
+      "types": "./src/public-api.ts",
+      "import": "./src/public-api.ts"
+    }
+  },
   "license": "MIT",
-  "author": "walodayeet",
+  "author": "buihongduc132",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/buihongduc132/pi-acp-agents.git"
@@ -52,8 +64,12 @@
       "optional": true
     }
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.21.0"
+    "@agentclientprotocol/sdk": "^0.21.0",
+    "pi-acp-types": "workspace:*"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "^0.73.0",

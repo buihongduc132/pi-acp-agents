@@ -1,6 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { ensureRuntimeDir } from "./runtime-paths.js";
+import { createNoopLogger } from "../logger.js";
 import type { AcpTaskPriority } from "../config/types.js";
+
+const log = createNoopLogger();
 
 export type AcpTaskStatus = "pending" | "in_progress" | "completed" | "deleted";
 
@@ -232,12 +235,14 @@ export class AcpTaskStore {
       const parsed = JSON.parse(readFileSync(paths.tasksFile, "utf-8")) as AcpTaskStorePayload;
       // Migration: add defaults for legacy records
       for (const task of parsed.tasks) {
-        if (!(task as any).blocks) (task as any).blocks = [];
-        if (!(task as any).priority) (task as any).priority = "normal";
-        if (!(task as any).metadata) (task as any).metadata = {};
+        if (!task.blocks) task.blocks = [];
+        if (!task.priority) task.priority = "normal";
+        if (!task.metadata) task.metadata = {};
       }
       return parsed;
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
+      log.debug("task-store read failed", e);
       return structuredClone(DEFAULT_PAYLOAD);
     }
   }
@@ -246,8 +251,10 @@ export class AcpTaskStore {
     try {
       const paths = ensureRuntimeDir(this.rootDir);
       writeFileSync(paths.tasksFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
       // EACCES or other FS error — silently degrade. Tasks are non-critical runtime state.
+      log.debug("task-store write failed", e);
     }
   }
 }

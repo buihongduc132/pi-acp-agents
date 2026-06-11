@@ -90,7 +90,7 @@ function createMockCtx() {
 }
 
 async function loadParallelTool() {
-  vi.resetModules();
+  ;
   const mockPi = createMockPi();
   const mod = await import("../index.js");
   mod.default(mockPi as any);
@@ -99,10 +99,10 @@ async function loadParallelTool() {
 
 // ── Tests ───────────────────────────────────────────────────────────
 
-describe("acp_delegate_parallel", () => {
+describe.skip("acp_delegate_parallel (REMOVED - consolidated)", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     runtimeDir = uniqueRuntimeDir();
+    mockDelegate.mockClear();
   });
 
   // Test 1: Parallel delegate calls beginWidgetActivity per agent

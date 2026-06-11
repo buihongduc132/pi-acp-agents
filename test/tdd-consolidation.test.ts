@@ -23,30 +23,12 @@ import type { AcpSessionHandle } from "../src/config/types.js";
 
 // ── Mocks (same pattern as existing index-tools.test.ts) ──────────────
 
-vi.mock("../src/config/config.js", async (imp) => ({
-	...await imp(),
-	loadConfig: vi.fn(),
-}));
-vi.mock("../src/core/session-manager.js", async (imp) => ({
-	...await imp(),
-	SessionManager: vi.fn(),
-}));
-vi.mock("../src/management/task-store.js", async (imp) => ({
-	...await imp(),
-	AcpTaskStore: vi.fn(),
-}));
-vi.mock("../src/management/mailbox-manager.js", async (imp) => ({
-	...await imp(),
-	MailboxManager: vi.fn(),
-}));
-vi.mock("../src/management/governance-store.js", async (imp) => ({
-	...await imp(),
-	GovernanceStore: vi.fn(),
-}));
-vi.mock("../src/management/event-log.js", async (imp) => ({
-	...await imp(),
-	AcpEventLog: vi.fn(),
-}));
+vi.mock("../src/config/config.js", () => ({ loadConfig: vi.fn() }));
+vi.mock("../src/core/session-manager.js", () => ({ SessionManager: vi.fn() }));
+vi.mock("../src/management/task-store.js", () => ({ AcpTaskStore: vi.fn() }));
+vi.mock("../src/management/mailbox-manager.js", () => ({ MailboxManager: vi.fn() }));
+vi.mock("../src/management/governance-store.js", () => ({ GovernanceStore: vi.fn() }));
+vi.mock("../src/management/event-log.js", () => ({ AcpEventLog: vi.fn() }));
 vi.mock("../src/management/session-archive-store.js", () => ({
 	SessionArchiveStore: class MockSessionArchiveStore {
 		get = vi.fn((sessionId: string) => sessionArchiveMappings.get(sessionId));
@@ -115,22 +97,10 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 vi.mock("../src/logger.js", () => ({
 	createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
-vi.mock("../src/core/circuit-breaker.js", async (imp) => ({
-	...await imp(),
-	AcpCircuitBreaker: vi.fn(),
-}));
-vi.mock("../src/core/health-monitor.js", async (imp) => ({
-	...await imp(),
-	HealthMonitor: vi.fn(),
-}));
-vi.mock("../src/adapter-factory.js", async (imp) => ({
-	...await imp(),
-	createAdapter: vi.fn(),
-}));
-vi.mock("../src/coordination/coordinator.js", async (imp) => ({
-	...await imp(),
-	AgentCoordinator: vi.fn(),
-}));
+vi.mock("../src/core/circuit-breaker.js", () => ({ AcpCircuitBreaker: vi.fn() }));
+vi.mock("../src/core/health-monitor.js", () => ({ HealthMonitor: vi.fn() }));
+vi.mock("../src/adapter-factory.js", () => ({ createAdapter: vi.fn() }));
+vi.mock("../src/coordination/coordinator.js", () => ({ AgentCoordinator: vi.fn() }));
 vi.mock("../src/acp-widget.js", () => ({
 	createAcpWidget: () => () => ({ render: vi.fn() }),
 }));
@@ -195,7 +165,6 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 	const ctx = { cwd: "/project", ui: { setWidget: vi.fn(), notify: vi.fn() } };
 
 	beforeEach(() => {
-		vi.clearAllMocks();
 		sessionArchiveMappings.clear();
 		sessionNameMappings.clear();
 		tools = new Map();
@@ -456,10 +425,10 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 			const handle = m.sm.add.mock.calls[0]?.[0];
 			if (!handle) return;
 			m.sm.get.mockReturnValue(handle);
-			// Add to activeAdapters by setting session on the mock
-			vi.clearAllMocks();
-			m.sm.get.mockReturnValue(handle);
 			m.cb.execute.mockImplementation(async (fn: () => any) => fn());
+
+			// Clear spawn mock so we can verify it's NOT called for reuse
+			m.ad.spawn.mockClear();
 
 			// Second call with session_id should reuse
 			const r = await exec("acp_prompt", {
@@ -487,8 +456,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 				session_name: "research",
 			});
 			expect(r.content[0].text).toBe("response");
-			// Should have registered the session name
-			expect(r.details.sessionName).toBe("research");
+			// Should have registered the session name (with random hex suffix)
+			expect(r.details.sessionName).toMatch(/^research-[0-9a-f]{4}$/);
 		});
 
 		// TODO: implement consolidation first — auto-reload archived sessions
@@ -517,7 +486,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 			});
 			// Should fall back to new session with warning
 			expect(m.ad.newSession).toHaveBeenCalled();
-			expect(r.content[0].text).toContain("warning");
+			expect(r.content[0].text).toContain("WARNING:");
 		});
 
 		// TODO: implement consolidation first — dispose:true param

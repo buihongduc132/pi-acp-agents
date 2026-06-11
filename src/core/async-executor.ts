@@ -9,6 +9,9 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AcpAsyncRunRecord } from "../config/types.js";
 import type { AgentCoordinator } from "../coordination/coordinator.js";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 interface AsyncStorePayload {
   runs: AcpAsyncRunRecord[];
@@ -112,7 +115,9 @@ export class AsyncExecutor {
     if (!existsSync(this.runsFile)) return structuredClone(DEFAULT_PAYLOAD);
     try {
       return JSON.parse(readFileSync(this.runsFile, "utf-8")) as AsyncStorePayload;
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
+      log.debug("async-executor read failed", e);
       return structuredClone(DEFAULT_PAYLOAD);
     }
   }
@@ -120,8 +125,10 @@ export class AsyncExecutor {
   private writeAll(payload: AsyncStorePayload): void {
     try {
       writeFileSync(this.runsFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
       // EACCES or other FS error — silently degrade.
+      log.debug("async-executor write failed", e);
     }
   }
 

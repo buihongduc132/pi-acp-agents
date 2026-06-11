@@ -3,30 +3,18 @@
  * Targets: numeric field validation, timeout order, getAgentConfig, empty name,
  * migrateLegacyConfig with auto-save, loadConfig with invalid JSON
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-// Mock homedir but keep tmpdir
-const FAKE_HOME = join(tmpdir(), `acp-config-branch-test-${process.pid}`);
-vi.mock("node:os", async (importOriginal) => {
-	const actual = await importOriginal() as any;
-	return {
-		...actual,
-		homedir: () => join(actual.tmpdir(), `acp-config-branch-test-${process.pid}`),
-	};
-});
+// Use explicit temp dirs instead of mocking node:os (CONFIG_PATH is evaluated at module load)
+const TEST_DIR = join(tmpdir(), `acp-config-branch-test-${process.pid}`);
 
 import { validateConfig, getAgentConfig, loadConfig, resolveConfigPath } from "../src/config/config.js";
 
 describe("config.ts — branch coverage", () => {
-	beforeEach(() => {
-		mkdirSync(FAKE_HOME, { recursive: true });
-	});
-	afterEach(() => {
-		rmSync(FAKE_HOME, { recursive: true, force: true });
-	});
+
 
 	describe("validateConfig", () => {
 		it("throws on empty agent name", () => {
@@ -150,25 +138,29 @@ describe("config.ts — branch coverage", () => {
 	});
 
 	describe("loadConfig", () => {
+		beforeEach(() => {
+			mkdirSync(TEST_DIR, { recursive: true });
+		});
+		afterEach(() => {
+			rmSync(TEST_DIR, { recursive: true, force: true });
+		});
+
 		it("returns defaults when config file has invalid JSON", () => {
-			const configDir = join(FAKE_HOME, ".pi", "acp-agents");
-			mkdirSync(configDir, { recursive: true });
-			writeFileSync(join(configDir, "config.json"), "not json {{{");
-			const config = loadConfig();
+			const configPath = join(TEST_DIR, "config.json");
+			writeFileSync(configPath, "not json {{{");
+			const config = loadConfig(configPath);
 			expect(config.agent_servers).toEqual({});
 		});
 
 		it("migrates old agents key and auto-saves", () => {
-			const configDir = join(FAKE_HOME, ".pi", "acp-agents");
-			mkdirSync(configDir, { recursive: true });
-			const configPath = join(configDir, "config.json");
+			const configPath = join(TEST_DIR, "config.json");
 			writeFileSync(configPath, JSON.stringify({
 				agents: {
 					test: { command: "test-cmd", args: [] },
 				},
 			}));
 
-			const config = loadConfig();
+			const config = loadConfig(configPath);
 			expect(config.agent_servers.test).toBeDefined();
 			expect(config.agent_servers.test.command).toBe("test-cmd");
 

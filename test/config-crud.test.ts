@@ -4,20 +4,10 @@
  * T1-T10 from plan: saveConfig, upsertAgentServer, removeAgentServer,
  * setDefaultAgent, detectAvailablePresets.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-
-// We mock homedir so config path goes to temp dir
-vi.mock("node:os", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("node:os")>();
-	const { join } = await import("node:path");
-	return {
-		...actual,
-		homedir: () => join(actual.tmpdir(), `acp-crud-test-${process.pid}`),
-	};
-});
 
 import {
 	saveConfig,
@@ -251,7 +241,7 @@ describe("Config CRUD", () => {
 				expect(p).toHaveProperty("config");
 				expect(p.config).toHaveProperty("command");
 				expect(typeof p.config.command).toBe("string");
-				expect(p.config.command.length).toBeGreaterThan(0);
+				expect((p.config.command ?? "").length).toBeGreaterThan(0);
 			}
 		});
 	});

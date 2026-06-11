@@ -1,7 +1,10 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock console.debug to avoid noise
-const mockConsoleDebug = vi.spyOn(console, "debug").mockImplementation(() => {});
+const { mockDebug } = vi.hoisted(() => ({ mockDebug: vi.fn() }));
+vi.mock("../../src/logger.js", () => ({
+	createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: mockDebug }),
+	createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+}));
 
 vi.mock("node:child_process", () => ({
 	execSync: vi.fn(),
@@ -16,7 +19,6 @@ const mockExec = execSync as ReturnType<typeof vi.fn>;
 
 describe("adapters — catch branches", () => {
 	afterEach(() => {
-		vi.clearAllMocks();
 	});
 
 	describe("GeminiAcpAdapter.isAvailable catch branch", () => {
@@ -26,7 +28,7 @@ describe("adapters — catch branches", () => {
 			});
 			const result = GeminiAcpAdapter.isAvailable();
 			expect(result).toBe(false);
-			expect(mockConsoleDebug).toHaveBeenCalled();
+			expect(mockDebug).toHaveBeenCalled();
 		});
 	});
 
@@ -37,7 +39,7 @@ describe("adapters — catch branches", () => {
 			});
 			const result = GeminiAcpAdapter.getVersion();
 			expect(result).toBeNull();
-			expect(mockConsoleDebug).toHaveBeenCalled();
+			expect(mockDebug).toHaveBeenCalled();
 		});
 	});
 

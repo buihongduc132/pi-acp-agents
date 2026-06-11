@@ -44,7 +44,7 @@ describe("AgentCoordinator", () => {
   let coordinator: AgentCoordinator;
 
   beforeEach(() => {
-    vi.mocked(createAdapter).mockReturnValue(createMockAdapter() as any);
+    (createAdapter as any).mockReturnValue(createMockAdapter() as any);
     coordinator = new AgentCoordinator(mockConfig, "/tmp");
   });
 
@@ -74,7 +74,7 @@ describe("AgentCoordinator", () => {
 
     it("disposes adapter after use", async () => {
       const adapter = createMockAdapter();
-      vi.mocked(createAdapter).mockReturnValue(adapter as any);
+      (createAdapter as any).mockReturnValue(adapter as any);
       await coordinator.delegate("gemini", "test");
       expect(adapter.dispose).toHaveBeenCalled();
     });
@@ -83,7 +83,7 @@ describe("AgentCoordinator", () => {
       const adapter = createMockAdapter({
         prompt: vi.fn().mockRejectedValue(new Error("boom")),
       });
-      vi.mocked(createAdapter).mockReturnValue(adapter as any);
+      (createAdapter as any).mockReturnValue(adapter as any);
       await expect(coordinator.delegate("gemini", "test")).rejects.toThrow("boom");
       expect(adapter.dispose).toHaveBeenCalled();
     });
@@ -100,7 +100,7 @@ describe("AgentCoordinator", () => {
 
     it("handles individual agent failures gracefully", async () => {
       let callCount = 0;
-      vi.mocked(createAdapter).mockImplementation((() => {
+      (createAdapter as any).mockImplementation((() => {
         callCount++;
         if (callCount === 2) {
           return createMockAdapter({
@@ -133,7 +133,7 @@ describe("AgentCoordinator", () => {
 
     it("includes error info in comparison", async () => {
       let callCount = 0;
-      vi.mocked(createAdapter).mockImplementation((() => {
+      (createAdapter as any).mockImplementation((() => {
         callCount++;
         if (callCount === 2) {
           return createMockAdapter({

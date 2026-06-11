@@ -9,7 +9,10 @@
 import { AcpAgentAdapter } from "./base.js";
 import type { AcpAgentConfig } from "../config/types.js";
 import type { Logger } from "../logger.js";
+import { createNoopLogger } from "../logger.js";
 import { execSync } from "node:child_process";
+
+const log = createNoopLogger();
 
 export interface OpenCodeAdapterOptions {
 	config?: Partial<AcpAgentConfig>;
@@ -53,7 +56,9 @@ export class OpenCodeAcpAdapter extends AcpAgentAdapter {
 			try {
 				execSync(`which ${cmd}`, { stdio: "pipe" });
 				return true;
-			} catch {
+			} catch (e) {
+				// Binary not found on PATH
+				log.debug(`opencode '${cmd}' not found`, e);
 				continue;
 			}
 		}
@@ -70,7 +75,9 @@ export class OpenCodeAcpAdapter extends AcpAgentAdapter {
 					stdio: "pipe",
 				});
 				return `${cmd}: ${output.trim()}`;
-			} catch {
+			} catch (e) {
+				// Version check failed for this binary
+				log.debug(`opencode '${cmd}' version check failed`, e);
 				continue;
 			}
 		}
@@ -83,7 +90,9 @@ export class OpenCodeAcpAdapter extends AcpAgentAdapter {
 			try {
 				execSync(`which ${cmd}`, { stdio: "pipe" });
 				return cmd;
-			} catch {
+			} catch (e) {
+				// Binary not found on PATH
+				log.debug(`opencode '${cmd}' resolve failed`, e);
 				continue;
 			}
 		}

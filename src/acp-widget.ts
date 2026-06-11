@@ -34,11 +34,21 @@ export interface AcpWidgetDelegation {
 	text?: string;
 }
 
+export interface AcpDelegationHistoryEntry {
+	agentName: string;
+	status: "completed" | "error";
+	error?: string;
+	sessionId?: string;
+	finishedAt: Date;
+}
+
 export interface AcpWidgetActivity {
 	activeDelegations: number;
 	activeBroadcasts: number;
 	activeCompares: number;
 	delegations: AcpWidgetDelegation[];
+	/** Capped at 20 entries — most recent last. */
+	delegationHistory?: AcpDelegationHistoryEntry[];
 	lastError?: string;
 }
 
@@ -190,6 +200,24 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 						const delLine = ` ${theme.fg("accent", `${phaseIcon} ${del.agentName}`)} ${theme.fg("dim", del.phase)}`;
 						const delText = del.text ? ` ${theme.fg("dim", truncateToWidth(del.text, 40))}` : "";
 						lines.push(truncateToWidth(`${delLine}${delText}`, width));
+					}
+				}
+
+				// ── Recent delegations (from history) ──
+				if (state.activity.delegationHistory && state.activity.delegationHistory.length > 0) {
+					const recent = state.activity.delegationHistory.slice(-5);
+					lines.push(
+						truncateToWidth(
+							` ${theme.fg("dim", "─ recent ─")}`,
+							width,
+						),
+					);
+					for (const entry of recent) {
+						const icon = entry.status === "completed" ? "\u2713" : "\u2717";
+						const color = entry.status === "completed" ? "success" : "error";
+						const errText = entry.error ? ` ${theme.fg("error", truncateToWidth(entry.error, 40))}` : "";
+						const histLine = `   ${theme.fg(color, `${icon} ${entry.agentName}`)}${errText}`;
+						lines.push(truncateToWidth(histLine, width));
 					}
 				}
 

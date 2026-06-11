@@ -103,7 +103,11 @@ export abstract class AcpAgentAdapter {
   /** Clean up — kill process and release resources */
   dispose(): void {
     if (this.client) {
-      this.client.dispose();
+      try {
+        this.client.dispose();
+      } catch {
+        // best-effort — dispose must not throw
+      }
       this.client = null;
     }
   }

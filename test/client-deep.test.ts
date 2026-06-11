@@ -77,7 +77,6 @@ describe("AcpClient — deep branches", () => {
 	}
 
 	beforeEach(() => {
-		vi.clearAllMocks();
 		capturedCallbacks = null;
 	});
 

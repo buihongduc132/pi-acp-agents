@@ -2,6 +2,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AcpArchivedSessionMetadata, AcpSessionHandle } from "../config/types.js";
 import { ensureRuntimeDir } from "./runtime-paths.js";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 interface ArchivePayload {
   sessions: AcpArchivedSessionMetadataRecord[];
@@ -25,6 +28,10 @@ interface AcpArchivedSessionMetadataRecord {
   closeReason?: string;
   model?: string;
   mode?: string;
+  loadStatus?: "loadable" | "unloadable" | "unknown";
+  lastLoadAttemptAt?: string;
+  lastLoadError?: string;
+  loadAttemptCount?: number;
 }
 
 const DEFAULT_PAYLOAD: ArchivePayload = { sessions: [] };
@@ -66,7 +73,9 @@ export class SessionArchiveStore {
     }
     try {
       return JSON.parse(readFileSync(this.filePath, "utf-8")) as ArchivePayload;
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
+      log.debug("session-archive-store read failed", e);
       return structuredClone(DEFAULT_PAYLOAD);
     }
   }
@@ -74,8 +83,10 @@ export class SessionArchiveStore {
   private writeRaw(payload: ArchivePayload): void {
     try {
       writeFileSync(this.filePath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
       // EACCES or other FS error — silently degrade.
+      log.debug("session-archive-store write failed", e);
     }
   }
 
@@ -94,6 +105,10 @@ export class SessionArchiveStore {
       closeReason: session.closeReason,
       model: session.model,
       mode: session.mode,
+      loadStatus: session.loadStatus,
+      lastLoadAttemptAt: session.lastLoadAttemptAt,
+      lastLoadError: session.lastLoadError,
+      loadAttemptCount: session.loadAttemptCount,
     };
   }
 
@@ -112,6 +127,10 @@ export class SessionArchiveStore {
       closeReason: record.closeReason,
       model: record.model,
       mode: record.mode,
+      loadStatus: record.loadStatus,
+      lastLoadAttemptAt: record.lastLoadAttemptAt,
+      lastLoadError: record.lastLoadError,
+      loadAttemptCount: record.loadAttemptCount,
     };
   }
 }

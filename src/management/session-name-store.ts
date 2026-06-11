@@ -1,5 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { ensureRuntimeDir } from "./runtime-paths.js";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 interface SessionNameRecord {
   sessionName: string;
@@ -66,7 +69,9 @@ export class SessionNameStore {
     try {
       const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as SessionNameRegistryPayload;
       return { mappings: Array.isArray(parsed.mappings) ? parsed.mappings.filter((entry) => entry?.sessionName && entry?.sessionId) : [] };
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
+      log.debug("session-name-store read failed", e);
       return structuredClone(DEFAULT_PAYLOAD);
     }
   }
@@ -74,8 +79,10 @@ export class SessionNameStore {
   private write(payload: SessionNameRegistryPayload): void {
     try {
       writeFileSync(this.filePath, JSON.stringify(payload, null, 2) + "\n", "utf8");
-    } catch {
+    } catch (e) {
+      // File read failed — return default payload
       // EACCES or other FS error — silently degrade.
+      log.debug("session-name-store write failed", e);
     }
   }
 }

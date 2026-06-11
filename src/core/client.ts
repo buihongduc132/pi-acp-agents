@@ -30,6 +30,7 @@ function createFilteredStdoutStream(rawStdout: ReadableStream<Uint8Array>, logge
 			JSON.parse(trimmed);
 			return true;
 		} catch {
+			// Not valid JSON — expected for non-JSON stdout lines
 			return false;
 		}
 	}
@@ -160,6 +161,7 @@ export class AcpClient {
 	/** Spawn the agent process and establish ACP connection */
 	async connect(): Promise<void> {
 		const cmd = this.config.command;
+		if (!cmd) throw new Error(`Agent "${this.agentName}" has no command configured for direct mode`);
 		const args = this.config.args ?? [];
 
 		try {
@@ -172,7 +174,7 @@ export class AcpClient {
 			throw classifyConnectionError(err, this.agentName, cmd);
 		}
 
-		if (!this.proc.stdin || !this.proc.stdout) {
+		if (!this.proc!.stdin || !this.proc!.stdout) {
 			throw new AcpProtocolError({
 				agentName: this.agentName,
 				command: cmd,
@@ -184,16 +186,16 @@ export class AcpClient {
 		}
 
 		// Prevent EPIPE crashes
-		this.proc.stdin.on("error", (err) => {
+		this.proc!.stdin.on("error", (err) => {
 			this.logger?.debug("stdin error", err);
 		});
-		this.proc.stdout.on("error", (err) => {
+		this.proc!.stdout.on("error", (err) => {
 			this.logger?.debug("stdout error", err);
 		});
-		this.proc.stderr?.on("error", (err) => {
+		this.proc!.stderr?.on("error", (err) => {
 			this.logger?.debug("stderr error", err);
 		});
-		this.proc.stderr?.on("data", (chunk: Buffer) => {
+		this.proc!.stderr?.on("data", (chunk: Buffer) => {
 			const text = chunk.toString();
 			this.lastStderr += text;
 			if (this.lastStderr.length > 2048)
@@ -202,10 +204,10 @@ export class AcpClient {
 		});
 
 		const rawStdout = Readable.toWeb(
-			this.proc.stdout,
+			this.proc!.stdout,
 		) as ReadableStream<Uint8Array>;
 		const webStdin = Writable.toWeb(
-			this.proc.stdin,
+			this.proc!.stdin,
 		) as WritableStream<Uint8Array>;
 
 		// Filter non-JSON lines before passing to ndJsonStream to avoid
@@ -238,11 +240,11 @@ export class AcpClient {
 				clientInfo: this.clientInfo,
 			});
 		} catch (err: unknown) {
-			throw classifyConnectionError(err, this.agentName, this.config.command, this.lastStderr);
+			throw classifyConnectionError(err, this.agentName, this.config.command!, this.lastStderr);
 		}
 
 		// Behavior-based validation: does the response look like ACP?
-		validateInitializeResponse(resp, this.agentName, this.config.command);
+		validateInitializeResponse(resp, this.agentName, this.config.command!);
 
 		this._agentInfo = resp;
 
@@ -251,6 +253,7 @@ export class AcpClient {
 			try {
 				await this.conn.authenticate({ methodId: resp.authMethods[0]!.id });
 			} catch (err) {
+								// Auth is best-effort — may fail if no auth needed
 				this.logger?.debug("Auth skipped or failed", err);
 			}
 		}
@@ -269,11 +272,11 @@ export class AcpClient {
 				mcpServers: [],
 			});
 		} catch (err: unknown) {
-			throw classifyConnectionError(err, this.agentName, this.config.command, this.lastStderr);
+			throw classifyConnectionError(err, this.agentName, this.config.command!, this.lastStderr);
 		}
 
 		// Behavior-based validation
-		validateNewSessionResponse(resp, this.agentName, this.config.command);
+		validateNewSessionResponse(resp, this.agentName, this.config.command!);
 
 		this._sessionId = resp.sessionId;
 
@@ -288,6 +291,7 @@ export class AcpClient {
 					modelId: this.config.default_model,
 				});
 			} catch (err) {
+								// Setting model is best-effort
 				this.logger?.debug("Set model failed (best-effort)", err);
 			}
 		}
@@ -300,6 +304,7 @@ export class AcpClient {
 					modeId: this.config.default_mode,
 				});
 			} catch (err) {
+								// Setting mode is best-effort
 				this.logger?.debug("Set mode failed (best-effort)", err);
 			}
 		}
@@ -323,7 +328,7 @@ export class AcpClient {
 				prompt: [{ type: "text", text: message }],
 			});
 		} catch (err: unknown) {
-			const classified = classifyConnectionError(err, this.agentName, this.config.command, this.lastStderr);
+			const classified = classifyConnectionError(err, this.agentName, this.config.command!, this.lastStderr);
 			if (classified instanceof AcpProtocolError) throw classified;
 			const msg = err instanceof Error ? err.message : String(err);
 			const stderrDelta = this.lastStderr.slice(stderrBefore.length).trim();
@@ -334,7 +339,7 @@ export class AcpClient {
 		}
 
 		// Behavior-based validation
-		validatePromptResponse(resp, this.agentName, this.config.command);
+		validatePromptResponse(resp, this.agentName, this.config.command!);
 
 		// Surface stopReason=error with stderr context
 		if ((resp.stopReason as string) === "error") {

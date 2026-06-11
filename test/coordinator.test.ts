@@ -92,13 +92,13 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
   let coordinator: AgentCoordinator;
 
   beforeEach(() => {
-    vi.mocked(createAdapter).mockReturnValue(createMockAdapter() as any);
+    (createAdapter as any).mockReturnValue(createMockAdapter() as any);
     coordinator = new AgentCoordinator(mockConfig, "/tmp");
   });
 
   it("pre-aborted signal: throws AbortError and disposes adapter", async () => {
     const adapter = createMockAdapter();
-    vi.mocked(createAdapter).mockReturnValue(adapter as any);
+    (createAdapter as any).mockReturnValue(adapter as any);
 
     const controller = new AbortController();
     controller.abort();
@@ -118,7 +118,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
   it("abort during prompt: cancels and disposes adapter", async () => {
     const controller = new AbortController();
     const adapter = createHangingMockAdapter("prompt");
-    vi.mocked(createAdapter).mockReturnValue(adapter as any);
+    (createAdapter as any).mockReturnValue(adapter as any);
 
     const delegatePromise = coordinator.delegate(
       "gemini",
@@ -144,7 +144,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
   it("abort during spawn: cleans up, no leak", async () => {
     const controller = new AbortController();
     const adapter = createHangingMockAdapter("spawn");
-    vi.mocked(createAdapter).mockReturnValue(adapter as any);
+    (createAdapter as any).mockReturnValue(adapter as any);
 
     const delegatePromise = coordinator.delegate(
       "gemini",
@@ -166,7 +166,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
   it("abort during initialize: cleans up, no leak", async () => {
     const controller = new AbortController();
     const adapter = createHangingMockAdapter("initialize");
-    vi.mocked(createAdapter).mockReturnValue(adapter as any);
+    (createAdapter as any).mockReturnValue(adapter as any);
 
     const delegatePromise = coordinator.delegate(
       "gemini",
@@ -187,7 +187,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
 
   it("no signal = no abort: completes normally", async () => {
     const adapter = createMockAdapter();
-    vi.mocked(createAdapter).mockReturnValue(adapter as any);
+    (createAdapter as any).mockReturnValue(adapter as any);
 
     const result = await coordinator.delegate("gemini", "test");
 
@@ -204,7 +204,7 @@ describe("AgentCoordinator — AbortSignal propagation", () => {
     const onProgress = (p: AcpDelegateProgress) => progressCalls.push(p);
 
     const adapter = createHangingMockAdapter("prompt");
-    vi.mocked(createAdapter).mockReturnValue(adapter as any);
+    (createAdapter as any).mockReturnValue(adapter as any);
 
     const delegatePromise = coordinator.delegate(
       "gemini",

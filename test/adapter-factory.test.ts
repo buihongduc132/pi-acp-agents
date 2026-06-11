@@ -3,11 +3,12 @@
  */
 import { describe, it, expect } from "vitest";
 import { createAdapter, isKnownAdapter } from "../src/adapter-factory.js";
+import { AcpxAdapter } from "../src/adapters/acpx.js";
 import { CodexAcpAdapter } from "../src/adapters/codex.js";
 import { CustomAcpAdapter } from "../src/adapters/custom.js";
 import { GeminiAcpAdapter } from "../src/adapters/gemini.js";
 import { OpenCodeAcpAdapter } from "../src/adapters/opencode.js";
-import type { AcpConfig } from "../src/config/types.js";
+import type { AcpAgentConfig, AcpConfig } from "../src/config/types.js";
 
 function createTestConfig(): AcpConfig {
 	return {
@@ -103,5 +104,57 @@ describe("createAdapter", () => {
 		expect(isKnownAdapter("opencode")).toBe(true);
 		expect(isKnownAdapter("codex")).toBe(true);
 		expect(isKnownAdapter("unknown")).toBe(false);
+	});
+});
+
+describe("createAdapter — mode routing", () => {
+	const baseConfig: AcpConfig = {
+		agent_servers: {
+			gemini: { command: "gemini", args: ["--acp"] },
+			"my-acpx-agent": { command: "acpx", mode: "acpx" as const },
+			"my-direct-agent": { command: "my-cli", mode: "direct" as const },
+		},
+		defaultAgent: "gemini",
+	};
+
+	it("routes to AcpxAdapter when mode is 'acpx' (overrides name-based routing)", () => {
+		const adapter = createAdapter(
+			"gemini",
+			{ ...baseConfig.agent_servers.gemini, mode: "acpx" },
+			baseConfig,
+		);
+		expect(adapter).toBeInstanceOf(AcpxAdapter);
+		expect(adapter.name).toBe("acpx");
+	});
+
+	it("routes to AcpxAdapter for unknown agent name when mode is 'acpx'", () => {
+		const cfg: AcpAgentConfig = { command: "acpx", mode: "acpx" };
+		const adapter = createAdapter("some-unknown-agent", cfg, baseConfig);
+		expect(adapter).toBeInstanceOf(AcpxAdapter);
+	});
+
+	it("routes to name-based adapter when mode is 'direct'", () => {
+		const cfg: AcpAgentConfig = { command: "my-cli", mode: "direct" };
+		const adapter = createAdapter("gemini", cfg, baseConfig);
+		expect(adapter).toBeInstanceOf(GeminiAcpAdapter);
+	});
+
+	it("routes to CustomAcpAdapter for unknown name when mode is 'direct'", () => {
+		const cfg: AcpAgentConfig = { command: "my-cli", mode: "direct" };
+		const adapter = createAdapter("unknown-agent", cfg, baseConfig);
+		expect(adapter).toBeInstanceOf(CustomAcpAdapter);
+	});
+
+	it("defaults to name-based routing when mode is undefined", () => {
+		const cfg: AcpAgentConfig = { command: "gemini", args: ["--acp"] };
+		const adapter = createAdapter("gemini", cfg, baseConfig);
+		expect(adapter).toBeInstanceOf(GeminiAcpAdapter);
+	});
+
+	it("passes agentName to AcpxAdapter for session creation", () => {
+		const cfg: AcpAgentConfig = { command: "acpx", mode: "acpx" };
+		const adapter = createAdapter("my-special-agent", cfg, baseConfig);
+		expect(adapter).toBeInstanceOf(AcpxAdapter);
+		expect((adapter as any).agentName).toBe("my-special-agent");
 	});
 });

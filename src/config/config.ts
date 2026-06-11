@@ -9,7 +9,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
-import type { AcpAgentConfig, AcpConfig, LegacyAcpConfig } from "./types.js";
+import type { AcpAgentConfig, AcpAliasConfig, AcpConfig, LegacyAcpConfig } from "./types.js";
+import { createNoopLogger } from "../logger.js";
+
+const log = createNoopLogger();
 
 const CONFIG_PATH = join(homedir(), ".pi", "acp-agents", "config.json");
 
@@ -33,14 +36,14 @@ export const AGENT_PRESETS: Record<string, () => AcpAgentConfig | null> = {
 		try {
 			execSync("which gemini", { stdio: "pipe" });
 			return { command: "gemini", args: ["--acp"] };
-		} catch { return null; }
+		} catch (e) { /* gemini not found on PATH */ log.debug("gemini preset not found", e); return null; }
 	},
 	opencode: () => {
 		for (const cmd of ["opencode", "ocxo"]) {
 			try {
 				execSync(`which ${cmd}`, { stdio: "pipe" });
 				return { command: cmd, args: ["acp"] };
-			} catch { continue; }
+			} catch (e) { /* binary not found on PATH */ log.debug(`opencode preset '${cmd}' not found`, e); continue; }
 		}
 		return null;
 	},
@@ -48,7 +51,7 @@ export const AGENT_PRESETS: Record<string, () => AcpAgentConfig | null> = {
 		try {
 			execSync("which codex-acp", { stdio: "pipe" });
 			return { command: "codex-acp", args: [] };
-		} catch { return null; }
+		} catch (e) { /* codex-acp not found on PATH */ log.debug("codex-acp preset not found", e); return null; }
 	},
 };
 
@@ -88,13 +91,16 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 		if (!agent || typeof agent !== "object") {
 			throw new Error(`Invalid agent config for "${name}": must be an object`);
 		}
+		// Command is required unless mode is 'acpx' (acpx derives command from its own binary)
+		const isAcpxMode = (agent as Record<string, unknown>).mode === "acpx";
 		if (
-			!("command" in agent) ||
-			typeof agent.command !== "string" ||
-			!agent.command
+			!isAcpxMode &&
+			(!("command" in agent) ||
+				typeof agent.command !== "string" ||
+				!agent.command)
 		) {
 			throw new Error(
-				`Invalid agent config for "${name}": "command" is required`,
+				`Invalid agent config for "${name}": "command" is required (or set mode: "acpx")`,
 			);
 		}
 		agent_servers[name] = {
@@ -134,6 +140,10 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 	validateNumericFields(resolved);
 	// EC-21: Validate healthCheckIntervalMs <= staleTimeoutMs
 	validateTimeoutOrder(resolved);
+	// EC-22: Validate agent_aliases if present
+	if (resolved.agent_aliases) {
+		validateAgentAliases(resolved.agent_aliases, resolved.agent_servers);
+	}
 
 	return resolved;
 }
@@ -167,6 +177,29 @@ function validateTimeoutOrder(resolved: AcpConfig): void {
 	}
 }
 
+/** Validate agent_aliases entries (EC-22) */
+function validateAgentAliases(
+	aliases: Record<string, AcpAliasConfig>,
+	agent_servers: Record<string, AcpAgentConfig>,
+): void {
+	for (const [aliasName, alias] of Object.entries(aliases)) {
+		if (!aliasName || aliasName.trim() === "") {
+			throw new Error("Alias name must be a non-empty string");
+		}
+		if (!alias.agents || !Array.isArray(alias.agents) || alias.agents.length === 0) {
+			throw new Error(`Alias "${aliasName}" must have a non-empty agents array`);
+		}
+		if (alias.strategy !== "failover" && alias.strategy !== "race") {
+			throw new Error(`Alias "${aliasName}" strategy must be "failover" or "race", got "${alias.strategy}"`);
+		}
+		for (const agentName of alias.agents) {
+			if (!agent_servers[agentName]) {
+				throw new Error(`Alias "${aliasName}" references unknown agent "${agentName}"`);
+			}
+		}
+	}
+}
+
 /** Load config from disk, falling back to defaults. Auto-migrates old `agents` key. */
 export function loadConfig(configPath?: string): AcpConfig {
 	const path = configPath ?? CONFIG_PATH;
@@ -182,11 +215,13 @@ export function loadConfig(configPath?: string): AcpConfig {
 		if (needsMigration) {
 			try {
 				writeFileSync(path, JSON.stringify(migrated, null, 2) + "\n");
-			} catch { /* best-effort */ }
+			} catch (e) { log.debug("config migration write failed", e); /* best-effort */ }
 		}
 
 		return validateConfig(migrated);
-	} catch {
+	} catch (e) {
+		// Config file corrupt or unreadable — fall back to defaults
+		log.debug("config load failed, using defaults", e);
 		return structuredClone(DEFAULT_CONFIG);
 	}
 }
@@ -201,8 +236,9 @@ export function saveConfig(config: AcpConfig, configPath?: string): void {
 		}
 		const data = JSON.stringify(config, null, 2) + "\n";
 		writeFileSync(path, data, "utf-8");
-	} catch {
+	} catch (e) {
 		// EACCES or other FS error — silently degrade. Config changes are non-critical.
+		log.debug("config save failed", e);
 	}
 }
 
