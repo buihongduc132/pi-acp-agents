@@ -9,6 +9,7 @@
  *   - dispose → acpx sessions close
  */
 import { spawnSync } from "node:child_process";
+import { platform } from "node:os";
 import type { AcpAdapterOptions, AcpPromptResult } from "../config/types.js";
 
 // ---------------------------------------------------------------------------
@@ -17,6 +18,18 @@ import type { AcpAdapterOptions, AcpPromptResult } from "../config/types.js";
 
 const DEFAULT_TIMEOUT_SEC = 3600; // 1 hour
 const ACX_BINARY = "acpx";
+
+/**
+ * Escape a string for safe use as a cmd.exe argument on Windows.
+ * When shell:true is used, cmd.exe interprets metacharacters like & | < > ^ %.
+ * This wraps the arg in double quotes and escapes internal quotes and carets.
+ */
+function escapeWindowsArg(arg: string): string {
+	// cmd.exe metacharacters: & | < > ^ % ( ) "
+	// Wrap in quotes and escape internal quotes with ^"
+	const escaped = arg.replace(/"/g, '""');
+	return `"${escaped}"`;
+}
 
 // ---------------------------------------------------------------------------
 // Internal state
@@ -187,11 +200,16 @@ export class AcpxAdapter {
 	// -----------------------------------------------------------------------
 
 	private _runAcpx(args: string[]) {
-		return spawnSync(ACX_BINARY, args, {
+		const isWindows = platform() === "win32";
+		// When shell:true on Windows, cmd.exe interprets metacharacters (&, |, <, >, ^, %).
+		// Escape args that may contain user-controlled content (e.g. prompt messages).
+		const safeArgs = isWindows ? args.map(escapeWindowsArg) : args;
+		return spawnSync(ACX_BINARY, safeArgs, {
 			cwd: this.cwd,
 			encoding: "utf-8",
 			timeout: 120_000, // 2 min for CLI itself; prompt timeout is passed to acpx
 			maxBuffer: 10 * 1024 * 1024, // 10 MB
+			shell: isWindows,
 		});
 	}
 }
