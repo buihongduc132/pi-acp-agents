@@ -147,6 +147,13 @@ export class HealthMonitor {
       // Check idle/stale detection (existing)
       if (this.getStaleReason(entry.session)) {
         staleIds.push(id);
+        // The stale session is being handed off to the `onStale` callback,
+        // which is contractually responsible for closing it (dispose adapter,
+        // remove from sessionMgr). Drop it from the monitor's internal map now
+        // so `monitor.size` converges to zero within a single check() -> onStale
+        // cycle instead of lingering until the next tick. Idempotent with the
+        // disposed-detection branch above: a session already reaped is a no-op.
+        toRemove.push(id);
         continue;
       }
 
@@ -167,6 +174,10 @@ export class HealthMonitor {
       }
       if (stallReason === "stalled-prompt") {
         staleIds.push(id);
+        // Same as the idle/stale branch above: the stalled-prompt is handed
+        // to `onStale`, which escalates to cancel -> kill -> closeSession.
+        // Remove from the monitor map so size converges in one cycle.
+        toRemove.push(id);
         continue;
       }
     }
