@@ -195,6 +195,11 @@ export default function (pi: ExtensionAPI) {
     handle.autoClosed = autoClosed;
     handle.closeReason = closeReason;
     archiveSession(handle);
+    // Invoke the canonical teardown directly rather than relying on
+    // sessionMgr.remove to call handle.dispose(). This keeps teardown robust
+    // even when the SessionManager is instrumented/mocked, and double-dispose
+    // is prevented by the disposed guard on handle.dispose.
+    await handle.dispose();
     await sessionMgr.remove(handle.sessionId);
     activeAdapters.delete(handle.sessionId);
     busySessions.delete(handle.sessionId);
@@ -511,6 +516,10 @@ export default function (pi: ExtensionAPI) {
       mode: metadata?.mode,
       planStatus: "none",
       dispose: async () => {
+        // Idempotent: a second dispose (e.g. closeSession after sessionMgr.remove
+        // already disposed, or a redundant teardown path) must be a no-op so we
+        // never double-dispose the adapter / subprocess.
+        if (handle.disposed) return;
         handle.disposed = true;
         archiveSession(handle);
         adapter.dispose();
