@@ -299,6 +299,7 @@ export default function (pi: ExtensionAPI) {
   const monitor = new HealthMonitor({
     intervalMs: config.healthCheckIntervalMs ?? 5_000,
     staleTimeoutMs: config.staleTimeoutMs ?? 600_000,
+    completedIdleTtlMs: config.completedIdleTtlMs ?? config.staleTimeoutMs ?? 600_000,
     needsAttentionMs: config.needsAttentionMs ?? 120_000,
     autoInterruptMs: config.autoInterruptMs ?? 300_000,
     interruptGraceMs: config.interruptGraceMs ?? 10_000,
@@ -315,7 +316,7 @@ export default function (pi: ExtensionAPI) {
 
       // Check if this is a prompt stall (activity-based) vs idle stale
       const isPromptStall = handle.isPrompting === true;
-      const closeReason = getSessionAutoCloseReason(handle, config.staleTimeoutMs ?? 600_000);
+      const closeReason = getSessionAutoCloseReason(handle, config.staleTimeoutMs ?? 600_000, undefined, config.completedIdleTtlMs ?? config.staleTimeoutMs ?? 600_000);
 
       if (isPromptStall) {
         // Escalation: cancel → grace → kill
@@ -394,7 +395,7 @@ export default function (pi: ExtensionAPI) {
         ? "error"
         : busySessions.get(s.sessionId)
           ? "active"
-          : getSessionAutoCloseReason(s, config.staleTimeoutMs ?? 600_000)
+          : getSessionAutoCloseReason(s, config.staleTimeoutMs ?? 600_000, undefined, config.completedIdleTtlMs ?? config.staleTimeoutMs ?? 600_000)
             ? "stale"
             : "idle",
       lastActivityAt: s.lastActivityAt,

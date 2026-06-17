@@ -129,6 +129,8 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 		staleTimeoutMs: partial.staleTimeoutMs ?? DEFAULT_CONFIG.staleTimeoutMs,
 		healthCheckIntervalMs:
 			partial.healthCheckIntervalMs ?? DEFAULT_CONFIG.healthCheckIntervalMs,
+		completedIdleTtlMs:
+			partial.completedIdleTtlMs ?? partial.staleTimeoutMs ?? DEFAULT_CONFIG.staleTimeoutMs,
 		circuitBreakerMaxFailures:
 			partial.circuitBreakerMaxFailures ??
 			DEFAULT_CONFIG.circuitBreakerMaxFailures,
@@ -152,6 +154,11 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 	validateNumericFields(resolved);
 	// EC-21: Validate healthCheckIntervalMs <= staleTimeoutMs
 	validateTimeoutOrder(resolved);
+	// Validate completedIdleTtlMs, when explicitly set, is greater than
+	// healthCheckIntervalMs so we never reap a session on the very tick it
+	// completed. When unset it falls back to staleTimeoutMs, whose relationship
+	// to healthCheckIntervalMs is already covered by validateTimeoutOrder.
+	validateCompletedIdleTtl(resolved, partial.completedIdleTtlMs);
 	// EC-22: Validate agent_aliases if present
 	if (resolved.agent_aliases) {
 		validateAgentAliases(resolved.agent_aliases, resolved.agent_servers);
@@ -188,6 +195,19 @@ function validateNumericFields(resolved: AcpConfig): void {
 function validateTimeoutOrder(resolved: AcpConfig): void {
 	if (resolved.healthCheckIntervalMs! > resolved.staleTimeoutMs!) {
 		throw new Error("healthCheckIntervalMs must be <= staleTimeoutMs");
+	}
+}
+
+/** Validate completedIdleTtlMs > healthCheckIntervalMs, when explicitly set.
+ *  Only enforced for user-provided values; the auto-fallback to staleTimeoutMs
+ *  is governed by validateTimeoutOrder. */
+function validateCompletedIdleTtl(resolved: AcpConfig, explicit?: number): void {
+	if (explicit === undefined) return;
+	const interval = resolved.healthCheckIntervalMs!;
+	if (explicit <= interval) {
+		throw new Error(
+			"completedIdleTtlMs must be greater than healthCheckIntervalMs",
+		);
 	}
 }
 

@@ -28,6 +28,10 @@ export type PromptStallReason = "slow-prompt" | "stalled-prompt";
 export interface HealthMonitorOptions {
   intervalMs: number;
   staleTimeoutMs: number;
+  /** Shorter, dedicated TTL for completed (non-busy) idle sessions.
+   * When set, reaps reuse sessions and their subprocesses sooner than the
+   * long stall `staleTimeoutMs`. Falls back to staleTimeoutMs if unset. */
+  completedIdleTtlMs?: number;
   /** Idle threshold (ms) before emitting needs-attention for active prompts. Default: 60_000 */
   needsAttentionMs?: number;
   /** Idle threshold (ms) before auto-interrupting stalled prompts. Default: 300_000, 0 = disabled */
@@ -175,7 +179,7 @@ export class HealthMonitor {
   }
 
   private getStaleReason(session: HealthMonitorable): "stalled-no-response" | "completed-idle" | undefined {
-    return getSessionAutoCloseReason(session, this.opts.staleTimeoutMs);
+    return getSessionAutoCloseReason(session, this.opts.staleTimeoutMs, undefined, this.opts.completedIdleTtlMs);
   }
 
   /**

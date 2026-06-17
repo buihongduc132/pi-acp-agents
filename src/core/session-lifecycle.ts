@@ -14,6 +14,7 @@ export function getSessionAutoCloseReason(
   session: SessionLifecycleState,
   timeoutMs: number,
   now = Date.now(),
+  completedIdleTtlMs: number = timeoutMs,
 ): SessionAutoCloseReason | undefined {
   if (session.busy) {
     if (!session.lastResponseAt) return undefined;
@@ -23,7 +24,9 @@ export function getSessionAutoCloseReason(
   }
 
   if (!session.completedAt) return undefined;
-  return now - session.completedAt.getTime() > timeoutMs
+  // Completed (non-busy) idle sessions are reaped on their own, shorter TTL —
+  // independent of the long stall `timeoutMs` used for busy sessions.
+  return now - session.completedAt.getTime() > completedIdleTtlMs
     ? "completed-idle"
     : undefined;
 }
@@ -32,15 +35,17 @@ export function isSessionAutoClosable(
   session: SessionLifecycleState,
   timeoutMs: number,
   now = Date.now(),
+  completedIdleTtlMs: number = timeoutMs,
 ): boolean {
-  return getSessionAutoCloseReason(session, timeoutMs, now) !== undefined;
+  return getSessionAutoCloseReason(session, timeoutMs, now, completedIdleTtlMs) !== undefined;
 }
 
 export function getSessionPruneReason(
   session: Pick<AcpSessionHandle | HealthMonitorable, "disposed" | "busy" | "lastResponseAt" | "completedAt">,
   timeoutMs: number,
   now = Date.now(),
+  completedIdleTtlMs: number = timeoutMs,
 ): "disposed" | SessionAutoCloseReason | undefined {
   if (session.disposed) return "disposed";
-  return getSessionAutoCloseReason(session, timeoutMs, now);
+  return getSessionAutoCloseReason(session, timeoutMs, now, completedIdleTtlMs);
 }
