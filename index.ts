@@ -206,6 +206,34 @@ export default function (pi: ExtensionAPI) {
     eventLog.append("session_closed", { sessionId: handle.sessionId, agentName: handle.agentName, closeReason, autoClosed });
   }
 
+  /** A session is single-shot (auto-close on completion) when the caller did
+   *  not request reuse via session_id/session_name. Such sessions are closed
+   *  through `closeSession` once the prompt completes, so the adapter
+   *  subprocess and registry entry do not leak.
+   *  `dispose:true` is handled separately (ephemeral) and excluded here. */
+  function shouldAutoCloseOnCompletion(params: { session_id?: string; session_name?: string; dispose?: boolean }): boolean {
+    return !params.dispose && !params.session_id && !normalizeOptionalSessionName(params.session_name);
+  }
+
+  /** Auto-close a completed single-shot session on the next macrotask.
+   *
+   *  Deferral (rather than an inline `await closeSession` in the finally
+   *  block) preserves re-entrancy for an immediate follow-up operation
+   *  issued within the same synchronous stack (e.g. an `acp_cancel` or a
+   *  reuse-by-id prompt that runs before control returns to the event
+   *  loop): such a call still observes the live adapter in `activeAdapters`.
+   *  Once the stack unwinds, the session is archived, the adapter subprocess
+   *  is disposed, and the registry entry is removed — so independent
+   *  subsequent operations no longer observe a leaked live session. */
+  function scheduleCompletionClose(handle: AcpSessionHandle, params: { session_id?: string; session_name?: string; dispose?: boolean }): void {
+    if (params.dispose || handle.disposed || !handle.completedAt) return;
+    if (!shouldAutoCloseOnCompletion(params)) return;
+    setImmediate(() => {
+      if (handle.disposed) return;
+      closeSession(handle, 'completed', false).catch((e) => logger.debug('deferred completion close failed', e));
+    });
+  }
+
   function markPromptLifecycle(handle: AcpSessionHandle, promptResult: AcpPromptResult): void {
     const now = new Date();
     handle.lastActivityAt = now;
@@ -687,6 +715,7 @@ ${pr.text}`;
                 return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
               } finally {
                 busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
+                scheduleCompletionClose(handle, params);
               }
             } catch (freshErr) { freshAdapter.dispose(); throw freshErr; }
           }
@@ -738,6 +767,7 @@ ${pr.text}`;
                   return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
                 } finally {
                   busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
+                  scheduleCompletionClose(handle, params);
                 }
               } catch (freshErr) {
                 if (archivedHandle) {
@@ -757,6 +787,7 @@ ${pr.text}`;
               return { ...pr, sessionId: target.sessionId, sessionName: handle.sessionName };
             } finally {
               busySessions.delete(target.sessionId); handle.busy = false; archiveSession(handle);
+              scheduleCompletionClose(handle, params);
             }
           } catch (err) {
             if (archivedHandle) {
@@ -803,6 +834,7 @@ ${pr.text}`;
             if (params.dispose) {
               await closeSession(handle, "completed-ephemeral");
             }
+            scheduleCompletionClose(handle, params);
           }
         } catch (err) {
           // If a handle was already registered (spawn/initialize succeeded but

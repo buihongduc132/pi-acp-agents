@@ -449,6 +449,10 @@ describe("ACP prompt completion disposes single-shot session (no leak)", () => {
 		const promptResult = await exec("acp_prompt", { agent: "gemini", message: "do something" });
 		expect(promptResult.details.sessionId).toBe("session-gemini");
 
+		// Completion close is deferred to the next macrotask so that same-stack
+		// re-entrancy is preserved; drain it before asserting disposal.
+		await drainMacrotasks();
+
 		const adapter = createdAdapters.at(-1)!;
 
 		// sessionMgr (mocked sessions map) no longer holds a live entry for the completed session
@@ -546,6 +550,14 @@ describe("ACP prompt completion disposes single-shot session (no leak)", () => {
 		expect(adapter.dispose).not.toHaveBeenCalled();
 	});
 });
+
+/** Drain pending macrotasks (e.g. deferred completion close) so their side
+ *  effects are observable synchronously by the test assertions. */
+async function drainMacrotasks(depth = 5): Promise<void> {
+	for (let i = 0; i < depth; i++) {
+		await new Promise<void>((resolve) => setImmediate(resolve));
+	}
+}
 
 /** Poll the internal health monitor to detect staleness, with timeout */
 async function monitorCheckOrStale(sessions: Map<string, AcpSessionHandle>, sessionId: string, maxMs = 5000): Promise<void> {
