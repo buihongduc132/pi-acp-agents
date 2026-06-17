@@ -176,6 +176,7 @@ export function classifyConnectionError(
 	if (err instanceof AcpProtocolError) return err;
 
 	const msg = err instanceof Error ? err.message : String(err);
+	const code = (err as { code?: string } | null)?.code ?? "";
 
 	// Method not found (agent doesn't implement ACP) — check BEFORE ENOENT
 	if (msg.includes("Method not found") || msg.includes("-32601")) {
@@ -189,7 +190,7 @@ export function classifyConnectionError(
 		});
 	}
 
-	// Process exited before connection established
+	// Binary missing (ENOENT) or spawn-level failure
 	if (msg.includes("ENOENT") || msg.includes("spawn")) {
 		return new AcpProtocolError({
 			agentName,
@@ -197,6 +198,30 @@ export function classifyConnectionError(
 			phase: "spawn",
 			message: `Command "${command}" could not be spawned.`,
 			cause: msg + (stderr ? `\nStderr: ${stderr.slice(0, 500)}` : ""),
+		});
+	}
+
+	// Broken pipe / connection reset while talking to the child — the child
+	// exited before the ACP handshake completed (GAP-2). Common when the binary
+	// EXISTS but crashes / has wrong args and dies immediately (e.g. `false`,
+	// missing '--acp' flag). The process writes its initialize request, the
+	// already-dead child's pipe returns EPIPE. Surface as a fast, classified,
+	// spawn-phase rejection instead of hanging to an RPC timeout.
+	if (
+		code === "EPIPE" || code === "ECONNRESET" ||
+		msg.includes("EPIPE") || msg.includes("ECONNRESET") ||
+		msg.includes("ERR_STREAM_WRITE_AFTER_END")
+	) {
+		return new AcpProtocolError({
+			agentName,
+			command,
+			phase: "spawn",
+			message: `Command "${command}" exited immediately before completing the ACP handshake.`,
+			cause:
+				"The process started but exited before speaking ACP — the binary " +
+				"may be missing the ACP flag (e.g. '--acp' or 'acp') or crashed on " +
+				"startup. Original error: " + msg +
+					(stderr ? `\nStderr: ${stderr.slice(0, 500)}` : ""),
 		});
 	}
 

@@ -6,8 +6,9 @@ import { Type } from "typebox";
 import { type AcpWidgetState, createAcpWidget } from "./src/acp-widget.js";
 import { createAdapter } from "./src/adapter-factory.js";
 import { loadConfig } from "./src/config/config.js";
-import type { AcpArchivedSessionMetadata, AcpConfig, AcpPromptResult, AcpSessionHandle } from "./src/config/types.js";
+import type { AcpArchivedSessionMetadata, AcpConfig, AcpPromptResult, AcpSessionHandle, AcpWorkerStatus } from "./src/config/types.js";
 import { AgentCoordinator } from "./src/coordination/coordinator.js";
+import { WorkerDispatcher, type WorkerDispatcherDeps } from "./src/coordination/worker-dispatcher.js";
 import { AcpCircuitBreaker } from "./src/core/circuit-breaker.js";
 import { HealthMonitor } from "./src/core/health-monitor.js";
 import { getSessionAutoCloseReason } from "./src/core/session-lifecycle.js";
@@ -17,6 +18,7 @@ import { AcpEventLog } from "./src/management/event-log.js";
 import { GovernanceStore } from "./src/management/governance-store.js";
 import { MailboxManager } from "./src/management/mailbox-manager.js";
 import { AcpTaskStore, type AcpTaskStatus } from "./src/management/task-store.js";
+import { WorkerStore } from "./src/management/worker-store.js";
 import { SessionArchiveStore } from "./src/management/session-archive-store.js";
 import { SessionNameStore } from "./src/management/session-name-store.js";
 import { ensureRuntimeDir } from "./src/management/runtime-paths.js";
@@ -60,6 +62,7 @@ export default function (pi: ExtensionAPI) {
   const sessionMgr = new SessionManager();
   const activeAdapters = new Map<string, ReturnType<typeof createAdapter>>();
   const busySessions = new Map<string, boolean>();
+  const workerSessionMap = new Map<string, string>(); // sessionId → workerName for heartbeat consumer
   const DELEGATION_HISTORY_CAP = 20;
   const widgetActivity = {
     activeDelegations: 0,
@@ -78,6 +81,7 @@ export default function (pi: ExtensionAPI) {
   const runtimePaths = ensureRuntimeDir(config.runtimeDir);
   const eventLog = new AcpEventLog(runtimePaths.rootDir);
   const taskStore = new AcpTaskStore(runtimePaths.rootDir);
+  const workerStore = new WorkerStore(runtimePaths.rootDir);
   const mailboxManager = new MailboxManager(runtimePaths.rootDir);
   const governanceStore = new GovernanceStore(runtimePaths.rootDir);
   const sessionArchiveStore = new SessionArchiveStore(runtimePaths.rootDir);
@@ -177,6 +181,42 @@ export default function (pi: ExtensionAPI) {
     return { sessionId, sessionName, metadata: undefined };
   }
 
+  /**
+   * Heartbeat consumer — processes ACP session/update events for worker-bound sessions.
+   * Extracts token/tool deltas and calls WorkerStore.touch().
+   * (Tasks 2.1 + 2.2: defensive parsing built-in)
+   */
+  function heartbeatConsumer(sessionId: string, update: import("@agentclientprotocol/sdk").SessionUpdate): void {
+    const workerName = workerSessionMap.get(sessionId);
+    if (!workerName) return; // Not a worker-bound session
+    try {
+      const updateRec = update as Record<string, unknown>;
+      const updateType = updateRec.sessionUpdate;
+      let tokenDelta = 0;
+      let toolCallDelta = 0;
+
+      if (updateType === "usage_update") {
+        // Defensive: treat missing 'used' as zero-delta
+        const used = typeof updateRec.used === "number" ? updateRec.used : 0;
+        const size = typeof updateRec.size === "number" ? updateRec.size : 0;
+        tokenDelta = used;
+        // Track cumulative via touch
+        void size; // size is total context window, not useful as delta
+      } else if (updateType === "tool_call") {
+        toolCallDelta = 1;
+      }
+
+      workerStore.touch(workerName, { tokenDelta, toolCallDelta });
+    } catch (err) {
+      // Task 2.2: defensive parsing — log malformed events, don't crash
+      eventLog.append("heartbeat_parse_error", {
+        workerName,
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   const monitor = new HealthMonitor({
     intervalMs: config.healthCheckIntervalMs ?? 5_000,
     staleTimeoutMs: config.staleTimeoutMs ?? 600_000,
@@ -225,6 +265,46 @@ export default function (pi: ExtensionAPI) {
   });
   monitor.start();
 
+  // ── Worker Dispatcher (tasks 3.1-3.8) ──
+  let workerDispatcher: WorkerDispatcher | null = null;
+  const workerAutoClaim = config.workerAutoClaim ?? true;
+
+  if (workerAutoClaim) {
+    const dispatchDeps: WorkerDispatcherDeps = {
+      workerStore: workerStore as unknown as WorkerDispatcherDeps["workerStore"],
+      taskStore: taskStore as unknown as WorkerDispatcherDeps["taskStore"],
+      eventLog,
+      busySessions,
+      getSessionIdForWorker: (workerName: string) => {
+        const worker = workerStore.get(workerName);
+        if (!worker) return undefined;
+        // Find sessionId from the workerSessionMap by reversing the lookup
+        for (const [sid, name] of workerSessionMap.entries()) {
+          if (name === workerName) return sid;
+        }
+        return undefined;
+      },
+      dispatchTask: async (sessionId: string, prompt: string) => {
+        const adapter = activeAdapters.get(sessionId);
+        if (!adapter) return { ok: false, error: "No adapter for session" };
+        try {
+          busySessions.set(sessionId, true);
+          const result = (await withTimeoutMs(adapter.prompt(prompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `dispatch:${sessionId}`)) as AcpPromptResult;
+          return { ok: true, value: result.text };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        } finally {
+          busySessions.delete(sessionId);
+        }
+      },
+    };
+    workerDispatcher = new WorkerDispatcher(
+      dispatchDeps,
+      config.workerClaimIntervalMs ?? 5000,
+    );
+    workerDispatcher.start();
+  }
+
   const getWidgetState = (): AcpWidgetState => ({
     sessions: sessionMgr.list().map((s) => ({
       sessionId: s.sessionId,
@@ -247,6 +327,21 @@ export default function (pi: ExtensionAPI) {
     configuredAliases: config.agent_aliases ? Object.keys(config.agent_aliases) : [],
     defaultAgent: config.defaultAgent,
     activity: { ...widgetActivity },
+    workers: workerStore.list().map((w) => {
+      const now = Date.now();
+      const ageSec = Math.floor((now - new Date(w.lastActivityAt).getTime()) / 1000);
+      const derived = deriveWorkerStatus(w);
+      return {
+        name: w.name,
+        agentName: w.agentName,
+        status: derived.status,
+        tokenCountTotal: w.tokenCountTotal ?? 0,
+        toolCallCount: w.toolCallCount ?? 0,
+        ageSeconds: ageSec,
+        stale: derived.stale || isWorkerStale(w),
+        currentTaskId: w.currentTaskId,
+      };
+    }),
   });
 
   const widgetFactory = createAcpWidget({ getState: getWidgetState });
@@ -969,6 +1064,461 @@ ${pr.text}`;
     },
   });
 
+  /**
+   * Derive worker status from liveliness signals (LIVELINESS-1).
+   * - online: activity < workerOnlineMs
+   * - busy: has in-flight task (currentTaskId set)
+   * - idle: no task, activity < workerStaleMs
+   * - stale(Ns): activity > workerStaleMs
+   */
+  function deriveWorkerStatus(worker: import("./src/config/types.js").AcpWorkerRecord): { status: string; stale: boolean } {
+    const now = Date.now();
+    const lastActivity = new Date(worker.lastActivityAt).getTime();
+    const ageMs = now - lastActivity;
+    const onlineMs = config.workerOnlineMs ?? 60_000;
+    const staleMs = config.workerStaleMs ?? 60_000;
+
+    // If offline in the store, keep offline
+    if (worker.status === "offline") {
+      return { status: "offline", stale: false };
+    }
+
+    // Busy if has in-flight task
+    if (worker.currentTaskId) {
+      return { status: "busy", stale: false };
+    }
+
+    // Stale if activity exceeds threshold
+    if (ageMs > staleMs) {
+      const ageSec = Math.floor(ageMs / 1000);
+      return { status: `stale(${ageSec}s)`, stale: true };
+    }
+
+    // Online if recently active
+    if (ageMs < onlineMs) {
+      return { status: "online", stale: false };
+    }
+
+    // Idle: no task, activity between online and stale thresholds
+    return { status: "idle", stale: false };
+  }
+
+  /**
+   * Check if worker is stale (⚠ stale indicator).
+   * All three signals frozen: tokenCountTotal, toolCallCount, lastActivityAt
+   * beyond stallTimeoutMs with no change.
+   */
+  function isWorkerStale(worker: import("./src/config/types.js").AcpWorkerRecord): boolean {
+    const stallMs = config.stallTimeoutMs ?? 300_000;
+    const now = Date.now();
+    const ageMs = now - new Date(worker.lastActivityAt).getTime();
+    // If lastActivity was recent enough, not stale
+    if (ageMs < stallMs) return false;
+    // If tokens have been used, signals aren't frozen
+    if ((worker.tokenCountTotal ?? 0) > 0) return false;
+    // If tools have been called, signals aren't frozen
+    if ((worker.toolCallCount ?? 0) > 0) return false;
+    // All signals frozen beyond stall timeout
+    return true;
+  }
+
+  // ── Worker tools (persistent-workers) ──
+
+  if (isToolEnabled(toolSettings, "acp_worker_spawn")) pi.registerTool({
+    name: "acp_worker_spawn",
+    label: "ACP Worker Spawn",
+    description: "Spawn a persistent named ACP worker. Creates a long-lived ACP session bound to a worker identity in WorkerStore. The worker persists across task completions and can be controlled via steer, shutdown, and kill tools.",
+    promptSnippet: "acp_worker_spawn — spawn a persistent named ACP worker",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name (1-64 chars, alphanumeric + hyphens + underscores). Must be unique." }),
+      agent: Type.String({ description: "Agent name from config to use for the worker" }),
+      cwd: Type.Optional(Type.String({ description: "Working directory for the agent" }),
+      ),
+      model: Type.Optional(Type.String({ description: "Model to set on the session" })),
+      thinking: Type.Optional(Type.String({ description: "Thinking/mode level to set on the session" })),
+      initPrompt: Type.Optional(Type.String({ description: "Optional initial prompt to send after session creation" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = requireString(params.name, "name");
+      const agentName = getAgentName(params.agent);
+
+      // Validate name format: 1-64 chars, alphanumeric + hyphens + underscores
+      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name)) {
+        return {
+          content: [textContent("Worker name must be 1-64 characters and contain only alphanumeric characters, hyphens, and underscores.")],
+          details: { error: "invalid_name" },
+        };
+      }
+
+      // Validate agent exists
+      try {
+        getAgentConfigOrThrow(agentName);
+      } catch (error) {
+        return {
+          content: [textContent(String((error as Error).message))],
+          details: { error: "agent_not_found", agent: agentName },
+        };
+      }
+
+      // Check for duplicate name
+      const existing = workerStore.get(name);
+      if (existing) {
+        return {
+          content: [textContent(`Worker '${name}' already exists`)],
+          details: { error: "duplicate_name", name },
+        };
+      }
+
+      const result = await safeExecute(async () => {
+        const agentCfg = getAgentConfigOrThrow(agentName);
+        const effectiveCwd = params.cwd ?? ctx.cwd;
+        const adapter = createAdapter(agentName, agentCfg, config, effectiveCwd, {
+          onActivity: (sid) => monitor.touch(sid),
+          onSessionUpdate: heartbeatConsumer,
+        });
+        try {
+          await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_worker_spawn:${name}`);
+          await adapter.initialize();
+          const sessionId = await adapter.newSession(effectiveCwd);
+          if (params.model) await adapter.setModel(params.model);
+          if (params.thinking) await adapter.setMode(params.thinking);
+          const handle = makeSessionHandle(sessionId, agentName, effectiveCwd, adapter);
+          // Register in WorkerStore
+          const worker = workerStore.register({ name, sessionId, agentName });
+          // Register session → worker mapping for heartbeat consumer
+          workerSessionMap.set(sessionId, name);
+          // Store adapter for dispatcher access
+          activeAdapters.set(sessionId, adapter);
+          eventLog.append("worker_spawn", { name, sessionId, agentName });
+          // Send init prompt if provided
+          if (params.initPrompt) {
+            busySessions.set(sessionId, true);
+            handle.busy = true;
+            handle.isPrompting = true;
+            handle.promptStartedAt = new Date();
+            monitor.markPromptStart(sessionId);
+            archiveSession(handle);
+            try {
+              const promptResult = (await withTimeoutMs(adapter.prompt(params.initPrompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_worker_spawn:${name}:init`)) as AcpPromptResult;
+              markPromptLifecycle(handle, promptResult);
+            } finally {
+              busySessions.delete(sessionId);
+              handle.busy = false;
+              handle.isPrompting = false;
+              monitor.markPromptEnd(sessionId);
+              archiveSession(handle);
+            }
+          }
+          return { name, sessionId, status: "online" };
+        } catch (err) {
+          adapter.dispose();
+          throw err;
+        }
+      }, `acp_worker_spawn(${name})`);
+
+      refreshWidget(ctx);
+      if (result.ok) {
+        return {
+          content: [textContent(`Worker '${result.value.name}' spawned with session ${result.value.sessionId} (status: ${result.value.status})`)],
+          details: result.value,
+        };
+      }
+      return {
+        content: [textContent(`Failed to spawn worker '${name}': ${result.error}`)],
+        details: { error: result.error, circuitOpen: result.circuitOpen },
+      };
+    },
+  });
+
+  if (isToolEnabled(toolSettings, "acp_worker_list")) pi.registerTool({
+    name: "acp_worker_list",
+    label: "ACP Worker List",
+    description: "List all persistent ACP workers with their status and liveliness counters (tokenCountTotal, toolCallCount, age since last activity).",
+    promptSnippet: "acp_worker_list — list all persistent ACP workers with status and liveliness",
+    parameters: Type.Object({
+      filter: Type.Optional(Type.String({ description: "Filter by derived status: 'online', 'idle', 'busy', 'stale', 'offline'" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      // Fetch all workers, then filter by derived status if requested
+      const allWorkers = workerStore.list();
+      const rawFilter = params.filter as string | undefined;
+      const workers = rawFilter
+        ? allWorkers.filter((w) => {
+            const derived = deriveWorkerStatus(w);
+            // For 'stale', match the stale(Ns) prefix
+            if (rawFilter === "stale") return derived.status.startsWith("stale");
+            return derived.status === rawFilter;
+          })
+        : allWorkers;
+
+      if (workers.length === 0) {
+        return {
+          content: [textContent("No workers found")],
+          details: { workers: [] },
+        };
+      }
+
+      const now = Date.now();
+      const lines = workers.map((w) => {
+        const ageSec = Math.floor((now - new Date(w.lastActivityAt).getTime()) / 1000);
+        const tok = w.tokenCountTotal ?? 0;
+        const tools = w.toolCallCount ?? 0;
+        const taskInfo = w.currentTaskId ? ` · task=${w.currentTaskId}` : "";
+        const derived = deriveWorkerStatus(w);
+        const staleIndicator = isWorkerStale(w) ? " ⚠ stale" : "";
+        return `${w.name}: ${derived.status} · tok=${tok} · tools=${tools} · ${ageSec}s ago${taskInfo}${staleIndicator}`;
+      });
+
+      refreshWidget(ctx);
+      return {
+        content: [textContent(`Workers (${workers.length}):\n${lines.join("\n")}`)],
+        details: {
+          workers: workers.map((w) => {
+            const derived = deriveWorkerStatus(w);
+            return {
+              name: w.name,
+              status: w.status,
+              derivedStatus: derived.status,
+              agentName: w.agentName,
+              sessionId: w.sessionId,
+              currentTaskId: w.currentTaskId,
+              tokenCountTotal: w.tokenCountTotal ?? 0,
+              toolCallCount: w.toolCallCount ?? 0,
+              ageSeconds: Math.floor((now - new Date(w.lastActivityAt).getTime()) / 1000),
+              spawnedAt: w.spawnedAt,
+              lastActivityAt: w.lastActivityAt,
+              lastHeartbeatAt: w.lastHeartbeatAt,
+            };
+          }),
+          count: workers.length,
+        },
+      };
+    },
+  });
+
+  // ── Worker Steer (4.1-4.5) ──
+
+  if (isToolEnabled(toolSettings, "acp_worker_steer")) pi.registerTool({
+    name: "acp_worker_steer",
+    label: "ACP Worker Steer",
+    description: "Send a steering message to a persistent ACP worker. If the worker is busy (in-flight turn), attempts to interrupt the active session. If idle, queues the steer as a prefix for the next prompt the dispatcher issues.",
+    promptSnippet: "acp_worker_steer — send a steering message to a worker",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name" }),
+      message: Type.String({ description: "Steering message to send" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = requireString(params.name, "name");
+      const message = requireString(params.message, "message");
+
+      // 4.5: Return error if worker not found
+      const worker = workerStore.get(name);
+      if (!worker) {
+        return { content: [textContent(`Worker '${name}' not found`)], details: { error: "worker_not_found", name } };
+      }
+
+      // Resolve worker's session
+      const sessionId = worker.sessionId;
+      const adapter = activeAdapters.get(sessionId);
+      const isBusy = !!worker.currentTaskId || !!busySessions.get(sessionId);
+
+      if (isBusy && adapter) {
+        // 4.1/4.3: Attempt interrupt for in-flight workers
+        try {
+          await adapter.cancel();
+          // Cancel succeeded — queue steer for next prompt after worker returns to idle
+          workerStore.updateMetadata(name, { pendingSteer: message });
+          eventLog.append("worker_steer_interrupt", { name, sessionId, message });
+          refreshWidget(ctx);
+          return {
+            content: [textContent(`Interrupt sent to worker '${name}'. Steer queued for next prompt: ${message}`)],
+            details: { name, message, interruptAttempted: true, queued: true },
+          };
+        } catch (err) {
+          // Interrupt failed — queue as next-prompt-prefix with warning
+          workerStore.updateMetadata(name, { pendingSteer: message });
+          eventLog.append("worker_steer_queued", { name, sessionId, message, reason: "interrupt_failed" });
+          refreshWidget(ctx);
+          return {
+            content: [textContent(`Provider does not support live interrupt; steer queued for next prompt. Worker '${name}': ${message}`)],
+            details: { name, message, interruptAttempted: true, queued: true, warning: true },
+          };
+        }
+      }
+
+      // Idle or no adapter — queue as next-prompt-prefix (4.4)
+      workerStore.updateMetadata(name, { pendingSteer: message });
+      eventLog.append("worker_steer_queued", { name, sessionId, message, reason: isBusy ? "no_adapter" : "idle" });
+      refreshWidget(ctx);
+      return { content: [textContent(`Steer message queued for worker '${name}': ${message}`)], details: { name, message, queued: true } };
+    },
+  });
+
+  // ── Worker Shutdown (5.1-5.2) ──
+
+  if (isToolEnabled(toolSettings, "acp_worker_shutdown")) pi.registerTool({
+    name: "acp_worker_shutdown",
+    label: "ACP Worker Shutdown",
+    description: "Gracefully shut down a persistent ACP worker. Waits for in-flight turn to complete (with timeout), then disposes the session and marks the worker offline.",
+    promptSnippet: "acp_worker_shutdown — gracefully shut down a worker",
+    parameters: Type.Object({
+      name: Type.Optional(Type.String({ description: "Worker name to shut down" })),
+      all: Type.Optional(Type.Boolean({ description: "Shut down all workers" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const shutdownTimeoutMs = config.workerShutdownTimeoutMs ?? 30_000;
+
+      // Determine which workers to shut down
+      let targets: string[];
+      if (params.all) {
+        targets = workerStore.list().filter((w) => w.status !== "offline").map((w) => w.name);
+      } else if (params.name) {
+        const worker = workerStore.get(params.name);
+        if (!worker) {
+          return { content: [textContent(`Worker '${params.name}' not found`)], details: { error: "worker_not_found" } };
+        }
+        targets = [params.name];
+      } else {
+        return { content: [textContent("Specify 'name' or 'all'")], details: { error: "missing_params" } };
+      }
+
+      const results: Array<{ name: string; ok: boolean; error?: string }> = [];
+
+      for (const name of targets) {
+        const worker = workerStore.get(name);
+        if (!worker) continue;
+
+        try {
+          // 5.2: Wait for turn completion if busy
+          if (worker.currentTaskId) {
+            const startTime = Date.now();
+            while (worker.currentTaskId && (Date.now() - startTime) < shutdownTimeoutMs) {
+              await new Promise((r) => setTimeout(r, 500));
+              const fresh = workerStore.get(name);
+              if (fresh && !fresh.currentTaskId) break;
+            }
+            // Check if still busy after timeout
+            const afterWait = workerStore.get(name);
+            if (afterWait?.currentTaskId) {
+              results.push({ name, ok: false, error: `Shutdown timed out; worker '${name}' still busy. Use acp_worker_kill to force.` });
+              continue;
+            }
+          }
+
+          // Dispose session
+          const sessionId = worker.sessionId;
+          const adapter = activeAdapters.get(sessionId);
+          if (adapter) {
+            adapter.dispose();
+            activeAdapters.delete(sessionId);
+          }
+          workerSessionMap.delete(sessionId);
+          busySessions.delete(sessionId);
+
+          // Mark worker offline
+          workerStore.updateStatus(name, "offline");
+
+          // 6.2: Emit worker_shutdown event
+          eventLog.append("worker_shutdown", { name, sessionId });
+
+          results.push({ name, ok: true });
+        } catch (err) {
+          results.push({ name, ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      refreshWidget(ctx);
+      const failed = results.filter((r) => !r.ok);
+      return {
+        content: [textContent(`Shutdown ${results.length} workers: ${failed.length} failed` + (failed.length > 0 ? ` (${failed.map((f) => f.error).join(", ")})` : ""))],
+        details: { results },
+      };
+    },
+  });
+
+  // ── Worker Kill (5.3) ──
+
+  if (isToolEnabled(toolSettings, "acp_worker_kill")) pi.registerTool({
+    name: "acp_worker_kill",
+    label: "ACP Worker Kill",
+    description: "Force-kill a persistent ACP worker. Immediately disposes the session, unassigns active tasks (set to pending), and marks the worker offline.",
+    promptSnippet: "acp_worker_kill — force-kill a worker",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name to kill" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const name = requireString(params.name, "name");
+      const worker = workerStore.get(name);
+      if (!worker) {
+        return { content: [textContent(`Worker '${name}' not found`)], details: { error: "worker_not_found" } };
+      }
+
+      // Force-dispose session
+      const sessionId = worker.sessionId;
+      const adapter = activeAdapters.get(sessionId);
+      if (adapter) {
+        adapter.dispose();
+        activeAdapters.delete(sessionId);
+      }
+      workerSessionMap.delete(sessionId);
+      busySessions.delete(sessionId);
+
+      // Unassign active tasks (set to pending)
+      if (worker.currentTaskId) {
+        try {
+          taskStore.update(worker.currentTaskId, (t) => { t.status = "pending"; });
+        } catch { /* ignore */ }
+        workerStore.unassignTask(name);
+      }
+
+      // Mark worker offline
+      workerStore.updateStatus(name, "offline");
+
+      // 6.2: Emit worker_shutdown event
+      eventLog.append("worker_shutdown", { name, sessionId, forced: true });
+
+      refreshWidget(ctx);
+      return { content: [textContent(`Worker '${name}' killed`)], details: { name, sessionId } };
+    },
+  });
+
+  // ── Worker Prune (5.4) ──
+
+  if (isToolEnabled(toolSettings, "acp_worker_prune")) pi.registerTool({
+    name: "acp_worker_prune",
+    label: "ACP Worker Prune",
+    description: "Prune stale persistent workers. Finds all workers with derived stale status, unassigns active tasks, marks them offline, and returns the list of pruned workers.",
+    promptSnippet: "acp_worker_prune — prune stale workers",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const workers = workerStore.list();
+      const pruned: string[] = [];
+
+      for (const w of workers) {
+        if (w.status === "offline") continue;
+        const derived = deriveWorkerStatus(w);
+        if (derived.stale) {
+          // Unassign active tasks
+          if (w.currentTaskId) {
+            try {
+              taskStore.update(w.currentTaskId, (t) => { t.status = "pending"; });
+            } catch { /* ignore */ }
+            workerStore.unassignTask(w.name);
+          }
+          // Mark offline
+          workerStore.updateStatus(w.name, "offline");
+          pruned.push(w.name);
+        }
+      }
+
+      refreshWidget(ctx);
+      return {
+        content: [textContent(pruned.length > 0 ? `Pruned ${pruned.length} stale workers: ${pruned.join(", ")}` : "No stale workers found")],
+        details: { pruned, count: pruned.length },
+      };
+    },
+  });
+
   pi.registerCommand("acp-doctor", {
     description: "Compatibility alias for /acp runtime doctor",
     async handler(_args, ctx) {
@@ -978,6 +1528,7 @@ ${pr.text}`;
 
   pi.on("session_shutdown", async () => {
     monitor.stop();
+    workerDispatcher?.stop();
     await sessionMgr.disposeAll();
     for (const adapter of activeAdapters.values()) {
       adapter.dispose();

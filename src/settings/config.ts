@@ -52,6 +52,12 @@ export const ACP_TOOL_NAMES = [
 	"acp_env",
 	"acp_event_log",
 	"acp_cleanup",
+	"acp_worker_spawn",
+	"acp_worker_list",
+	"acp_worker_steer",
+	"acp_worker_shutdown",
+	"acp_worker_kill",
+	"acp_worker_prune",
 ] as const;
 
 export type AcpToolName = (typeof ACP_TOOL_NAMES)[number];

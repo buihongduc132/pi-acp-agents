@@ -22,9 +22,9 @@ export function createAdapter(
 	agentConfig: AcpAgentConfig,
 	_globalConfig: AcpConfig,
 	cwd?: string,
-	adapterOpts?: { onActivity?: (sessionId: string) => void },
+	adapterOpts?: { onActivity?: (sessionId: string) => void; onSessionUpdate?: (sessionId: string, update: import("@agentclientprotocol/sdk").SessionUpdate) => void },
 ): AcpAgentAdapter {
-	const sharedOpts = { onActivity: adapterOpts?.onActivity };
+	const sharedOpts = { onActivity: adapterOpts?.onActivity, onSessionUpdate: adapterOpts?.onSessionUpdate };
 
 	// Mode-based routing: acpx mode always routes to AcpxAdapter
 	if (agentConfig.mode === "acpx") {

@@ -73,19 +73,52 @@ export class WorkerStore {
     this.write(payload);
   }
 
-  clearTask(name: string): void {
+  touch(name: string, deltas?: { tokenDelta?: number; toolCallDelta?: number }): AcpWorkerRecord {
     const payload = this.read();
     const worker = payload.workers.find((w) => w.name === name);
-    if (worker) {
-      worker.currentTaskId = undefined;
-      this.write(payload);
+    if (!worker) throw new Error(`Worker "${name}" not found`);
+    const now = new Date().toISOString();
+    worker.lastHeartbeatAt = now;
+    worker.lastActivityAt = now;
+    if (deltas?.tokenDelta) {
+      worker.tokenCountTotal = (worker.tokenCountTotal ?? 0) + deltas.tokenDelta;
     }
+    if (deltas?.toolCallDelta) {
+      worker.toolCallCount = (worker.toolCallCount ?? 0) + deltas.toolCallDelta;
+    }
+    this.write(payload);
+    return worker;
+  }
+
+  unassignTask(name: string): AcpWorkerRecord {
+    const payload = this.read();
+    const worker = payload.workers.find((w) => w.name === name);
+    if (!worker) throw new Error(`Worker "${name}" not found`);
+    worker.currentTaskId = undefined;
+    this.write(payload);
+    return worker;
   }
 
   unregister(name: string): void {
     const payload = this.read();
     payload.workers = payload.workers.filter((w) => w.name !== name);
     this.write(payload);
+  }
+
+  /** Update worker metadata fields */
+  updateMetadata(name: string, metadata: Partial<Record<string, unknown>>): AcpWorkerRecord | undefined {
+    const payload = this.read();
+    const worker = payload.workers.find((w) => w.name === name);
+    if (!worker) return undefined;
+    for (const [k, v] of Object.entries(metadata)) {
+      if (v === undefined) {
+        delete worker.metadata[k];
+      } else {
+        worker.metadata[k] = v;
+      }
+    }
+    this.write(payload);
+    return worker;
   }
 
   pruneStale(cutoffMs = 3_600_000): { pruned: string[] } {

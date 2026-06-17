@@ -48,6 +48,12 @@ export interface AcpConfig {
 		broadcast?: number;
 		compare?: number;
 	};
+	/** Worker lifecycle config */
+	workerAutoClaim?: boolean;           // default: true
+	workerClaimIntervalMs?: number;      // default: 5000
+	workerShutdownTimeoutMs?: number;     // default: 30000
+	workerOnlineMs?: number;              // default: 60000
+	workerStaleMs?: number;               // default: 60000
 	/** Activity-based stall detection for persistent sessions (ms) */
 	needsAttentionMs?: number;     // default: 60_000
 	autoInterruptMs?: number;      // default: 300_000, 0 = disabled
@@ -142,11 +148,13 @@ export interface AcpAdapterOptions {
 	agentName?: string;
 	/** Activity callback — called on every session/update notification from the agent */
 	onActivity?: (sessionId: string) => void;
+	/** Session update callback — called on every session/update with full update data */
+	onSessionUpdate?: (sessionId: string, update: import("@agentclientprotocol/sdk").SessionUpdate) => void;
 }
 
 // --- Worker types (M6) ---
 
-export type AcpWorkerStatus = "online" | "idle" | "streaming" | "offline";
+export type AcpWorkerStatus = "online" | "idle" | "busy" | "streaming" | "offline";
 
 export interface AcpWorkerRecord {
 	name: string;
@@ -156,6 +164,12 @@ export interface AcpWorkerRecord {
 	currentTaskId?: string;
 	spawnedAt: string;
 	lastActivityAt: string;
+	/** Last heartbeat timestamp (ISO 8601), updated on every session/update event */
+	lastHeartbeatAt?: string;
+	/** Cumulative token count (tokensIn + tokensOut) from session/update deltas */
+	tokenCountTotal?: number;
+	/** Count of tool calls observed from session/update events */
+	toolCallCount?: number;
 	metadata: Record<string, unknown>;
 }
 

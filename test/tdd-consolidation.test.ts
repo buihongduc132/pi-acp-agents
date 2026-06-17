@@ -65,6 +65,7 @@ vi.mock("../src/settings/config.js", () => ({
 				"acp_env", "acp_event_log", "acp_cleanup",
 				// New consolidated tools
 				"acp_task_update", "acp_message",
+				"acp_worker_spawn",
 			].map((n) => [n, { enabled: true }])
 		),
 	})),
@@ -81,6 +82,7 @@ vi.mock("../src/settings/config.js", () => ({
 		"acp_model_policy_check", "acp_doctor", "acp_runtime_info",
 		"acp_env", "acp_event_log", "acp_cleanup",
 		"acp_task_update", "acp_message",
+		"acp_worker_spawn",
 	],
 }));
 vi.mock("../src/management/runtime-paths.js", () => ({
@@ -96,7 +98,9 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 }));
 vi.mock("../src/logger.js", () => ({
 	createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+	createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
+vi.mock("../src/management/worker-store.js", () => ({ WorkerStore: vi.fn() }));
 vi.mock("../src/core/circuit-breaker.js", () => ({ AcpCircuitBreaker: vi.fn() }));
 vi.mock("../src/core/health-monitor.js", () => ({ HealthMonitor: vi.fn() }));
 vi.mock("../src/adapter-factory.js", () => ({ createAdapter: vi.fn() }));
@@ -314,8 +318,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 
 	describe("1. Tool Registration", () => {
 		// TODO: implement consolidation first — currently 33 tools, should be 7
-		it("registers exactly 7 tools after consolidation", () => {
-			expect(tools.size).toBe(7);
+		it("registers exactly 13 tools after consolidation", () => {
+			expect(tools.size).toBe(13);
 		});
 
 		const EXPECTED_TOOLS = [
@@ -326,6 +330,12 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 			"acp_message",
 			"acp_cancel",
 			"acp_status",
+			"acp_worker_spawn",
+			"acp_worker_list",
+			"acp_worker_steer",
+			"acp_worker_shutdown",
+			"acp_worker_kill",
+			"acp_worker_prune",
 		];
 
 		it.each(EXPECTED_TOOLS)("registers tool: %s", (toolName) => {

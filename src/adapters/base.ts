@@ -18,6 +18,7 @@ export abstract class AcpAgentAdapter {
   protected cwd: string;
   protected client: AcpClient | null = null;
   protected onActivity?: (sessionId: string) => void;
+  protected onSessionUpdate?: (sessionId: string, update: import("@agentclientprotocol/sdk").SessionUpdate) => void;
 
   constructor(opts: AcpAdapterOptions) {
     this.config = this.applyDefaults(opts.config);
@@ -25,6 +26,7 @@ export abstract class AcpAgentAdapter {
     this.logger = opts.logger ?? createNoopLogger();
     this.cwd = opts.cwd ?? process.cwd();
     this.onActivity = opts.onActivity;
+    this.onSessionUpdate = opts.onSessionUpdate;
   }
 
   /** Subclasses override to provide agent-specific default config values */
@@ -43,6 +45,7 @@ export abstract class AcpAgentAdapter {
       cwd: this.cwd,
       clientInfo: this.clientInfo,
       onActivity: this.onActivity,
+      onSessionUpdate: this.onSessionUpdate,
     });
     await client.connect();
     // Only assign after successful connect

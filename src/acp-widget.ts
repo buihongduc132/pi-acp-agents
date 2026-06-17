@@ -8,7 +8,6 @@
 import type { Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
 import type { Component } from "@mariozechner/pi-tui";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import type { AcpSessionHandle } from "./config/types.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -52,6 +51,17 @@ export interface AcpWidgetActivity {
 	lastError?: string;
 }
 
+export interface AcpWidgetWorker {
+	name: string;
+	agentName: string;
+	status: string;
+	tokenCountTotal: number;
+	toolCallCount: number;
+	ageSeconds: number;
+	stale: boolean;
+	currentTaskId?: string;
+}
+
 export interface AcpWidgetState {
 	sessions: AcpWidgetSession[];
 	circuitBreakerState: "closed" | "open" | "half-open";
@@ -59,6 +69,7 @@ export interface AcpWidgetState {
 	configuredAliases?: string[];
 	defaultAgent?: string;
 	activity: AcpWidgetActivity;
+	workers?: AcpWidgetWorker[];
 }
 
 // ── Status styling ──────────────────────────────────────────────────
@@ -81,6 +92,13 @@ const CB_ICON: Record<string, { icon: string; color: ThemeColor }> = {
 	closed: { icon: "●", color: "success" },
 	open: { icon: "✕", color: "error" },
 	"half-open": { icon: "◐", color: "warning" },
+};
+
+const WORKER_STATUS_ICON: Record<string, { icon: string; color: ThemeColor }> = {
+	online: { icon: "●", color: "success" },
+	idle: { icon: "○", color: "muted" },
+	busy: { icon: "●", color: "accent" },
+	offline: { icon: "✕", color: "dim" },
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -137,10 +155,12 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 			render(width: number): string[] {
 				const state = deps.getState();
 
-				// Hide when no sessions and no configured agents
+				// Hide when nothing to show
+				const hasWorkers = (state.workers?.length ?? 0) > 0;
 				if (
 					state.sessions.length === 0 &&
-					state.configuredAgentNames.length === 0
+					state.configuredAgentNames.length === 0 &&
+					!hasWorkers
 				) {
 					return [];
 				}
@@ -230,13 +250,7 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 							width,
 						),
 					);
-					lines.push(
-						truncateToWidth(
-							theme.fg("dim", " /acp · /acp-config · acp_prompt <msg>"),
-							width,
-						),
-					);
-					return lines;
+					// Don't return early — workers may still need rendering below
 				}
 
 				// ── Build rows ──
@@ -273,6 +287,26 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 					lines.push(truncateToWidth(row, width));
 				}
 
+				// ── Worker rows (persistent workers) ──
+				if (state.workers && state.workers.length > 0) {
+					lines.push(
+						truncateToWidth(
+							" " + theme.fg("dim", "─ workers ─"),
+							width,
+						),
+					);
+					for (const w of state.workers) {
+						// Resolve status icon — use stale icon for stale workers, otherwise map by status
+						const statusBase = w.status.startsWith("stale") ? "offline" : w.status;
+						const wIcon = WORKER_STATUS_ICON[statusBase] ?? { icon: "○", color: "muted" as ThemeColor };
+						const statusColor: ThemeColor = w.status.startsWith("stale") ? "warning" : wIcon.color;
+						const staleIndicator = w.stale ? theme.fg("warning", " ⚠ stale") : "";
+						const taskInfo = w.currentTaskId ? theme.fg("dim", ` · task=${w.currentTaskId}`) : "";
+						const workerLine = ` ${theme.fg(statusColor, wIcon.icon)} ${theme.bold(w.name)}: ${theme.fg(statusColor, w.status)} · tok=${formatTokens(w.tokenCountTotal)} · tools=${w.toolCallCount} · ${w.ageSeconds}s ago${taskInfo}${staleIndicator}`;
+						lines.push(truncateToWidth(workerLine, width));
+					}
+				}
+
 				// ── Separator + Summary ──
 				lines.push(
 					truncateToWidth(
@@ -298,6 +332,19 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 				if (totalActive > 0) summaryParts.push(`${totalActive} active`);
 				if (totalIdle > 0) summaryParts.push(`${totalIdle} idle`);
 				if (totalStale > 0) summaryParts.push(`${totalStale} stale`);
+
+				// Worker summary counts
+				const workerCount = (state.workers?.length ?? 0);
+				if (workerCount > 0) {
+					const wBusy = state.workers!.filter((w) => w.status === "busy").length;
+					const wStale = state.workers!.filter((w) => w.stale).length;
+					const wIdle = workerCount - wBusy - wStale - state.workers!.filter((w) => w.status === "offline").length;
+					const wParts: string[] = [`${workerCount} worker${workerCount !== 1 ? "s" : ""}`];
+					if (wBusy > 0) wParts.push(`${wBusy} busy`);
+					if (wIdle > 0) wParts.push(`${wIdle} idle`);
+					if (wStale > 0) wParts.push(`${wStale} stale`);
+					summaryParts.push(wParts.join(" "));
+				}
 
 				const agentsConfigured = state.configuredAgentNames.length;
 				const defaultLabel = state.defaultAgent

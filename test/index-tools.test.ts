@@ -128,7 +128,7 @@ describe("ACP Extension Tools", () => {
 		return h;
 	}
 
-	it("registers 7 tools", () => { expect(tools.size).toBe(7); });
+it("registers 13 tools", () => { expect(tools.size).toBe(13); });
 
 	it("acp_status overall", async () => { m.sm.size = 1; m.sm.list.mockReturnValue([mkSession("s1")]); const r = await exec("acp_status", {}); expect(r.content[0].text).toContain("Agent Servers: 2 configured"); });
 	it("acp_status specific", async () => { m.sm.get.mockReturnValue(mkSession("s1")); const r = await exec("acp_status", { session_id: "s1" }); expect(r.content[0].text).toContain("Session: s1"); });

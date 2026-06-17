@@ -133,6 +133,28 @@ export class AcpClient {
 	private logsDir?: string;
 	private lastStderr = "";
 	private onActivity?: (sessionId: string) => void;
+	/**
+	 * Deferred spawn error. Node's child_process.spawn() does NOT throw
+	 * synchronously when the binary is missing (ENOENT) — it emits the error
+	 * asynchronously via the process 'error' event. We capture it here so
+	 * connect() (and every subsequent RPC) can reject cleanly instead of
+	 * crashing the host with an unhandled 'error' event -> uncaughtException.
+	 */
+	private spawnError: Error | null = null;
+	/**
+	 * Process-exit-before-handshake error. A binary that EXISTS but exits
+	 * (any code) before the ACP initialize handshake completes is broken; we
+	 * capture it here so initialize()/newSession() reject fast instead of
+	 * hanging to a RPC timeout. (Does NOT fire proc 'error' — only 'exit'.)
+	 */
+	private processExitError: Error | null = null;
+	private spawnErrorListeners: Array<(err: Error) => void> = [];
+	/**
+	 * GAP-4: when true, the persistent proc.on('error')/on('exit') callbacks
+	 * become no-ops so a late event from a killed process cannot mutate state
+	 * of an already-disposed client. Reset to false at the top of connect().
+	 */
+	private disposed = false;
 
 	constructor(opts: AcpClientOptions) {
 		this.agentName = opts.agentName;
@@ -159,8 +181,31 @@ export class AcpClient {
 		return this.conn !== null && this.proc !== null && !this.proc.killed;
 	}
 
-	/** Spawn the agent process and establish ACP connection */
+	/**
+	 * Spawn the agent process and establish ACP connection.
+	 *
+	 * IMPORTANT: Node's child_process.spawn() does NOT throw synchronously
+	 * when the binary is missing (ENOENT). It returns a ChildProcess and emits
+	 * the error asynchronously via the 'error' event on the next tick. If no
+	 * 'error' listener is attached, Node throws on that tick ->
+	 * uncaughtException -> host (pi) crashes. Likewise, a binary that exists
+	 * but exits before the handshake only fires 'exit' (not 'error').
+	 *
+	 * We therefore:
+	 *   1. Attach proc.on('error') + proc.on('exit') IMMEDIATELY after spawn
+	 *      returns (before any await), so the error/exit is captured, never
+	 *      leaked. Both callbacks are inert once `disposed` is true (GAP-4).
+	 *   2. Race the rest of connect() against a spawn-error promise, so an
+	 *      ENOENT or early-exit surfaces as a clean rejection.
+	 */
 	async connect(): Promise<void> {
+		// Reset lifecycle state so a fresh connect() after dispose() does not
+		// resurrect stale spawn/exit errors from a previous process (GAP-4).
+		this.disposed = false;
+		this.spawnError = null;
+		this.processExitError = null;
+		this.spawnErrorListeners = [];
+
 		const cmd = this.config.command;
 		if (!cmd) throw new Error(`Agent "${this.agentName}" has no command configured for direct mode`);
 		const args = this.config.args ?? [];
@@ -174,6 +219,48 @@ export class AcpClient {
 			});
 		} catch (err: unknown) {
 			throw classifyConnectionError(err, this.agentName, cmd);
+		}
+
+		// Attach process-level listeners IMMEDIATELY — before any await and
+		// before the stdin/stdout null check. This is the safety net for async
+		// spawn errors (ENOENT, EACCES, EAGAIN) delivered on the next tick, and
+		// for early process exit (binary exists but crashes / wrong args).
+		// Without proc.on('error'), an unhandled 'error' event on a
+		// ChildProcess throws synchronously -> uncaughtException -> pi dies.
+		this.proc!.on("error", (err: NodeJS.ErrnoException) => {
+			this.logger?.debug("process error event", err);
+			this.captureFatalSpawnError("spawnError", err);
+		});
+		this.proc!.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
+			this.logger?.debug("process exit event", { code, signal });
+			// Only fatal if the process died BEFORE the ACP initialize handshake
+		// completed. Post-handshake exits are normal session termination.
+			if (this._agentInfo !== null) return;
+			const exitErr = new AcpProtocolError({
+				agentName: this.agentName,
+				command: cmd,
+				phase: "spawn",
+				message:
+					`Command "${cmd}" exited immediately` +
+					(code !== null ? ` with non-zero status ${code}` : "") +
+					(signal ? ` (signal ${signal})` : "") + `.`,
+				cause:
+					"The process started but exited before completing the ACP " +
+					"handshake. Check the command/args; the binary may be missing " +
+					"the ACP flag (e.g. '--acp' or 'acp') or crashed on startup." +
+					(this.lastStderr ? `\nStderr: ${this.lastStderr.slice(0, 500)}` : ""),
+			});
+			this.captureFatalSpawnError("processExitError", exitErr);
+		});
+
+		// If the spawn already failed async (race window), reject now.
+		if (this.spawnError || this.processExitError) {
+			throw classifyConnectionError(
+				(this.spawnError ?? this.processExitError)!,
+				this.agentName,
+				cmd,
+				this.lastStderr,
+			);
 		}
 
 		if (!this.proc!.stdin || !this.proc!.stdout) {
@@ -228,10 +315,96 @@ export class AcpClient {
 			}),
 			stream,
 		);
+
+		// Final guard: race any deferred spawn error / early exit (ENOENT and
+		// process-exit both fire on later ticks) against successful return.
+		await this.guardAgainstSpawnError(cmd);
+	}
+
+	/**
+	 * Capture a fatal pre-handshake error (async spawn 'error' or early
+	 * 'exit') into the appropriate field and notify any in-flight
+	 * connect()/initialize()/newSession()/prompt() caller. Inert once the
+	 * client is disposed (GAP-4).
+		 */
+	private captureFatalSpawnError(
+		kind: "spawnError" | "processExitError",
+		err: Error,
+	): void {
+		if (this.disposed) return; // GAP-4: late events on a killed proc are ignored
+		if (kind === "spawnError") {
+			if (!this.spawnError) this.spawnError = err;
+		} else {
+			if (!this.processExitError) this.processExitError = err;
+		}
+		const listeners = this.spawnErrorListeners.splice(0);
+		for (const fn of listeners) {
+			try { fn(err); } catch { /* listener errors must not propagate */ }
+		}
+	}
+
+	/**
+	 * The current fatal pre-handshake error, if any (spawn 'error' takes
+	 * precedence over early 'exit').
+		 */
+	private get fatalSpawnError(): Error | null {
+		return this.spawnError ?? this.processExitError;
+	}
+
+	/**
+	 * If a spawn error / early exit has fired (or fires within one event-loop
+	 * turn), reject with a classified, stderr-enriched error. Otherwise resolve.
+	 *
+	 * Note on timing: yielding one setImmediate turn is empirically sufficient
+	 * for libuv to deliver a pending ENOENT on POSIX. It is NOT a hard
+	 * contract (Windows libuv timing is less deterministic; under heavy
+	 * event-loop load delivery can slip). The persistent proc.on('error') /
+	 * on('exit') listeners are the real safety net — they reject this promise
+	 * synchronously when the event arrives. We additionally RE-READ
+	 * this.fatalSpawnError after the await so a slowly-delivered error that
+	 * set the field without yet draining listeners still surfaces here.
+		 */
+	private guardAgainstSpawnError(cmd: string): Promise<void> {
+		const immediate = this.fatalSpawnError;
+		if (immediate) {
+			return Promise.reject(
+				classifyConnectionError(immediate, this.agentName, cmd, this.lastStderr),
+			);
+		}
+		return new Promise<void>((resolve, reject) => {
+			let settled = false;
+			const onErr = (err: Error) => {
+				if (settled) return;
+				settled = true;
+				reject(classifyConnectionError(err, this.agentName, cmd, this.lastStderr));
+			};
+			this.spawnErrorListeners.push(onErr);
+			setImmediate(() => {
+				if (settled) return; // error/exit already rejected via listener
+				settled = true;
+				const idx = this.spawnErrorListeners.indexOf(onErr);
+				if (idx >= 0) this.spawnErrorListeners.splice(idx, 1);
+				// Defensive re-check: a slow-delivered event may have set the field
+				// without the listener draining yet.
+				const late = this.fatalSpawnError;
+				if (late) {
+					reject(classifyConnectionError(late, this.agentName, cmd, this.lastStderr));
+					return;
+				}
+				resolve();
+			});
+		});
 	}
 
 	/** ACP initialize + auto-authenticate + protocol validation */
 	async initialize(): Promise<InitializeResponse> {
+		// GAP-1: surface a deferred spawn error / early exit as a classified
+		// rejection instead of awaiting this.conn.*() against a dead process.
+		if (this.fatalSpawnError) {
+			throw classifyConnectionError(
+				this.fatalSpawnError, this.agentName, this.config.command!, this.lastStderr,
+			);
+		}
 		if (!this.conn) throw new Error("Not connected");
 
 		let resp: InitializeResponse;
@@ -265,6 +438,12 @@ export class AcpClient {
 
 	/** Create a new session */
 	async newSession(): Promise<string> {
+		// GAP-1: surface deferred spawn error / early exit fast.
+		if (this.fatalSpawnError) {
+			throw classifyConnectionError(
+				this.fatalSpawnError, this.agentName, this.config.command!, this.lastStderr,
+			);
+		}
 		if (!this.conn) throw new Error("Not connected");
 
 		let resp: NewSessionResponse;
@@ -316,6 +495,12 @@ export class AcpClient {
 
 	/** Send a prompt and collect the full response */
 	async prompt(message: string): Promise<{ text: string; stopReason: string }> {
+		// GAP-1: surface deferred spawn error / early exit fast.
+		if (this.fatalSpawnError) {
+			throw classifyConnectionError(
+				this.fatalSpawnError, this.agentName, this.config.command!, this.lastStderr,
+			);
+		}
 		if (!this.conn || !this._sessionId) {
 			throw new Error("No active session");
 		}
@@ -426,6 +611,14 @@ export class AcpClient {
 
 	/** Kill the agent process and clean up */
 	async dispose(): Promise<void> {
+		// GAP-4: mark disposed FIRST so any late 'error'/'exit' event emitted
+		// by killWithEscalation / OS cleanup becomes inert (captureFatalSpawnError
+		// returns immediately) and cannot mutate state of this dead client.
+		this.disposed = true;
+		// Drop pending listeners so a late event doesn't reject a promise nobody awaits.
+		this.spawnErrorListeners = [];
+		this.spawnError = null;
+		this.processExitError = null;
 		if (this.proc && !this.proc.killed) {
 			killWithEscalation(this.proc);
 		}

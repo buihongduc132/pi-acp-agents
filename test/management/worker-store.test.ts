@@ -92,14 +92,18 @@ describe("WorkerStore", () => {
 		});
 	});
 
-	describe("assignTask / clearTask", () => {
-		it("assigns and clears task", () => {
+	describe("assignTask / unassignTask", () => {
+		it("assigns and unassigns task", () => {
 			const store = new WorkerStore(tmpDir);
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.assignTask("w1", "task-5");
 			expect(store.get("w1")!.currentTaskId).toBe("task-5");
-			store.clearTask("w1");
+			store.unassignTask("w1");
 			expect(store.get("w1")!.currentTaskId).toBeUndefined();
+		});
+		it("unassignTask throws when worker not found", () => {
+			const store = new WorkerStore(tmpDir);
+			expect(() => store.unassignTask("nope")).toThrow(/not found/i);
 		});
 	});
 
@@ -155,6 +159,54 @@ describe("WorkerStore", () => {
 			writeFileSync(join(tmpDir, "workers.json"), "not json{{{");
 			const store = new WorkerStore(tmpDir);
 			expect(store.list()).toEqual([]);
+		});
+	});
+
+	describe("touch", () => {
+		it("updates lastHeartbeatAt and lastActivityAt", () => {
+			const store = new WorkerStore(tmpDir);
+			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
+			// small delay to ensure lastActivityAt changes
+			const before = new Date();
+			const updated = store.touch("w1");
+			expect(updated.lastHeartbeatAt).toBeTruthy();
+			expect(updated.lastActivityAt).toBeTruthy();
+			const recent = new Date(updated.lastActivityAt).getTime();
+			expect(recent - before.getTime()).toBeGreaterThanOrEqual(0);
+			expect(Date.now() - recent).toBeLessThan(1000);
+		});
+
+		it("accumulates tokenCountTotal and toolCallCount deltas", () => {
+			const store = new WorkerStore(tmpDir);
+			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
+			store.touch("w1", { tokenDelta: 100, toolCallDelta: 1 });
+			expect(store.get("w1")!.tokenCountTotal).toBe(100);
+			expect(store.get("w1")!.toolCallCount).toBe(1);
+			store.touch("w1", { tokenDelta: 50, toolCallDelta: 2 });
+			expect(store.get("w1")!.tokenCountTotal).toBe(150);
+			expect(store.get("w1")!.toolCallCount).toBe(3);
+		});
+
+		it("ignores zero deltas", () => {
+			const store = new WorkerStore(tmpDir);
+			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
+			store.touch("w1", { tokenDelta: 0, toolCallDelta: 0 });
+			expect(store.get("w1")!.tokenCountTotal ?? 0).toBe(0);
+			expect(store.get("w1")!.toolCallCount ?? 0).toBe(0);
+		});
+	});
+
+	describe("updateMetadata", () => {
+		it("stores pending steer in metadata", () => {
+			const store = new WorkerStore(tmpDir);
+			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
+			store.updateMetadata("w1", { pendingSteer: "focus on tests" });
+			expect(store.get("w1")!.metadata.pendingSteer).toBe("focus on tests");
+		});
+
+		it("returns undefined for unknown worker", () => {
+			const store = new WorkerStore(tmpDir);
+			expect(store.updateMetadata("nope", { key: "val" })).toBeUndefined();
 		});
 	});
 });

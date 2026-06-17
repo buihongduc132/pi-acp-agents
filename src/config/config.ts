@@ -23,6 +23,11 @@ export const DEFAULT_CONFIG: AcpConfig = {
 	circuitBreakerMaxFailures: 3,
 	circuitBreakerResetMs: 60_000,
 	stallTimeoutMs: 3_600_000, // 1 hour default stall timeout
+	workerAutoClaim: true,
+	workerClaimIntervalMs: 5_000,
+	workerShutdownTimeoutMs: 30_000,
+	workerOnlineMs: 60_000,
+	workerStaleMs: 60_000,
 	modelPolicy: {
 		allowedModels: [],
 		blockedModels: [],

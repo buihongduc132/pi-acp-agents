@@ -26,8 +26,13 @@ describe("Level 3+ — ACP management tool registration", () => {
       "acp_task_update",
       "acp_message",
       "acp_task_create",
+      "acp_worker_spawn",
+      "acp_worker_steer",
+      "acp_worker_shutdown",
+      "acp_worker_kill",
+      "acp_worker_prune",
     ]));
-    expect(registeredTools.length).toBe(7);
+    expect(registeredTools.length).toBe(13);
   });
 
   it("does NOT register removed tools", async () => {
