@@ -694,6 +694,7 @@ ${pr.text}`;
           const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
             onActivity: (sid) => monitor.touch(sid),
           });
+          let archivedHandle: AcpSessionHandle | undefined;
           try {
             await withTimeoutMs(adapter.spawn(), config.staleTimeoutMs, `acp_spawn(archived:${target.sessionId})`);
             await adapter.initialize();
@@ -726,6 +727,7 @@ ${pr.text}`;
                 const freshSessionId = await freshAdapter.newSession(params.cwd ?? ctx.cwd);
                 if (target.sessionName) sessionNameStore.register(target.sessionName, freshSessionId);
                 const handle = makeSessionHandle(freshSessionId, agentName, params.cwd ?? ctx.cwd, freshAdapter, undefined, target.sessionName);
+                archivedHandle = handle;
                 handle.busy = true; busySessions.set(freshSessionId, true);
                 try {
                   const pr = (await withTimeoutMs(freshAdapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(fresh:${freshSessionId})`)) as AcpPromptResult;
@@ -736,9 +738,17 @@ ${pr.text}`;
                 } finally {
                   busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
                 }
-              } catch (freshErr) { freshAdapter.dispose(); throw freshErr; }
+              } catch (freshErr) {
+                if (archivedHandle) {
+                  await closeSession(archivedHandle, "error");
+                } else {
+                  freshAdapter.dispose();
+                }
+                throw freshErr;
+              }
             }
             const handle = makeSessionHandle(target.sessionId, agentName, archived.cwd ?? params.cwd ?? ctx.cwd, adapter, undefined, target.sessionName);
+            archivedHandle = handle;
             handle.busy = true; busySessions.set(target.sessionId, true);
             try {
               const pr = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(archived:${target.sessionId})`)) as AcpPromptResult;
@@ -747,12 +757,20 @@ ${pr.text}`;
             } finally {
               busySessions.delete(target.sessionId); handle.busy = false; archiveSession(handle);
             }
-          } catch (err) { adapter.dispose(); throw err; }
+          } catch (err) {
+            if (archivedHandle) {
+              await closeSession(archivedHandle, "error");
+            } else {
+              adapter.dispose();
+            }
+            throw err;
+          }
         }
         const agentCfg = getAgentConfigOrThrow(agentName);
         const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
           onActivity: (sid) => monitor.touch(sid),
         });
+        let handle: AcpSessionHandle | undefined;
         try {
           await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_spawn(new:${agentName})`);
           await adapter.initialize();
@@ -762,7 +780,7 @@ ${pr.text}`;
           if (target.sessionName && !params.dispose) {
             sessionNameStore.register(target.sessionName, sessionId);
           }
-          const handle = makeSessionHandle(sessionId, agentName, params.cwd ?? ctx.cwd, adapter, undefined, params.dispose ? undefined : target.sessionName);
+          handle = makeSessionHandle(sessionId, agentName, params.cwd ?? ctx.cwd, adapter, undefined, params.dispose ? undefined : target.sessionName);
           handle.busy = true;
           busySessions.set(sessionId, true);
           handle.lastActivityAt = new Date();
@@ -786,7 +804,17 @@ ${pr.text}`;
             }
           }
         } catch (err) {
-          adapter.dispose();
+          // If a handle was already registered (spawn/initialize succeeded but
+          // the prompt threw), tear it down via the canonical closeSession path
+          // so the registry entry, monitor registration, and activeAdapters
+          // mapping are all cleaned up — not just the raw adapter. For the
+          // pre-handle failure case (spawn/initialize), no handle exists yet,
+          // so dispose the bare adapter directly.
+          if (handle) {
+            await closeSession(handle, "error");
+          } else {
+            adapter.dispose();
+          }
           throw err;
         }
       }, `acp_prompt(${agentName})`);
