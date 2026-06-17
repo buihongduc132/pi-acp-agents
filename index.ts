@@ -186,6 +186,12 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function closeSession(handle: AcpSessionHandle, closeReason: string, autoClosed = false): Promise<void> {
+    // Idempotent: a handle already torn down must be a no-op. This lets the
+    // completion / error call sites in acp_prompt invoke closeSession without
+    // risk of double-disposing (e.g. error path after a completion teardown).
+    if (handle.disposed) {
+      return;
+    }
     handle.autoClosed = autoClosed;
     handle.closeReason = closeReason;
     archiveSession(handle);
@@ -766,7 +772,9 @@ ${pr.text}`;
             handle.isPrompting = false;
             monitor.markPromptEnd(sessionId);
             archiveSession(handle);
-            if (params.dispose) adapter.dispose();
+            if (params.dispose) {
+              await closeSession(handle, "completed-ephemeral");
+            }
           }
         } catch (err) {
           adapter.dispose();
