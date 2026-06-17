@@ -4,6 +4,35 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { WorkerDispatcher, type WorkerDispatcherDeps } from "../../src/coordination/worker-dispatcher.js";
+import type { AcpWorkerRecord } from "../../src/config/types.js";
+
+function makeWorker(name: string, status: AcpWorkerRecord["status"] = "idle", currentTaskId?: string): AcpWorkerRecord {
+	const now = new Date().toISOString();
+	return {
+		name,
+		sessionId: "ses-1",
+		agentName: "gemini",
+		status,
+		currentTaskId,
+		spawnedAt: now,
+		lastActivityAt: now,
+		metadata: {},
+	};
+}
+
+function makeWorkerStore(workers: AcpWorkerRecord[] = []) {
+	return {
+		list: vi.fn((opts?: { status?: string }) => {
+			if (opts?.status) return workers.filter((w) => w.status === opts.status);
+			return workers;
+		}),
+		updateStatus: vi.fn((name: string, status: AcpWorkerRecord["status"]) => makeWorker(name, status)),
+		assignTask: vi.fn(),
+		unassignTask: vi.fn((name: string) => makeWorker(name)),
+		get: vi.fn((name: string) => workers.find((w) => w.name === name)),
+		updateMetadata: vi.fn((name: string) => makeWorker(name)),
+	};
+}
 
 function createMockDeps(overrides?: Partial<WorkerDispatcherDeps>): WorkerDispatcherDeps {
 	const claimedTasks = [
@@ -13,13 +42,7 @@ function createMockDeps(overrides?: Partial<WorkerDispatcherDeps>): WorkerDispat
 	let claimIndex = 0;
 
 	return {
-		workerStore: {
-			list: vi.fn(() => overrides?.workerStore?.list?.() ?? []),
-			updateStatus: vi.fn((name: string, status: string) => ({ name, status })),
-			assignTask: vi.fn(),
-			unassignTask: vi.fn(() => ({ name: "", currentTaskId: undefined })),
-			get: vi.fn(() => undefined),
-		},
+		workerStore: makeWorkerStore(),
 		taskStore: {
 			claimNextAvailable: vi.fn(async () => {
 				if (claimIndex < claimedTasks.length) return claimedTasks[claimIndex++]!;
@@ -40,13 +63,7 @@ function createMockDeps(overrides?: Partial<WorkerDispatcherDeps>): WorkerDispat
 describe("WorkerDispatcher", () => {
 	it("7.3: dispatchOnce claims unblocked task for idle worker", async () => {
 		const deps = createMockDeps({
-			workerStore: {
-				list: vi.fn(() => [{ name: "worker-1", status: "idle", currentTaskId: undefined }]),
-				updateStatus: vi.fn((name: string, status: string) => ({ name, status })),
-				assignTask: vi.fn(),
-				unassignTask: vi.fn(() => ({ name: "", currentTaskId: undefined })),
-				get: vi.fn(() => undefined),
-			},
+			workerStore: makeWorkerStore([makeWorker("worker-1", "idle")]),
 		});
 		const dispatcher = new WorkerDispatcher(deps, 5000);
 		await dispatcher.dispatchOnce();
@@ -58,19 +75,10 @@ describe("WorkerDispatcher", () => {
 	});
 
 	it("7.4: dispatchOnce skips busy workers", async () => {
-		const busyWorker = { name: "worker-busy", status: "busy", currentTaskId: "task-existing" };
-		const idleWorker = { name: "worker-idle", status: "idle", currentTaskId: undefined };
+		const busyWorker = makeWorker("worker-busy", "busy", "task-existing");
+		const idleWorker = makeWorker("worker-idle", "idle");
 		const deps = createMockDeps({
-			workerStore: {
-				list: vi.fn((opts?: { status?: string }) => {
-					if (opts?.status === "idle") return [idleWorker];
-					return [busyWorker, idleWorker];
-				}),
-				updateStatus: vi.fn((name: string, status: string) => ({ name, status })),
-				assignTask: vi.fn(),
-				unassignTask: vi.fn(() => ({ name: "", currentTaskId: undefined })),
-				get: vi.fn(() => undefined),
-			},
+			workerStore: makeWorkerStore([busyWorker, idleWorker]),
 		});
 		const dispatcher = new WorkerDispatcher(deps, 5000);
 		await dispatcher.dispatchOnce();
@@ -81,15 +89,9 @@ describe("WorkerDispatcher", () => {
 	});
 
 	it("7.4: dispatchOnce skips workers with in-flight sessions", async () => {
-		const idleWorker = { name: "worker-1", status: "idle", currentTaskId: undefined };
+		const idleWorker = makeWorker("worker-1", "idle");
 		const deps = createMockDeps({
-			workerStore: {
-				list: vi.fn(() => [idleWorker]),
-				updateStatus: vi.fn((name: string, status: string) => ({ name, status })),
-				assignTask: vi.fn(),
-				unassignTask: vi.fn(() => ({ name: "", currentTaskId: undefined })),
-				get: vi.fn(() => undefined),
-			},
+			workerStore: makeWorkerStore([idleWorker]),
 			busySessions: new Map([["ses-1", true]]),
 			getSessionIdForWorker: vi.fn(() => "ses-1"),
 		});
@@ -103,13 +105,7 @@ describe("WorkerDispatcher", () => {
 
 	it("7.5: dispatcher returns to idle after task completion", async () => {
 		const deps = createMockDeps({
-			workerStore: {
-				list: vi.fn(() => [{ name: "worker-1", status: "idle", currentTaskId: undefined }]),
-				updateStatus: vi.fn((name: string, status: string) => ({ name, status })),
-				assignTask: vi.fn(),
-				unassignTask: vi.fn(() => ({ name: "", currentTaskId: undefined })),
-				get: vi.fn(() => undefined),
-			},
+			workerStore: makeWorkerStore([makeWorker("worker-1", "idle")]),
 			dispatchTask: vi.fn(async () => ({ ok: true, value: "result text" })),
 		});
 		const dispatcher = new WorkerDispatcher(deps, 5000);
@@ -127,8 +123,8 @@ describe("WorkerDispatcher", () => {
 
 	it("7.12/7.13: round-robin dispatches tasks to different workers", async () => {
 		const workers = [
-			{ name: "worker-a", status: "idle", currentTaskId: undefined },
-			{ name: "worker-b", status: "idle", currentTaskId: undefined },
+			makeWorker("worker-a", "idle"),
+			makeWorker("worker-b", "idle"),
 		];
 		const tasks = [
 			{ id: "task-1", subject: "Task 1", description: null },
@@ -137,13 +133,7 @@ describe("WorkerDispatcher", () => {
 		let taskIdx = 0;
 
 		const deps = createMockDeps({
-			workerStore: {
-				list: vi.fn((_opts?: { status?: string }) => workers),
-				updateStatus: vi.fn((name: string, status: string) => ({ name, status })),
-				assignTask: vi.fn(),
-				unassignTask: vi.fn(() => ({ name: "", currentTaskId: undefined })),
-				get: vi.fn(() => undefined),
-			},
+			workerStore: makeWorkerStore(workers),
 			taskStore: {
 				claimNextAvailable: vi.fn(async () => {
 					if (taskIdx < tasks.length) return tasks[taskIdx++]!;
@@ -178,13 +168,7 @@ describe("WorkerDispatcher", () => {
 
 	it("no-op when no idle workers", async () => {
 		const deps = createMockDeps({
-			workerStore: {
-				list: vi.fn(() => []),
-				updateStatus: vi.fn(),
-				assignTask: vi.fn(),
-				unassignTask: vi.fn(() => ({ name: "", currentTaskId: undefined })),
-				get: vi.fn(() => undefined),
-			},
+			workerStore: makeWorkerStore([]),
 		});
 		const dispatcher = new WorkerDispatcher(deps, 5000);
 		await dispatcher.dispatchOnce();

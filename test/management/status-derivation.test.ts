@@ -43,7 +43,6 @@ function isWorkerStale(worker: AcpWorkerRecord, stallMs?: number): boolean {
 function makeWorker(overrides: Partial<AcpWorkerRecord> & { name: string }): AcpWorkerRecord {
 	const now = new Date().toISOString();
 	return {
-		name: overrides.name,
 		sessionId: "ses-1",
 		agentName: "gemini",
 		status: "online",

@@ -111,6 +111,7 @@ export interface AcpClientOptions {
 	logger?: Logger;
 	logsDir?: string;
 	onActivity?: (sessionId: string) => void;
+	onSessionUpdate?: (sessionId: string, update: import("@agentclientprotocol/sdk").SessionUpdate) => void;
 }
 
 /**
@@ -133,6 +134,7 @@ export class AcpClient {
 	private logsDir?: string;
 	private lastStderr = "";
 	private onActivity?: (sessionId: string) => void;
+	private onSessionUpdate?: (sessionId: string, update: import("@agentclientprotocol/sdk").SessionUpdate) => void;
 	/**
 	 * Deferred spawn error. Node's child_process.spawn() does NOT throw
 	 * synchronously when the binary is missing (ENOENT) — it emits the error
@@ -167,6 +169,7 @@ export class AcpClient {
 		this.logger = opts.logger;
 		this.logsDir = opts.logsDir;
 		this.onActivity = opts.onActivity;
+		this.onSessionUpdate = opts.onSessionUpdate;
 	}
 
 	get sessionId(): string | null {
@@ -639,6 +642,12 @@ export class AcpClient {
 
 		// Fire activity callback for ALL update types (stall detection)
 		if (this._sessionId) this.onActivity?.(this._sessionId);
+
+		// Forward the raw update to the onSessionUpdate callback (heartbeat consumer,
+		// defensive parsing, zero-delta fallback, AcpEventLog logging, etc.)
+		if (this._sessionId) {
+			this.onSessionUpdate?.(this._sessionId, params.update);
+		}
 
 		if (updateType === "agent_message_chunk" || updateType === "agent_thought_chunk") {
 			const content = update.content as

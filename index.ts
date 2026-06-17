@@ -16,6 +16,7 @@ import { SessionManager } from "./src/core/session-manager.js";
 import { createFileLogger } from "./src/logger.js";
 import { AcpEventLog } from "./src/management/event-log.js";
 import { GovernanceStore } from "./src/management/governance-store.js";
+import { consumeHeartbeat } from "./src/management/heartbeat-parser.js";
 import { MailboxManager } from "./src/management/mailbox-manager.js";
 import { AcpTaskStore, type AcpTaskStatus } from "./src/management/task-store.js";
 import { WorkerStore } from "./src/management/worker-store.js";
@@ -181,40 +182,21 @@ export default function (pi: ExtensionAPI) {
     return { sessionId, sessionName, metadata: undefined };
   }
 
+  const heartbeatDeps = {
+    resolveWorkerName: (sid: string) => workerSessionMap.get(sid),
+    touch: (name: string, deltas?: { tokenDelta?: number; toolCallDelta?: number }) =>
+      workerStore.touch(name, deltas),
+    logParseError: (entry: { workerName: string; sessionId: string; error: string }) =>
+      eventLog.append("heartbeat_parse_error", entry),
+  };
+
   /**
    * Heartbeat consumer — processes ACP session/update events for worker-bound sessions.
    * Extracts token/tool deltas and calls WorkerStore.touch().
-   * (Tasks 2.1 + 2.2: defensive parsing built-in)
+   * (Tasks 2.1 + 2.2: defensive parsing + error logging in consumeHeartbeat)
    */
   function heartbeatConsumer(sessionId: string, update: import("@agentclientprotocol/sdk").SessionUpdate): void {
-    const workerName = workerSessionMap.get(sessionId);
-    if (!workerName) return; // Not a worker-bound session
-    try {
-      const updateRec = update as Record<string, unknown>;
-      const updateType = updateRec.sessionUpdate;
-      let tokenDelta = 0;
-      let toolCallDelta = 0;
-
-      if (updateType === "usage_update") {
-        // Defensive: treat missing 'used' as zero-delta
-        const used = typeof updateRec.used === "number" ? updateRec.used : 0;
-        const size = typeof updateRec.size === "number" ? updateRec.size : 0;
-        tokenDelta = used;
-        // Track cumulative via touch
-        void size; // size is total context window, not useful as delta
-      } else if (updateType === "tool_call") {
-        toolCallDelta = 1;
-      }
-
-      workerStore.touch(workerName, { tokenDelta, toolCallDelta });
-    } catch (err) {
-      // Task 2.2: defensive parsing — log malformed events, don't crash
-      eventLog.append("heartbeat_parse_error", {
-        workerName,
-        sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    consumeHeartbeat(heartbeatDeps, sessionId, update);
   }
 
   const monitor = new HealthMonitor({

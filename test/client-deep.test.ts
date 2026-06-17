@@ -373,6 +373,22 @@ describe("AcpClient — deep branches", () => {
 			expect((client as any).collectedText).toBe("");
 		});
 
+		it("forwards raw update to onSessionUpdate callback", async () => {
+			const onSessionUpdate = vi.fn();
+			const client = createClient({ onSessionUpdate });
+			await client.connect();
+			const conn = (client as any).conn;
+			conn.newSession.mockResolvedValueOnce({ sessionId: "sess-fwd", models: {}, modes: {} });
+			await client.newSession();
+
+			const sessionUpdateCb = capturedCallbacks().sessionUpdate;
+			const rawUpdate = { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } };
+			await sessionUpdateCb({ update: rawUpdate });
+
+			expect(onSessionUpdate).toHaveBeenCalledTimes(1);
+			expect(onSessionUpdate).toHaveBeenCalledWith("sess-fwd", rawUpdate);
+		});
+
 		it("handles requestPermission callback", async () => {
 			const client = createClient();
 			await client.connect();
