@@ -87,6 +87,10 @@ describe("acp_prompt ephemeral dispose-on-completion (T1)", () => {
 	const ctx = { cwd: "/project", ui: { setWidget: vi.fn(), notify: vi.fn() } };
 
 	beforeEach(() => {
+		// Reset any spies/mock-implementations left over from the previous
+		// iteration (notably the SessionManager.prototype.add spy below, which
+		// otherwise stacks across tests and causes infinite recursion).
+		vi.restoreAllMocks();
 		tools = new Map();
 		capturedHandle = undefined;
 
@@ -153,5 +157,35 @@ describe("acp_prompt ephemeral dispose-on-completion (T1)", () => {
 
 		// And the adapter was actually disposed (no live subprocess leak).
 		expect(fakeAdapter.dispose).toHaveBeenCalled();
+	});
+
+	it("tears down the session handle when adapter.prompt throws (T2)", async () => {
+		// Make the fake adapter's prompt reject AFTER the session handle was
+		// created (new-session path).
+		fakeAdapter.prompt.mockRejectedValueOnce(new Error("boom"));
+
+		// Invoke acp_prompt via the new-session path. The tool's safeExecute
+		// wrapper catches the error and returns an error result rather than
+		// rejecting.
+		const result = await tools.get("acp_prompt").execute(
+			"t",
+			{ message: "hi" },
+			undefined,
+			undefined,
+			ctx,
+		);
+		expect(result.details.stopReason).toBe("error");
+
+		// Sanity: a handle was created before prompt threw.
+		expect(capturedHandle).toBeDefined();
+
+		// sessionMgr.size === 0 — the leaked registry entry must be gone.
+		const status = await tools.get("acp_status").execute("t", {}, undefined, undefined, ctx);
+		expect(status.details.sessionCount).toBe(0);
+		expect(status.content[0].text).toContain("Active Sessions (0)");
+
+		// handle.disposed === true — the handle was disposed, not just the
+		// raw adapter.
+		expect(capturedHandle!.disposed).toBe(true);
 	});
 });
