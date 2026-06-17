@@ -31,13 +31,17 @@ export class SessionManager {
 
   async remove(sessionId: string): Promise<void> {
     const handle = this.sessions.get(sessionId);
-    if (handle) {
-      try {
-        await handle.dispose();
-      } catch (err) {
-        console.error("[acp] dispose error:", err);
-      }
-      this.sessions.delete(sessionId);
+    if (!handle) return;
+    // Always remove from the map so size converges to zero.
+    this.sessions.delete(sessionId);
+    // Idempotency guard: if the adapter was already disposed (e.g. by the
+    // completion hook in T1 or the reaper in T2), do NOT call dispose()
+    // again — that would double-dispose the underlying subprocess.
+    if (handle.disposed) return;
+    try {
+      await handle.dispose();
+    } catch (err) {
+      console.error("[acp] dispose error:", err);
     }
   }
 

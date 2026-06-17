@@ -139,6 +139,10 @@ export class HealthMonitor {
     const toRemove: string[] = [];
 
     for (const [id, entry] of this.entries) {
+      // Idempotency: a session already disposed by the completion hook (T1)
+      // or a prior reaper cycle (T2) must be cleanly dropped from the monitor
+      // on the next tick without being reprocessed as stale (which would route
+      // it back through onStale -> closeSession -> dispose, a double-dispose).
       if (entry.session.disposed) {
         toRemove.push(id);
         continue;
