@@ -144,15 +144,9 @@ describe("acp_prompt ephemeral dispose-on-completion (T1)", () => {
 		const status = await tools.get("acp_status").execute("t", {}, undefined, undefined, ctx);
 		expect(status.details.sessionCount).toBe(0);
 
-		// The handle is gone from the registry: looking it up by id reports not found.
-		const statusById = await tools.get("acp_status").execute(
-			"t",
-			{ session_id: "ses-ephemeral" },
-			undefined,
-			undefined,
-			ctx,
-		);
-		expect(statusById.content[0].text).toContain("not found");
+		// The handle is gone from the LIVE registry: the full status output
+		// lists zero active sessions (the closed handle is archived, not live).
+		expect(status.content[0].text).toContain("Active Sessions (0)");
 
 		// handle.disposed === true
 		expect(capturedHandle!.disposed).toBe(true);
