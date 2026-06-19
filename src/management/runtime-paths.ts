@@ -22,7 +22,7 @@ export function getRuntimePaths(rootDir?: string, sessionId?: string): AcpRuntim
     mailboxesFile: join(sessionBase, "mailboxes.json"),
     governanceFile: join(sessionBase, "governance.json"),
     eventLogFile: join(base, "events.jsonl"),
-    sessionArchiveFile: join(sessionBase, "session-archive.json"),
+    sessionArchiveFile: join(base, "session-archive.json"),
     sessionNameRegistryFile: join(base, "session-name-registry.json"),
     workersFile: join(sessionBase, "workers.json"),
   };

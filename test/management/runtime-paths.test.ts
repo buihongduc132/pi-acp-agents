@@ -22,12 +22,12 @@ describe("getRuntimePaths", () => {
 		expect(paths.mailboxesFile).toContain(join("ses-abc", "mailboxes.json"));
 		expect(paths.governanceFile).toContain(join("ses-abc", "governance.json"));
 		expect(paths.workersFile).toContain(join("ses-abc", "workers.json"));
-		expect(paths.sessionArchiveFile).toContain(join("ses-abc", "session-archive.json"));
 	});
 
 	it("global paths do NOT include session segment", () => {
 		const paths = getRuntimePaths(tmpDir, "ses-abc");
 		expect(paths.sessionNameRegistryFile).toBe(join(tmpDir, "session-name-registry.json"));
+		expect(paths.sessionArchiveFile).toBe(join(tmpDir, "session-archive.json"));
 		expect(paths.eventLogFile).toBe(join(tmpDir, "events.jsonl"));
 	});
 

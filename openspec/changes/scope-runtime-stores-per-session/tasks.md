@@ -1,7 +1,7 @@
 ## 1. Path derivation
 
 - [x] 1.1 Update `getRuntimePaths` / `ensureRuntimeDir` to accept a `sessionId` and append `<sessionId>/` to the base root for session-scoped files
-- [x] 1.2 Split the path contract: session-scoped files (`tasksFile`, `mailboxesFile`, `governanceFile`, `workersFile`) resolve under `<root>/<sessionId>/`; global files (`sessionNameRegistryFile`, `sessionArchiveFile`, `eventLogFile`) resolve directly under `<root>/``
+- [x] 1.2 Split the path contract: session-scoped files (`tasksFile`, `mailboxesFile`, `governanceFile`, `workersFile`) resolve under `<root>/<sessionId>/`; global files (`sessionNameRegistryFile`, `sessionArchiveFile`, `eventLogFile`) resolve directly under `<root>/`
 - [x] 1.3 Add unit tests in `runtime-paths.test.ts` covering: session-scoped paths include `<sessionId>/`, global paths do not, custom `rootDir` override still appends session segment
 
 ## 2. Store constructor signature changes
