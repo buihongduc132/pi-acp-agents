@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema",
+  "version": 1,
+  "verified_at": "2026-06-19",
+  "verified_by": "teammates grpA/B/C + index.ts registerTool audit",
+  "active_tool_count": 13,
+  "active_tool_source": "index.ts (pi.registerTool lines)",
+  "legacy_tool_list_note": "src/settings/config.ts:22-60 ACP_TOOL_NAMES is a legacy reference (39 names) — many consolidated-out. Do NOT use as truth.",
+
+  "state_values": ["implemented", "partial", "stub", "planned", "deferred", "to-sunset"],
+
+  "active_registered_tools": [
+    { "tool": "acp_prompt",            "state": "implemented", "gap": null,     "plan": null,                              "notes": "Long-lived by default; dispose:true opt-in." },
+    { "tool": "acp_status",            "state": "implemented", "gap": null,     "plan": "acp-per-agent-cooldown.md",        "notes": "Liveness + active sessions. Cooldown section planned (none today)." },
+    { "tool": "acp_cancel",            "state": "implemented", "gap": null,     "plan": null,                              "notes": "Cancels running prompt." },
+    { "tool": "acp_broadcast",         "state": "implemented", "gap": null,     "plan": null,                              "notes": "N agents parallel via Promise.allSettled. Short-lived/disposed." },
+    { "tool": "acp_task_create",       "state": "implemented", "gap": null,     "plan": null,                              "notes": "Create task with deps/blockedBy." },
+    { "tool": "acp_task_update",       "state": "partial",     "gap": "G-I",    "plan": "acp-task-revoke.md (new needed)", "notes": "Multiplex: status/assignee/deps_add/rm/result. assignee:'' unassign does NOT halt worker mid-flight (race). No task_dep_ls action (use filter)." },
+    { "tool": "acp_message",           "state": "partial",     "gap": "G-B",    "plan": "persistent-acp-workers.md",       "notes": "Multiplex send/list; kind:'steer' accepted but mailbox stays passive store (no consumer). Active steer only via acp_worker_steer." },
+    { "tool": "acp_worker_spawn",      "state": "implemented", "gap": "G-A",    "plan": "persistent-acp-workers.md",       "notes": "Persistent named worker + optional initPrompt + auto-claim registration." },
+    { "tool": "acp_worker_list",       "state": "implemented", "gap": "G-A",    "plan": "persistent-acp-workers.md",       "notes": "Online/idle/streaming + currentTaskId." },
+    { "tool": "acp_worker_steer",      "state": "implemented", "gap": "G-B",    "plan": "persistent-acp-workers.md",       "notes": "Busy worker: cancel + pendingSteer queued; idle worker: queued for next dispatch." },
+    { "tool": "acp_worker_shutdown",   "state": "partial",     "gap": "G-K",    "plan": "persistent-acp-workers.md",       "notes": "Graceful but no handshake ack protocol yet." },
+    { "tool": "acp_worker_kill",       "state": "implemented", "gap": null,     "plan": null,                              "notes": "Force dispose + workerStore.unassignTask." },
+    { "tool": "acp_worker_prune",      "state": "partial",     "gap": "G-J",    "plan": "persistent-acp-workers.md",       "notes": "Marks stale offline but staleness NOT heartbeat-derived yet (R-W4/W6)." }
+  ],
+
+  "consolidated_out_legacy_names": [
+    { "name": "acp_delegate",                  "state": "to-sunset", "replaced_by": "acp_prompt (long-lived) or acp_broadcast (1-agent); coordinator.delegate() internal" },
+    { "name": "acp_delegate_parallel",         "state": "to-sunset", "replaced_by": "acp_broadcast. test/delegate-parallel.test.ts:139 .skip 'REMOVED - consolidated'" },
+    { "name": "acp_compare",                   "state": "to-sunset", "replaced_by": "AgentCoordinator.compare() internal method; no LLM surface" },
+    { "name": "acp_session_new",               "state": "to-sunset", "replaced_by": "acp_prompt without dispose:true" },
+    { "name": "acp_session_load",              "state": "to-sunset", "replaced_by": "SessionManager loads by ID via acp_prompt(session_id:)" },
+    { "name": "acp_session_set_model",         "state": "to-sunset", "replaced_by": "model/mode param on acp_prompt/acp_worker_spawn" },
+    { "name": "acp_session_set_mode",          "state": "to-sunset", "replaced_by": "model/mode param on acp_prompt/acp_worker_spawn" },
+    { "name": "acp_session_list",              "state": "to-sunset", "replaced_by": "acp_status covers active sessions" },
+    { "name": "acp_session_shutdown",          "state": "to-sunset", "replaced_by": "acp_worker_shutdown" },
+    { "name": "acp_session_kill",              "state": "to-sunset", "replaced_by": "acp_worker_kill" },
+    { "name": "acp_prune",                     "state": "to-sunset", "replaced_by": "acp_worker_prune" },
+    { "name": "acp_task_assign",               "state": "to-sunset", "replaced_by": "acp_task_create + acp_task_update. tdd-consolidation.test.ts:756" },
+    { "name": "acp_task_set_status",           "state": "to-sunset", "replaced_by": "acp_task_update" },
+    { "name": "acp_task_dependency_add",       "state": "to-sunset", "replaced_by": "acp_task_update(deps_add:)" },
+    { "name": "acp_task_dependency_remove",    "state": "to-sunset", "replaced_by": "acp_task_update(deps_remove:)" },
+    { "name": "acp_task_clear",                "state": "to-sunset", "replaced_by": "acp_task_update(status:deleted)" },
+    { "name": "acp_task_get",                  "state": "to-sunset", "replaced_by": "acp_task_update(filter:) (verify if separate getter needed)" },
+    { "name": "acp_task_list",                 "state": "to-sunset", "replaced_by": "acp_task_update(filter:) + acp_status" },
+    { "name": "acp_task_dep_ls",               "state": "to-sunset", "replaced_by": "acp_task_update(filter:).dependencies. G-I covered" },
+    { "name": "acp_message_send",              "state": "to-sunset", "replaced_by": "acp_message(action:send)" },
+    { "name": "acp_message_list",              "state": "to-sunset", "replaced_by": "acp_message(action:list)" },
+    { "name": "acp_plan_request",              "state": "to-sunset", "replaced_by": "plan-governance is per-adapter, not ACP tool" },
+    { "name": "acp_plan_resolve",              "state": "to-sunset", "replaced_by": "plan-governance is per-adapter" },
+    { "name": "acp_model_policy_get",          "state": "to-sunset", "replaced_by": "validation at spawn/prompt path" },
+    { "name": "acp_model_policy_check",        "state": "to-sunset", "replaced_by": "validation at spawn/prompt path" },
+    { "name": "acp_doctor",                    "state": "to-sunset", "replaced_by": "folded into acp_status" },
+    { "name": "acp_runtime_info",              "state": "to-sunset", "replaced_by": "acp_status or removed" },
+    { "name": "acp_env",                       "state": "to-sunset", "replaced_by": "removed" },
+    { "name": "acp_event_log",                 "state": "to-sunset", "replaced_by": "acp_status or removed" },
+    { "name": "acp_cleanup",                   "state": "to-sunset", "replaced_by": "removed" }
+  ],
+
+  "planned": [
+    { "capability": "Hooks & quality-gate policy",   "new_tools": ["acp_hooks_policy_get", "acp_hooks_policy_set"],                                            "gap": "G-D",    "plan": "acp-hooks-quality-gates.md",            "priority": "PRI-3" },
+    { "capability": "Per-agent cooldown (cross-session)", "new_tools": ["acp_cooldown_set", "acp_cooldown_clear", "acp_cooldown_list"],                         "gap": null,     "plan": "acp-per-agent-cooldown.md",             "priority": "PRI-2" },
+    { "capability": "Worker liveliness + staleness", "changes": ["UPDATE acp_worker_prune", "UPDATE acp_worker_list"], "behavior": "heartbeat-derived staleness", "gap": "G-J rest","plan": "persistent-acp-workers.md (remaining 20%)", "priority": "PRI-1" },
+    { "capability": "Graceful handshake shutdown",   "changes": ["UPDATE acp_worker_shutdown"], "behavior": "RPC ack protocol",                       "gap": "G-K",    "plan": "persistent-acp-workers.md",             "priority": "PRI-1" },
+    { "capability": "Predefined teams / agent presets", "new_tools": ["acp_preset_teams_list", "acp_preset_team_spawn", "acp_preset_agents_list"],             "gap": "G-G",    "plan": "fold into acp-workflow-templating.md",  "priority": "PRI-3 (bumped 2026-06-19)" },
+    { "capability": "task_revoke (mid-flight unassign)", "new_tools": ["acp_task_revoke OR wire acp_task_update(assignee:'') to coordinated halt"],            "gap": "new",    "plan": "acp-task-revoke.md (new needed)",       "priority": "MEDIUM" }
+  ],
+
+  "deferred": [
+    { "capability": "Context branching (contextMode:branch)", "gap": "G-E",     "plan": "acp-context-branching.md",            "reason": "user deprioritized — non-trivial across ACP transport" },
+    { "capability": "Worktree isolation (workspaceMode:worktree)", "gap": "G-F", "plan": "acp-workspace-isolation.md",          "reason": "user deprioritized" },
+    { "capability": "Team styles/naming",                     "gap": "G-H",     "plan": null,                                   "reason": "cosmetic only" },
+    { "capability": "Cross-DAG coordination",                 "gap": "DAG GAP-2","plan": "deferred-cross-dag-coordination.md",   "reason": "Phase 2" },
+    { "capability": "Per-agent concurrency (DAG)",            "gap": "DAG GAP-1","plan": "deferred-per-agent-concurrency.md",    "reason": "Phase 2" },
+    { "capability": "OpenClaw heartbeat for DAG",             "gap": "DAG",     "plan": "deferred-openclaw-heartbeat-for-dag.md","reason": "research first" },
+    { "capability": "Agent capability validation",            "gap": "DAG GAP-3","plan": "deferred-agent-capability-validation.md","reason": "Phase 2" },
+    { "capability": "Teams ↔ ACP shared registry",            "gap": "G3/G4",   "plan": "teams-acp-shared-registry.md",         "reason": "user deprioritized" }
+  ],
+
+  "already_shipped": [
+    { "capability": "Persistent named workers + spawn/list/shutdown/kill/prune", "gap": "G-A",           "plan": "persistent-acp-workers.md", "status": "shipped", "evidence": "index.ts:1109-1490, WorkerStore 164 lines" },
+    { "capability": "Auto-claim background loop",                                  "gap": "G-C",           "plan": "persistent-acp-workers.md", "status": "shipped", "evidence": "WorkerDispatcher.start() round-robin" },
+    { "capability": "Active steer for live workers",                               "gap": "G-B (active half)", "plan": "persistent-acp-workers.md", "status": "shipped", "evidence": "acp_worker_steer + pendingSteer" },
+    { "capability": "Task tool consolidation (multiplex)",                         "gap": null,            "plan": "test/tdd-consolidation.test.ts", "status": "shipped", "evidence": "13 active tools" }
+  ],
+
+  "priority_order": [
+    { "rank": 1, "priority": "PRI-1",   "work": "finish persistent-acp-workers.md — liveliness, handshake (G-J rest, G-K)" },
+    { "rank": 2, "priority": "PRI-2",   "work": "acp-per-agent-cooldown.md" },
+    { "rank": 3, "priority": "PRI-3",   "work": "acp-hooks-quality-gates.md (G-D) + predefined teams/presets (G-G) — bumped same priority" },
+    { "rank": 4, "priority": "MEDIUM",  "work": "acp-task-revoke.md (new) — mid-flight unassign correctness" },
+    { "rank": 5, "priority": "DEFERRED","work": "branching, worktree, styles, DAG, shared registry (see deferred table)" }
+  ],
+
+  "open_doc_debt": [
+    { "issue": "flow/findings/teams-alignment-gaps.md G-A/B 'WorkerStore dead code' claim is STALE", "fix": "workers shipped, refresh finding" },
+    { "issue": "test/tdd-consolidation.test.ts:1-24 references 8 requirement docs under flow/{intentions,requirements}/pi-acp-agents/ that do not exist", "fix": "orphan refs, recreate or remove" },
+    { "issue": "src/settings/config.ts ACP_TOOL_NAMES (39 names) does not match 13 registered tools", "fix": "prune constant to 13 active or delete if unused" }
+  ]
+}
