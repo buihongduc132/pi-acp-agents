@@ -20,7 +20,7 @@ describe("WorkerStore", () => {
 
 	describe("register", () => {
 		it("creates worker record", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			const worker = store.register({
 				name: "worker-1",
 				sessionId: "ses-abc",
@@ -35,7 +35,7 @@ describe("WorkerStore", () => {
 		});
 
 		it("re-register updates existing worker (reconnection)", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "ses-old", agentName: "gemini" });
 			store.updateStatus("w1", "offline");
 			const updated = store.register({ name: "w1", sessionId: "ses-new", agentName: "gemini" });
@@ -46,7 +46,7 @@ describe("WorkerStore", () => {
 
 	describe("get", () => {
 		it("returns worker by name", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "ses-1", agentName: "gemini" });
 			const worker = store.get("w1");
 			expect(worker).toBeDefined();
@@ -54,21 +54,21 @@ describe("WorkerStore", () => {
 		});
 
 		it("returns undefined for unknown worker", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			expect(store.get("nonexistent")).toBeUndefined();
 		});
 	});
 
 	describe("list", () => {
 		it("returns all workers", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.register({ name: "w2", sessionId: "s2", agentName: "codex" });
 			expect(store.list()).toHaveLength(2);
 		});
 
 		it("filters by status", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.register({ name: "w2", sessionId: "s2", agentName: "codex" });
 			store.updateStatus("w2", "offline");
@@ -79,7 +79,7 @@ describe("WorkerStore", () => {
 
 	describe("updateStatus", () => {
 		it("transitions status", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			const updated = store.updateStatus("w1", "streaming");
 			expect(updated.status).toBe("streaming");
@@ -87,14 +87,14 @@ describe("WorkerStore", () => {
 		});
 
 		it("throws for unknown worker", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			expect(() => store.updateStatus("nope", "offline")).toThrow(/not found/i);
 		});
 	});
 
 	describe("assignTask / unassignTask", () => {
 		it("assigns and unassigns task", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.assignTask("w1", "task-5");
 			expect(store.get("w1")!.currentTaskId).toBe("task-5");
@@ -102,14 +102,14 @@ describe("WorkerStore", () => {
 			expect(store.get("w1")!.currentTaskId).toBeUndefined();
 		});
 		it("unassignTask throws when worker not found", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			expect(() => store.unassignTask("nope")).toThrow(/not found/i);
 		});
 	});
 
 	describe("unregister", () => {
 		it("removes worker", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.unregister("w1");
 			expect(store.get("w1")).toBeUndefined();
@@ -119,7 +119,7 @@ describe("WorkerStore", () => {
 
 	describe("pruneStale", () => {
 		it("marks old workers offline", async () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.updateStatus("w1", "idle");
 			// Wait 10ms so lastActivityAt is in the past
@@ -130,7 +130,7 @@ describe("WorkerStore", () => {
 		});
 
 		it("skips already-offline workers", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.updateStatus("w1", "offline");
 			const { pruned } = store.pruneStale(0);
@@ -140,7 +140,7 @@ describe("WorkerStore", () => {
 
 	describe("countOnline", () => {
 		it("counts non-offline workers", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.register({ name: "w2", sessionId: "s2", agentName: "codex" });
 			store.updateStatus("w2", "offline");
@@ -148,7 +148,7 @@ describe("WorkerStore", () => {
 		});
 
 		it("returns 0 when empty", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			expect(store.countOnline()).toBe(0);
 		});
 	});
@@ -157,14 +157,14 @@ describe("WorkerStore", () => {
 		it("graceful fallback to empty", () => {
 			const { writeFileSync } = require("node:fs");
 			writeFileSync(join(tmpDir, "workers.json"), "not json{{{");
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			expect(store.list()).toEqual([]);
 		});
 	});
 
 	describe("touch", () => {
 		it("updates lastHeartbeatAt and lastActivityAt", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			// small delay to ensure lastActivityAt changes
 			const before = new Date();
@@ -177,7 +177,7 @@ describe("WorkerStore", () => {
 		});
 
 		it("accumulates tokenCountTotal and toolCallCount deltas", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.touch("w1", { tokenDelta: 100, toolCallDelta: 1 });
 			expect(store.get("w1")!.tokenCountTotal).toBe(100);
@@ -188,7 +188,7 @@ describe("WorkerStore", () => {
 		});
 
 		it("ignores zero deltas", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.touch("w1", { tokenDelta: 0, toolCallDelta: 0 });
 			expect(store.get("w1")!.tokenCountTotal ?? 0).toBe(0);
@@ -198,14 +198,14 @@ describe("WorkerStore", () => {
 
 	describe("updateMetadata", () => {
 		it("stores pending steer in metadata", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			store.register({ name: "w1", sessionId: "s1", agentName: "gemini" });
 			store.updateMetadata("w1", { pendingSteer: "focus on tests" });
 			expect(store.get("w1")!.metadata.pendingSteer).toBe("focus on tests");
 		});
 
 		it("returns undefined for unknown worker", () => {
-			const store = new WorkerStore(tmpDir);
+			const store = new WorkerStore(tmpDir, "ses-test-1");
 			expect(store.updateMetadata("nope", { key: "val" })).toBeUndefined();
 		});
 	});

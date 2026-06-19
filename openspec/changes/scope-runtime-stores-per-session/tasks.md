@@ -6,7 +6,7 @@
 
 ## 2. Store constructor signature changes
 
-- [ ] 2.1 Add required `sessionId: string` (plus keep optional `rootDir`) to: `AcpTaskStore`, `MailboxManager`, `GovernanceStore`, `WorkerStore` (the 4 session-scoped stores)
+- [x] 2.1 Add required `sessionId: string` (plus keep optional `rootDir`) to: `AcpTaskStore`, `MailboxManager`, `GovernanceStore`, `WorkerStore` (the 4 session-scoped stores)
 - [ ] 2.2 Throw synchronously when `sessionId` is missing/empty on those four stores (no silent global fallback)
 - [ ] 2.3 Leave `SessionNameStore`, `SessionArchiveStore`, and `AcpEventLog` signatures unchanged — they remain global (they catalog/audit sessions themselves)
 - [ ] 2.4 Update each store's `read()`/`write()` to use the new session-scoped path from `getRuntimePaths(this.rootDir, this.sessionId)`

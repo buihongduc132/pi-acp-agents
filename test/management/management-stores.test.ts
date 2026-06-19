@@ -46,7 +46,7 @@ describe("AcpTaskStore", () => {
 	afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
 	it("creates a task", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		const task = store.create({ subject: "Test task", description: "desc" });
 		expect(task.id).toBe("1");
 		expect(task.subject).toBe("Test task");
@@ -54,14 +54,14 @@ describe("AcpTaskStore", () => {
 	});
 
 	it("lists tasks excluding deleted by default", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		store.create({ subject: "Task 1" });
 		store.create({ subject: "Task 2" });
 		expect(store.list()).toHaveLength(2);
 	});
 
 	it("filters by status", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		const t1 = store.create({ subject: "T1" });
 		store.update(t1.id, (t) => { t.status = "completed"; });
 		expect(store.list({ status: "pending" })).toHaveLength(0);
@@ -69,7 +69,7 @@ describe("AcpTaskStore", () => {
 	});
 
 	it("includes deleted when includeDeleted is true", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		const t1 = store.create({ subject: "T1" });
 		store.update(t1.id, (t) => { t.status = "deleted"; });
 		expect(store.list()).toHaveLength(0);
@@ -77,18 +77,18 @@ describe("AcpTaskStore", () => {
 	});
 
 	it("gets task by id", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		const t1 = store.create({ subject: "Find me" });
 		expect(store.get(t1.id)?.subject).toBe("Find me");
 	});
 
 	it("returns undefined for unknown id", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		expect(store.get("nonexistent")).toBeUndefined();
 	});
 
 	it("updates a task", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		const t1 = store.create({ subject: "Original" });
 		const updated = store.update(t1.id, (t) => { t.subject = "Updated"; t.status = "in_progress"; });
 		expect(updated.subject).toBe("Updated");
@@ -96,12 +96,12 @@ describe("AcpTaskStore", () => {
 	});
 
 	it("throws when updating nonexistent task", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		expect(() => store.update("nope", () => {})).toThrow(/not found/);
 	});
 
 	it("clears completed tasks", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		const t1 = store.create({ subject: "Done" });
 		store.create({ subject: "Pending" });
 		store.update(t1.id, (t) => { t.status = "completed"; });
@@ -111,7 +111,7 @@ describe("AcpTaskStore", () => {
 	});
 
 	it("clears all tasks", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		store.create({ subject: "A" });
 		store.create({ subject: "B" });
 		const result = store.clear("all");
@@ -124,12 +124,12 @@ describe("AcpTaskStore", () => {
 		const { join } = require("node:path");
 		md(tmpDir, { recursive: true });
 		wf(join(tmpDir, "tasks.json"), "bad json {{{");
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		expect(store.list()).toHaveLength(0);
 	});
 
 	it("creates task with assignee", () => {
-		const store = new AcpTaskStore(tmpDir);
+		const store = new AcpTaskStore(tmpDir, "ses-test-1");
 		const task = store.create({ subject: "Assigned", assignee: "agent-1" });
 		expect(task.assignee).toBe("agent-1");
 	});

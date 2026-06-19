@@ -18,7 +18,14 @@ interface WorkerPayload {
 const DEFAULT_PAYLOAD: WorkerPayload = { workers: [] };
 
 export class WorkerStore {
-  constructor(private rootDir?: string) {}
+  constructor(
+    private rootDir?: string,
+    private sessionId?: string,
+  ) {
+    if (!sessionId || sessionId.trim() === "") {
+      throw new Error("WorkerStore requires a non-empty sessionId");
+    }
+  }
 
   register(input: { name: string; sessionId: string; agentName: string }): AcpWorkerRecord {
     const payload = this.read();
@@ -141,7 +148,7 @@ export class WorkerStore {
 
   private read(): WorkerPayload {
     try {
-      const paths = ensureRuntimeDir(this.rootDir);
+      const paths = ensureRuntimeDir(this.rootDir, this.sessionId);
       if (!existsSync(paths.workersFile)) return structuredClone(DEFAULT_PAYLOAD);
       return JSON.parse(readFileSync(paths.workersFile, "utf-8")) as WorkerPayload;
     } catch (e) {
@@ -153,7 +160,7 @@ export class WorkerStore {
 
   private write(payload: WorkerPayload): void {
     try {
-      const paths = ensureRuntimeDir(this.rootDir);
+      const paths = ensureRuntimeDir(this.rootDir, this.sessionId);
       writeFileSync(paths.workersFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
     } catch (e) {
       // File read failed — return default payload

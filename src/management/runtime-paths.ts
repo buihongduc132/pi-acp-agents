@@ -13,22 +13,27 @@ export interface AcpRuntimePaths {
   workersFile: string;
 }
 
-export function getRuntimePaths(rootDir?: string): AcpRuntimePaths {
+export function getRuntimePaths(rootDir?: string, sessionId?: string): AcpRuntimePaths {
   const base = rootDir ?? join(homedir(), ".pi", "acp-agents", "runtime");
+  const sessionBase = sessionId ? join(base, sessionId) : base;
   return {
     rootDir: base,
-    tasksFile: join(base, "tasks.json"),
-    mailboxesFile: join(base, "mailboxes.json"),
-    governanceFile: join(base, "governance.json"),
+    tasksFile: join(sessionBase, "tasks.json"),
+    mailboxesFile: join(sessionBase, "mailboxes.json"),
+    governanceFile: join(sessionBase, "governance.json"),
     eventLogFile: join(base, "events.jsonl"),
-    sessionArchiveFile: join(base, "session-archive.json"),
+    sessionArchiveFile: join(sessionBase, "session-archive.json"),
     sessionNameRegistryFile: join(base, "session-name-registry.json"),
-    workersFile: join(base, "workers.json"),
+    workersFile: join(sessionBase, "workers.json"),
   };
 }
 
-export function ensureRuntimeDir(rootDir?: string): AcpRuntimePaths {
-  const paths = getRuntimePaths(rootDir);
+export function ensureRuntimeDir(rootDir?: string, sessionId?: string): AcpRuntimePaths {
+  const paths = getRuntimePaths(rootDir, sessionId);
   safeMkdir(paths.rootDir);
+  if (sessionId) {
+    const sessionBase = join(paths.rootDir, sessionId);
+    safeMkdir(sessionBase);
+  }
   return paths;
 }
