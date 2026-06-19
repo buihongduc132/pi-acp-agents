@@ -9,7 +9,6 @@ import { AcpTaskStore } from "./task-store.js";
 import { MailboxManager } from "./mailbox-manager.js";
 import { GovernanceStore } from "./governance-store.js";
 import { WorkerStore } from "./worker-store.js";
-import { SessionArchiveStore } from "./session-archive-store.js";
 import { migrateLegacyLayout } from "./legacy-migration.js";
 import { ensureRuntimeDir } from "./runtime-paths.js";
 
@@ -18,7 +17,6 @@ export interface SessionStores {
   mailboxManager: MailboxManager;
   governanceStore: GovernanceStore;
   workerStore: WorkerStore;
-  sessionArchiveStore: SessionArchiveStore;
 }
 
 export class SessionStoreFactory {
@@ -47,7 +45,6 @@ export class SessionStoreFactory {
       mailboxManager: new MailboxManager(this.rootDir, sessionId),
       governanceStore: new GovernanceStore(this.rootDir, sessionId),
       workerStore: new WorkerStore(this.rootDir, sessionId),
-      sessionArchiveStore: new SessionArchiveStore(this.rootDir, sessionId),
     };
     this.cache.set(sessionId, stores);
     return stores;

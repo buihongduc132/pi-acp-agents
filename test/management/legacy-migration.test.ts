@@ -31,16 +31,19 @@ describe("migrateLegacyLayout", () => {
 		expect(existsSync(join(tmpDir, "tasks.json"))).toBe(false);
 	});
 
-	it("leaves session-name-registry.json and events.jsonl at root", () => {
+	it("leaves session-name-registry.json, session-archive.json, and events.jsonl at root", () => {
 		writeFileSync(join(tmpDir, "session-name-registry.json"), "{}");
+		writeFileSync(join(tmpDir, "session-archive.json"), "{}");
 		writeFileSync(join(tmpDir, "events.jsonl"), "");
 		writeFileSync(join(tmpDir, "tasks.json"), "{}");
 
 		migrateLegacyLayout(tmpDir);
 
 		expect(existsSync(join(tmpDir, "session-name-registry.json"))).toBe(true);
+		expect(existsSync(join(tmpDir, "session-archive.json"))).toBe(true);
 		expect(existsSync(join(tmpDir, "events.jsonl"))).toBe(true);
 		expect(existsSync(join(tmpDir, "legacy", "session-name-registry.json"))).toBe(false);
+		expect(existsSync(join(tmpDir, "legacy", "session-archive.json"))).toBe(false);
 	});
 
 	it("no-op when no flat files exist (idempotent)", () => {

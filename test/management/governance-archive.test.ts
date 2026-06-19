@@ -119,7 +119,7 @@ describe("SessionArchiveStore", () => {
 	});
 
 	it("stores and retrieves a session", () => {
-		const store = new SessionArchiveStore(tmpDir, "ses-test-1");
+		const store = new SessionArchiveStore(tmpDir);
 		const handle = makeHandle("s1");
 		const archived = store.upsert(handle);
 		expect(archived.sessionId).toBe("s1");
@@ -127,12 +127,12 @@ describe("SessionArchiveStore", () => {
 	});
 
 	it("returns undefined for unknown session", () => {
-		const store = new SessionArchiveStore(tmpDir, "ses-test-1");
+		const store = new SessionArchiveStore(tmpDir);
 		expect(store.get("unknown")).toBeUndefined();
 	});
 
 	it("updates existing session", () => {
-		const store = new SessionArchiveStore(tmpDir, "ses-test-1");
+		const store = new SessionArchiveStore(tmpDir);
 		store.upsert(makeHandle("s1"));
 		const updated = { ...makeHandle("s1"), disposed: true, closeReason: "stale" };
 		store.upsert(updated);
@@ -142,9 +142,9 @@ describe("SessionArchiveStore", () => {
 	});
 
 	it("persists across store instances", () => {
-		const store1 = new SessionArchiveStore(tmpDir, "ses-test-1");
+		const store1 = new SessionArchiveStore(tmpDir);
 		store1.upsert(makeHandle("s1"));
-		const store2 = new SessionArchiveStore(tmpDir, "ses-test-1");
+		const store2 = new SessionArchiveStore(tmpDir);
 		expect(store2.get("s1")).toBeDefined();
 	});
 });

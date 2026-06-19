@@ -106,7 +106,9 @@ export default function (pi: ExtensionAPI) {
   const workerStore = () => getStores().workerStore;
   const mailboxManager = () => getStores().mailboxManager;
   const governanceStore = () => getStores().governanceStore;
-  const sessionArchiveStore = () => getStores().sessionArchiveStore;
+
+  // SessionArchiveStore is GLOBAL (catalogs all sessions) — not session-scoped
+  const sessionArchiveStore = new SessionArchiveStore(runtimePaths.rootDir);
 
   const cb = new AcpCircuitBreaker(
     config.circuitBreakerMaxFailures ?? 3,
@@ -115,7 +117,7 @@ export default function (pi: ExtensionAPI) {
   );
 
   function archiveSession(handle: AcpSessionHandle): AcpArchivedSessionMetadata {
-    return sessionArchiveStore().upsert(handle);
+    return sessionArchiveStore.upsert(handle);
   }
 
   async function closeSession(handle: AcpSessionHandle, closeReason: string, autoClosed = false): Promise<void> {
@@ -140,7 +142,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   function getArchivedSession(sessionId: string): AcpArchivedSessionMetadata | undefined {
-    return sessionArchiveStore().get(sessionId);
+    return sessionArchiveStore.get(sessionId);
   }
 
   function findLiveSessionByName(sessionName: string): AcpSessionHandle | undefined {

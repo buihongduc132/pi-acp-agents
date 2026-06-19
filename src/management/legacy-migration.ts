@@ -17,7 +17,6 @@ const FLAT_FILES = [
   "mailboxes.json",
   "governance.json",
   "workers.json",
-  "session-archive.json",
 ];
 
 /**
@@ -26,7 +25,7 @@ const FLAT_FILES = [
  * Behavior:
  * - If `<root>/legacy/` already exists → no-op (already migrated)
  * - Otherwise: create `legacy/`, write `.migrating` marker, move each flat file via `rename()`, remove marker
- * - Files NOT migrated: `session-name-registry.json`, `events.jsonl` (global, stay at root)
+ * - Files NOT migrated: `session-name-registry.json`, `session-archive.json`, `events.jsonl` (global, stay at root)
  *
  * @returns `{ migrated: string[] }` — list of filenames moved
  */

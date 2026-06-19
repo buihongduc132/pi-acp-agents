@@ -37,14 +37,7 @@ interface AcpArchivedSessionMetadataRecord {
 const DEFAULT_PAYLOAD: ArchivePayload = { sessions: [] };
 
 export class SessionArchiveStore {
-  constructor(
-    private rootDir?: string,
-    private sessionId?: string,
-  ) {
-    if (!sessionId || sessionId.trim() === "") {
-      throw new Error("SessionArchiveStore requires a non-empty sessionId");
-    }
-  }
+  constructor(private rootDir?: string) {}
 
   get(sessionId: string): AcpArchivedSessionMetadata | undefined {
     return this.read().sessions.find((session) => session.sessionId === sessionId);
@@ -64,7 +57,7 @@ export class SessionArchiveStore {
   }
 
   private get filePath(): string {
-    const paths = ensureRuntimeDir(this.rootDir, this.sessionId);
+    const paths = ensureRuntimeDir(this.rootDir);
     return paths.sessionArchiveFile;
   }
 
