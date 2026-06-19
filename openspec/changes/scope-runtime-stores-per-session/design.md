@@ -37,22 +37,21 @@ Stakeholders: any pi session that spawns ACP workers (the entire pi-acp-agents u
   │   ├── tasks.json
   │   ├── mailboxes.json
   │   ├── governance.json
-  │   ├── workers.json
-  │   ├── events.jsonl
-  │   └── session-archive.json   # per-session archived metadata only
+  │   └── workers.json
   ├── ses_def456/
   │   └── ...
   ├── legacy/                     # migrated flat-layout files
   │   ├── tasks.json
   │   └── ...
   ├── session-name-registry.json  # GLOBAL — catalogs all sessions
+  ├── session-archive.json        # GLOBAL — catalogs/archives sessions themselves
   └── events.jsonl                # GLOBAL audit trail (append-only across sessions)
   ```
 
-**Decision 4 — `sessionId` becomes a required constructor param on session-scoped stores; global stores keep current signature.**
-- *Stores that gain `sessionId`*: TaskStore, MailboxManager, GovernanceStore, WorkerStore, SessionArchiveStore.
-- *Stores that stay as-is*: SessionNameStore (global registry), EventLog (global append-only audit).
-- *Why split*: A per-session event log would lose audit value; a per-session name registry is contradictory. Both stay global.
+**Decision 4 — `sessionId` becomes a required constructor param on the 4 session-scoped stores; the 3 global stores keep their current signature.**
+- *Stores that gain `sessionId`* (4): AcpTaskStore, MailboxManager, GovernanceStore, WorkerStore.
+- *Stores that stay as-is* (3): SessionNameStore (global registry), SessionArchiveStore (global session catalog), AcpEventLog (global append-only audit).
+- *Why split*: A per-session event log would lose audit value; a per-session name registry is contradictory; the session-archive catalogs sessions themselves (it is the index, not session-scoped data). All three stay global.
 - *Throw on missing*: Session-scoped stores constructed without `sessionId` throw synchronously — no silent global fallback (the original footgun).
 
 **Decision 5 — Migration runs once at coordinator boot, before any store is opened.**
