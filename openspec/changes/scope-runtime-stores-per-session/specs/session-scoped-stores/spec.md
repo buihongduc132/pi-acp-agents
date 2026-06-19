@@ -1,7 +1,9 @@
 ## ADDED Requirements
 
-### Requirement: Stores partitioned by ACP session
-All runtime store classes (task, mailbox, governance, worker, session-archive, session-name-registry, event-log) SHALL scope their persisted files by the ACP session ID of the caller. Each session SHALL have its own directory subtree. Data written by one session SHALL NOT be visible to another session's store instance.
+### Requirement: Session-scoped stores partitioned by ACP session
+The four session-scoped store classes (task, mailbox, governance, worker) SHALL scope their persisted files by the ACP session ID of the caller. Each session SHALL have its own directory subtree. Data written by one session SHALL NOT be visible to another session's session-scoped store instance.
+
+The three global stores (session-name-registry, session-archive, event-log) SHALL NOT be partitioned by session — they catalog and audit sessions themselves and remain at the runtime root. Partitioning them by session would break cross-session listing and the append-only audit trail.
 
 #### Scenario: Two sessions get isolated task stores
 - **WHEN** session A and session B each instantiate `AcpTaskStore` with their respective session IDs
@@ -22,9 +24,13 @@ The runtime paths helper SHALL derive a per-session base directory from the sess
 - **WHEN** `getRuntimePaths` is called with session ID `ses_abc123`
 - **THEN** `tasksFile` SHALL resolve to `~/.pi/acp-agents/runtime/ses_abc123/tasks.json` (or the equivalent configured root)
 
-#### Scenario: Session ID is mandatory at store construction
-- **WHEN** a store class is constructed without a session ID
+#### Scenario: Session ID is mandatory at session-scoped store construction
+- **WHEN** one of the four session-scoped store classes (`AcpTaskStore`, `MailboxManager`, `GovernanceStore`, `WorkerStore`) is constructed without a session ID
 - **THEN** construction SHALL throw an explicit error (no silent fallback to a global pool)
+
+#### Scenario: Global stores are not session-scoped
+- **WHEN** `SessionNameStore`, `SessionArchiveStore`, or `AcpEventLog` is constructed
+- **THEN** they SHALL NOT require a session ID, SHALL persist at the runtime root (not under a session subdirectory), and SHALL remain visible across all sessions
 
 ### Requirement: Legacy flat layout migration
 On first boot after upgrade, the system SHALL detect legacy flat files at the runtime root (`~/.pi/acp-agents/runtime/tasks.json`, `mailboxes.json`, etc.) and relocate them to a `legacy/` subdirectory. Migration SHALL be non-destructive (move, not delete). Migration SHALL be idempotent — running twice SHALL be a no-op.
