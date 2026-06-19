@@ -71,12 +71,12 @@ Stakeholders: any pi session that spawns ACP workers (the entire pi-acp-agents u
 1. Ship new binary that knows the new layout.
 2. On first coordinator boot in any session, run `migrateLegacyLayout(root)`:
    - If `legacy/` already exists, skip.
-   - Else, for each known flat file (`tasks.json`, `mailboxes.json`, `governance.json`, `workers.json`, `session-archive.json`): if present at root, `rename()` into `legacy/`.
-   - Leave `session-name-registry.json` and `events.jsonl` at root (they stay global).
+   - Else, for each known session-scoped flat file (`tasks.json`, `mailboxes.json`, `governance.json`, `workers.json`): if present at root, `rename()` into `legacy/`.
+   - Leave `session-name-registry.json`, `session-archive.json`, and `events.jsonl` at root (all three are GLOBAL — they catalog/audit sessions themselves, per Decision 2).
 3. Proceed with normal session-scoped store construction.
 4. Rollback: stop new binary, copy `legacy/*.json` back to root, start old binary.
 
 ## Open Questions
 
 - Should `acp_prune` gain a `--sessions` mode that removes whole session dirs past a staleness threshold? (Tentative: yes, but defer to a follow-up change to keep this one focused.)
-- Should session-archive store remain session-scoped or global? Decision 2 above keeps session-archive as session-scoped metadata of that session's own lifecycle — confirm against `acp_session_list` consumer expectations during implementation.
+- RESOLVED: session-archive store stays GLOBAL (per Decision 2 and spec line 6). Confirmed against `acp_session_list`, which must see all sessions — partitioning the archive by session would break cross-session listing.

@@ -13,7 +13,7 @@ let store: AcpTaskStore;
 describe("AcpTaskStore — Enhanced", () => {
 	beforeEach(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "acp-task-enh-"));
-		store = new AcpTaskStore(tmpDir);
+		store = new AcpTaskStore(tmpDir, "ses-test-1");
 	});
 
 	afterEach(() => {
@@ -175,7 +175,9 @@ describe("AcpTaskStore — Enhanced", () => {
 	describe("backward compatibility", () => {
 		it("old records get defaults on read", () => {
 			// Write a task without priority/blocks/metadata fields
-			const taskPath = join(tmpDir, "tasks.json");
+			const { mkdirSync } = require("node:fs");
+			mkdirSync(join(tmpDir, "ses-test-1"), { recursive: true });
+			const taskPath = join(tmpDir, "ses-test-1", "tasks.json");
 			writeFileSync(taskPath, JSON.stringify({
 				nextId: 2,
 				tasks: [{
@@ -188,7 +190,7 @@ describe("AcpTaskStore — Enhanced", () => {
 				}],
 			}));
 
-			const legacyStore = new AcpTaskStore(tmpDir);
+			const legacyStore = new AcpTaskStore(tmpDir, "ses-test-1");
 			const tasks = legacyStore.list();
 			expect(tasks).toHaveLength(1);
 			expect(tasks[0].priority).toBe("normal");

@@ -25,7 +25,14 @@ const DEFAULT_PAYLOAD: MailboxPayload = {
 };
 
 export class MailboxManager {
-  constructor(private rootDir?: string) {}
+  constructor(
+    private rootDir?: string,
+    private sessionId?: string,
+  ) {
+    if (!sessionId || sessionId.trim() === "") {
+      throw new Error("MailboxManager requires a non-empty sessionId");
+    }
+  }
 
   send(input: { from: string; to: string; message: string; kind: MailMessage["kind"] }): MailMessage {
     const payload = this.read();
@@ -70,7 +77,7 @@ export class MailboxManager {
 
   private read(): MailboxPayload {
     try {
-      const paths = ensureRuntimeDir(this.rootDir);
+      const paths = ensureRuntimeDir(this.rootDir, this.sessionId);
       if (!existsSync(paths.mailboxesFile)) {
         return structuredClone(DEFAULT_PAYLOAD);
       }
@@ -84,7 +91,7 @@ export class MailboxManager {
 
   private write(payload: MailboxPayload): void {
     try {
-      const paths = ensureRuntimeDir(this.rootDir);
+      const paths = ensureRuntimeDir(this.rootDir, this.sessionId);
       writeFileSync(paths.mailboxesFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
     } catch (e) {
       // File read failed — return default payload

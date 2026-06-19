@@ -33,7 +33,14 @@ const DEFAULT_PAYLOAD: GovernancePayload = {
 };
 
 export class GovernanceStore {
-  constructor(private rootDir?: string) {}
+  constructor(
+    private rootDir?: string,
+    private sessionId?: string,
+  ) {
+    if (!sessionId || sessionId.trim() === "") {
+      throw new Error("GovernanceStore requires a non-empty sessionId");
+    }
+  }
 
   getPlan(agent: string): PlanApprovalRequest | undefined {
     return this.read().planApprovals[agent];
@@ -99,7 +106,7 @@ export class GovernanceStore {
 
   private read(): GovernancePayload {
     try {
-      const paths = ensureRuntimeDir(this.rootDir);
+      const paths = ensureRuntimeDir(this.rootDir, this.sessionId);
       if (!existsSync(paths.governanceFile)) {
         return structuredClone(DEFAULT_PAYLOAD);
       }
@@ -113,7 +120,7 @@ export class GovernanceStore {
 
   private write(payload: GovernancePayload): void {
     try {
-      const paths = ensureRuntimeDir(this.rootDir);
+      const paths = ensureRuntimeDir(this.rootDir, this.sessionId);
       writeFileSync(paths.governanceFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
     } catch (e) {
       // EACCES or other FS error — silently degrade. Governance is non-critical state.

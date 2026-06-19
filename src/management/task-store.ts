@@ -33,7 +33,14 @@ const DEFAULT_PAYLOAD: AcpTaskStorePayload = {
 };
 
 export class AcpTaskStore {
-  constructor(private rootDir?: string) {}
+  constructor(
+    private rootDir?: string,
+    private sessionId?: string,
+  ) {
+    if (!sessionId || sessionId.trim() === "") {
+      throw new Error("AcpTaskStore requires a non-empty sessionId");
+    }
+  }
 
   list(options?: { status?: AcpTaskStatus; includeDeleted?: boolean }): AcpTaskRecord[] {
     const payload = this.read();
@@ -228,7 +235,7 @@ export class AcpTaskStore {
 
   private read(): AcpTaskStorePayload {
     try {
-      const paths = ensureRuntimeDir(this.rootDir);
+      const paths = ensureRuntimeDir(this.rootDir, this.sessionId);
       if (!existsSync(paths.tasksFile)) {
         return structuredClone(DEFAULT_PAYLOAD);
       }
@@ -249,7 +256,7 @@ export class AcpTaskStore {
 
   private write(payload: AcpTaskStorePayload): void {
     try {
-      const paths = ensureRuntimeDir(this.rootDir);
+      const paths = ensureRuntimeDir(this.rootDir, this.sessionId);
       writeFileSync(paths.tasksFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
     } catch (e) {
       // File read failed — return default payload

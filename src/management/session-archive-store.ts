@@ -58,7 +58,7 @@ export class SessionArchiveStore {
 
   private get filePath(): string {
     const paths = ensureRuntimeDir(this.rootDir);
-    return join(paths.rootDir, "session-archive.json");
+    return paths.sessionArchiveFile;
   }
 
   private read(): ParsedArchivePayload {

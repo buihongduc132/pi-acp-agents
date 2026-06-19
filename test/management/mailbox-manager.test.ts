@@ -10,7 +10,7 @@ describe("MailboxManager", () => {
 
 	beforeEach(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "acp-mailbox-"));
-		mm = new MailboxManager(tmpDir);
+		mm = new MailboxManager(tmpDir, "ses-test-1");
 	});
 
 	afterEach(() => {
@@ -37,7 +37,7 @@ describe("MailboxManager", () => {
 
 		it("persists messages to disk", () => {
 			mm.send({ from: "alice", to: "bob", message: "hello", kind: "dm" });
-			const mailboxFile = join(tmpDir, "mailboxes.json");
+			const mailboxFile = join(tmpDir, "ses-test-1", "mailboxes.json");
 			expect(existsSync(mailboxFile)).toBe(true);
 			const data = JSON.parse(readFileSync(mailboxFile, "utf-8"));
 			expect(data.messages).toHaveLength(1);
@@ -103,7 +103,7 @@ describe("MailboxManager", () => {
 			const mail = mm.send({ from: "alice", to: "bob", message: "hi", kind: "dm" });
 			mm.markRead(mail.id);
 			// Create a new manager to verify persistence
-			const mm2 = new MailboxManager(tmpDir);
+			const mm2 = new MailboxManager(tmpDir, "ses-test-1");
 			const msgs = mm2.listFor("bob");
 			expect(msgs[0].readAt).toBeDefined();
 		});
@@ -135,8 +135,9 @@ describe("MailboxManager", () => {
 
 	describe("edge cases", () => {
 		it("handles corrupted mailbox file gracefully", () => {
-			const { writeFileSync } = require("node:fs");
-			writeFileSync(join(tmpDir, "mailboxes.json"), "not json {{{");
+			const { writeFileSync, mkdirSync } = require("node:fs");
+			mkdirSync(join(tmpDir, "ses-test-1"), { recursive: true });
+			writeFileSync(join(tmpDir, "ses-test-1", "mailboxes.json"), "not json {{{");
 			// Should return empty results
 			expect(mm.listFor("bob")).toHaveLength(0);
 		});

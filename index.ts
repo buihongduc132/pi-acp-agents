@@ -22,6 +22,7 @@ import { AcpTaskStore, type AcpTaskStatus } from "./src/management/task-store.js
 import { WorkerStore } from "./src/management/worker-store.js";
 import { SessionArchiveStore } from "./src/management/session-archive-store.js";
 import { SessionNameStore } from "./src/management/session-name-store.js";
+import { SessionStoreFactory } from "./src/management/session-store-factory.js";
 import { ensureRuntimeDir } from "./src/management/runtime-paths.js";
 import { loadSettings, isToolEnabled, type AcpToolSettings } from "./src/settings/config.js";
 import { configureToolSettings } from "./src/settings/configure-tui.js";
@@ -81,13 +82,33 @@ export default function (pi: ExtensionAPI) {
   const logger = createFileLogger(logsDir);
   const runtimePaths = ensureRuntimeDir(config.runtimeDir);
   const eventLog = new AcpEventLog(runtimePaths.rootDir);
-  const taskStore = new AcpTaskStore(runtimePaths.rootDir);
-  const workerStore = new WorkerStore(runtimePaths.rootDir);
-  const mailboxManager = new MailboxManager(runtimePaths.rootDir);
-  const governanceStore = new GovernanceStore(runtimePaths.rootDir);
-  const sessionArchiveStore = new SessionArchiveStore(runtimePaths.rootDir);
   const sessionNameStore = new SessionNameStore(runtimePaths.rootDir);
-  governanceStore.setModelPolicy(config.modelPolicy ?? {});
+
+  // Session-scoped stores — lazily created per host session ID
+  const storeFactory = new SessionStoreFactory(runtimePaths.rootDir);
+  let hostSessionId: string | undefined;
+
+  // Capture host session ID on session start (fires before any tool call)
+  pi.on("session_start", (_event, ctx) => {
+    hostSessionId = ctx.sessionManager.getSessionId();
+    // Apply governance policy to the session-scoped governance store
+    storeFactory.get(hostSessionId).governanceStore.setModelPolicy(config.modelPolicy ?? {});
+  });
+
+  /** Get session-scoped stores for the current host session. */
+  function getStores() {
+    const sid = hostSessionId ?? process.env.PI_SESSION_ID ?? "default";
+    return storeFactory.get(sid);
+  }
+
+  /** Convenience accessors for closures that need stores without ctx. */
+  const taskStore = () => getStores().taskStore;
+  const workerStore = () => getStores().workerStore;
+  const mailboxManager = () => getStores().mailboxManager;
+  const governanceStore = () => getStores().governanceStore;
+
+  // SessionArchiveStore is GLOBAL (catalogs all sessions) — not session-scoped
+  const sessionArchiveStore = new SessionArchiveStore(runtimePaths.rootDir);
 
   const cb = new AcpCircuitBreaker(
     config.circuitBreakerMaxFailures ?? 3,
@@ -185,7 +206,7 @@ export default function (pi: ExtensionAPI) {
   const heartbeatDeps = {
     resolveWorkerName: (sid: string) => workerSessionMap.get(sid),
     touch: (name: string, deltas?: { tokenDelta?: number; toolCallDelta?: number }) =>
-      workerStore.touch(name, deltas),
+      workerStore().touch(name, deltas),
     logParseError: (entry: { workerName: string; sessionId: string; error: string }) =>
       eventLog.append("heartbeat_parse_error", entry),
   };
@@ -253,12 +274,12 @@ export default function (pi: ExtensionAPI) {
 
   if (workerAutoClaim) {
     const dispatchDeps: WorkerDispatcherDeps = {
-      workerStore: workerStore as unknown as WorkerDispatcherDeps["workerStore"],
-      taskStore: taskStore as unknown as WorkerDispatcherDeps["taskStore"],
+      get workerStore() { return workerStore() as unknown as WorkerDispatcherDeps["workerStore"]; },
+      get taskStore() { return taskStore() as unknown as WorkerDispatcherDeps["taskStore"]; },
       eventLog,
       busySessions,
       getSessionIdForWorker: (workerName: string) => {
-        const worker = workerStore.get(workerName);
+        const worker = workerStore().get(workerName);
         if (!worker) return undefined;
         // Find sessionId from the workerSessionMap by reversing the lookup
         for (const [sid, name] of workerSessionMap.entries()) {
@@ -309,7 +330,7 @@ export default function (pi: ExtensionAPI) {
     configuredAliases: config.agent_aliases ? Object.keys(config.agent_aliases) : [],
     defaultAgent: config.defaultAgent,
     activity: { ...widgetActivity },
-    workers: workerStore.list().map((w) => {
+    workers: workerStore().list().map((w) => {
       const now = Date.now();
       const ageSec = Math.floor((now - new Date(w.lastActivityAt).getTime()) / 1000);
       const derived = deriveWorkerStatus(w);
@@ -710,7 +731,7 @@ ${pr.text}`;
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       config = loadConfig();
-      governanceStore.setModelPolicy(config.modelPolicy ?? {});
+      governanceStore().setModelPolicy(config.modelPolicy ?? {});
       if (params.session_id || params.session_name) {
         let target;
         try {
@@ -844,7 +865,7 @@ ${pr.text}`;
       // Bulk operation
       if (params.task_id === "*") {
         const filter = params.filter ?? "";
-        const updated = taskStore.updateWhere(filter, (t: any) => {
+        const updated = taskStore().updateWhere(filter, (t: any) => {
           if (params.status) t.status = params.status;
           if (params.assignee !== undefined) t.assignee = params.assignee || null;
           if (params.result) t.result = params.result;
@@ -854,7 +875,7 @@ ${pr.text}`;
       }
 
       // Single task
-      const updated = taskStore.update(params.task_id, (t: any) => {
+      const updated = taskStore().update(params.task_id, (t: any) => {
         if (params.status) t.status = params.status;
         if (params.assignee !== undefined) t.assignee = params.assignee || null;
         if (params.result) t.result = params.result;
@@ -892,7 +913,7 @@ ${pr.text}`;
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (params.action === "send") {
         const kind: "dm" | "steer" | "broadcast" = params.to === "*" ? "broadcast" : ((params.kind as "dm" | "steer" | "broadcast" | undefined) ?? "dm");
-        const result = mailboxManager.send({
+        const result = mailboxManager().send({
           from: params.from ?? "user",
           to: params.to ?? "",
           message: params.message ?? "",
@@ -903,11 +924,11 @@ ${pr.text}`;
 
       if (params.action === "list") {
         if (params.recipient) {
-          const messages = mailboxManager.listFor(params.recipient);
+          const messages = mailboxManager().listFor(params.recipient);
           return { content: [textContent(`${messages.length} messages for ${params.recipient}.`)], details: { messages } };
         }
         // List all
-        const messages = mailboxManager.listAll?.() ?? [];
+        const messages = mailboxManager().listAll?.() ?? [];
         return { content: [textContent(`${messages.length} total messages.`)], details: { messages } };
       }
 
@@ -931,7 +952,7 @@ ${pr.text}`;
       deps: Type.Optional(Type.Array(Type.String(), { description: "Task IDs this task depends on" })),
     }),
     async execute(_toolCallId, params) {
-      const task = taskStore.create({ subject: params.subject, description: params.description, assignee: params.assignee, deps: params.deps });
+      const task = taskStore().create({ subject: params.subject, description: params.description, assignee: params.assignee, deps: params.deps });
       eventLog.append("task_create", { taskId: task.id, assignee: task.assignee });
       return { content: [textContent(formatJson(task))], details: task };
     },
@@ -1143,7 +1164,7 @@ ${pr.text}`;
       }
 
       // Check for duplicate name
-      const existing = workerStore.get(name);
+      const existing = workerStore().get(name);
       if (existing) {
         return {
           content: [textContent(`Worker '${name}' already exists`)],
@@ -1166,7 +1187,7 @@ ${pr.text}`;
           if (params.thinking) await adapter.setMode(params.thinking);
           const handle = makeSessionHandle(sessionId, agentName, effectiveCwd, adapter);
           // Register in WorkerStore
-          const worker = workerStore.register({ name, sessionId, agentName });
+          const worker = workerStore().register({ name, sessionId, agentName });
           // Register session → worker mapping for heartbeat consumer
           workerSessionMap.set(sessionId, name);
           // Store adapter for dispatcher access
@@ -1222,7 +1243,7 @@ ${pr.text}`;
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       // Fetch all workers, then filter by derived status if requested
-      const allWorkers = workerStore.list();
+      const allWorkers = workerStore().list();
       const rawFilter = params.filter as string | undefined;
       const workers = rawFilter
         ? allWorkers.filter((w) => {
@@ -1294,7 +1315,7 @@ ${pr.text}`;
       const message = requireString(params.message, "message");
 
       // 4.5: Return error if worker not found
-      const worker = workerStore.get(name);
+      const worker = workerStore().get(name);
       if (!worker) {
         return { content: [textContent(`Worker '${name}' not found`)], details: { error: "worker_not_found", name } };
       }
@@ -1309,7 +1330,7 @@ ${pr.text}`;
         try {
           await adapter.cancel();
           // Cancel succeeded — queue steer for next prompt after worker returns to idle
-          workerStore.updateMetadata(name, { pendingSteer: message });
+          workerStore().updateMetadata(name, { pendingSteer: message });
           eventLog.append("worker_steer_interrupt", { name, sessionId, message });
           refreshWidget(ctx);
           return {
@@ -1318,7 +1339,7 @@ ${pr.text}`;
           };
         } catch (err) {
           // Interrupt failed — queue as next-prompt-prefix with warning
-          workerStore.updateMetadata(name, { pendingSteer: message });
+          workerStore().updateMetadata(name, { pendingSteer: message });
           eventLog.append("worker_steer_queued", { name, sessionId, message, reason: "interrupt_failed" });
           refreshWidget(ctx);
           return {
@@ -1329,7 +1350,7 @@ ${pr.text}`;
       }
 
       // Idle or no adapter — queue as next-prompt-prefix (4.4)
-      workerStore.updateMetadata(name, { pendingSteer: message });
+      workerStore().updateMetadata(name, { pendingSteer: message });
       eventLog.append("worker_steer_queued", { name, sessionId, message, reason: isBusy ? "no_adapter" : "idle" });
       refreshWidget(ctx);
       return { content: [textContent(`Steer message queued for worker '${name}': ${message}`)], details: { name, message, queued: true } };
@@ -1353,9 +1374,9 @@ ${pr.text}`;
       // Determine which workers to shut down
       let targets: string[];
       if (params.all) {
-        targets = workerStore.list().filter((w) => w.status !== "offline").map((w) => w.name);
+        targets = workerStore().list().filter((w) => w.status !== "offline").map((w) => w.name);
       } else if (params.name) {
-        const worker = workerStore.get(params.name);
+        const worker = workerStore().get(params.name);
         if (!worker) {
           return { content: [textContent(`Worker '${params.name}' not found`)], details: { error: "worker_not_found" } };
         }
@@ -1367,7 +1388,7 @@ ${pr.text}`;
       const results: Array<{ name: string; ok: boolean; error?: string }> = [];
 
       for (const name of targets) {
-        const worker = workerStore.get(name);
+        const worker = workerStore().get(name);
         if (!worker) continue;
 
         try {
@@ -1376,11 +1397,11 @@ ${pr.text}`;
             const startTime = Date.now();
             while (worker.currentTaskId && (Date.now() - startTime) < shutdownTimeoutMs) {
               await new Promise((r) => setTimeout(r, 500));
-              const fresh = workerStore.get(name);
+              const fresh = workerStore().get(name);
               if (fresh && !fresh.currentTaskId) break;
             }
             // Check if still busy after timeout
-            const afterWait = workerStore.get(name);
+            const afterWait = workerStore().get(name);
             if (afterWait?.currentTaskId) {
               results.push({ name, ok: false, error: `Shutdown timed out; worker '${name}' still busy. Use acp_worker_kill to force.` });
               continue;
@@ -1398,7 +1419,7 @@ ${pr.text}`;
           busySessions.delete(sessionId);
 
           // Mark worker offline
-          workerStore.updateStatus(name, "offline");
+          workerStore().updateStatus(name, "offline");
 
           // 6.2: Emit worker_shutdown event
           eventLog.append("worker_shutdown", { name, sessionId });
@@ -1430,7 +1451,7 @@ ${pr.text}`;
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const name = requireString(params.name, "name");
-      const worker = workerStore.get(name);
+      const worker = workerStore().get(name);
       if (!worker) {
         return { content: [textContent(`Worker '${name}' not found`)], details: { error: "worker_not_found" } };
       }
@@ -1448,13 +1469,13 @@ ${pr.text}`;
       // Unassign active tasks (set to pending)
       if (worker.currentTaskId) {
         try {
-          taskStore.update(worker.currentTaskId, (t) => { t.status = "pending"; });
+          taskStore().update(worker.currentTaskId, (t) => { t.status = "pending"; });
         } catch { /* ignore */ }
-        workerStore.unassignTask(name);
+        workerStore().unassignTask(name);
       }
 
       // Mark worker offline
-      workerStore.updateStatus(name, "offline");
+      workerStore().updateStatus(name, "offline");
 
       // 6.2: Emit worker_shutdown event
       eventLog.append("worker_shutdown", { name, sessionId, forced: true });
@@ -1473,7 +1494,7 @@ ${pr.text}`;
     promptSnippet: "acp_worker_prune — prune stale workers",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const workers = workerStore.list();
+      const workers = workerStore().list();
       const pruned: string[] = [];
 
       for (const w of workers) {
@@ -1483,12 +1504,12 @@ ${pr.text}`;
           // Unassign active tasks
           if (w.currentTaskId) {
             try {
-              taskStore.update(w.currentTaskId, (t) => { t.status = "pending"; });
+              taskStore().update(w.currentTaskId, (t) => { t.status = "pending"; });
             } catch { /* ignore */ }
-            workerStore.unassignTask(w.name);
+            workerStore().unassignTask(w.name);
           }
           // Mark offline
-          workerStore.updateStatus(w.name, "offline");
+          workerStore().updateStatus(w.name, "offline");
           pruned.push(w.name);
         }
       }
