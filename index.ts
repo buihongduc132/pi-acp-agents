@@ -272,8 +272,8 @@ export default function (pi: ExtensionAPI) {
 
   if (workerAutoClaim) {
     const dispatchDeps: WorkerDispatcherDeps = {
-      workerStore: workerStore() as unknown as WorkerDispatcherDeps["workerStore"],
-      taskStore: taskStore() as unknown as WorkerDispatcherDeps["taskStore"],
+      get workerStore() { return workerStore() as unknown as WorkerDispatcherDeps["workerStore"]; },
+      get taskStore() { return taskStore() as unknown as WorkerDispatcherDeps["taskStore"]; },
       eventLog,
       busySessions,
       getSessionIdForWorker: (workerName: string) => {
