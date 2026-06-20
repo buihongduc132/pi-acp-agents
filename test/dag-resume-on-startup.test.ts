@@ -91,11 +91,13 @@ const { dagExecutorInstances, DagExecutorMock } = vi.hoisted(() => {
 	class DagExecutorMock {
 		execute!: ReturnType<typeof vi.fn>;
 		cancel!: ReturnType<typeof vi.fn>;
+		markStale: ReturnType<typeof vi.fn>;
 		resumeAll: ReturnType<typeof vi.fn>;
 		constructor(options: any) {
 			Object.assign(this, options);
 			this.execute = vi.fn(async () => undefined);
 			this.cancel = vi.fn(async () => ({ completed: 0, aborted: 0, cancelled: 0 }));
+			this.markStale = vi.fn();
 			this.resumeAll = vi.fn(async () => []);
 			dagExecutorInstances.push(this);
 		}

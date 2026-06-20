@@ -160,6 +160,12 @@ export default function (pi: ExtensionAPI) {
         logger,
         eventLog,
       });
+      // Mark stale DAGs before resuming — a DAG with no step transitions
+      // for longer than dagStaleTimeoutMs is transitioned to `stale` and
+      // excluded from resume (specs/dag-stale-detection).
+      const staleTimeoutMs = config.dagStaleTimeoutMs ?? 3_600_000;
+      resumeExecutor.markStale(staleTimeoutMs);
+
       await resumeExecutor.resumeAll();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
