@@ -6,10 +6,11 @@ import { Type } from "typebox";
 import { type AcpWidgetState, createAcpWidget } from "./src/acp-widget.js";
 import { createAdapter } from "./src/adapter-factory.js";
 import { loadConfig } from "./src/config/config.js";
-import type { AcpArchivedSessionMetadata, AcpConfig, AcpPromptResult, AcpSessionHandle, AcpWorkerStatus } from "./src/config/types.js";
+import type { AcpArchivedSessionMetadata, AcpConfig, AcpPromptResult, AcpSessionHandle, AcpWorkerStatus, DagIndexEntry } from "./src/config/types.js";
 import { AgentCoordinator } from "./src/coordination/coordinator.js";
 import { WorkerDispatcher, type WorkerDispatcherDeps } from "./src/coordination/worker-dispatcher.js";
 import { AcpCircuitBreaker } from "./src/core/circuit-breaker.js";
+import { AsyncExecutor } from "./src/core/async-executor.js";
 import { HealthMonitor } from "./src/core/health-monitor.js";
 import { getSessionAutoCloseReason } from "./src/core/session-lifecycle.js";
 import { SessionManager } from "./src/core/session-manager.js";
@@ -24,6 +25,10 @@ import { SessionArchiveStore } from "./src/management/session-archive-store.js";
 import { SessionNameStore } from "./src/management/session-name-store.js";
 import { SessionStoreFactory } from "./src/management/session-store-factory.js";
 import { ensureRuntimeDir } from "./src/management/runtime-paths.js";
+import { DagStore } from "./src/dag/dag-store.js";
+import { DagValidator } from "./src/dag/dag-validator.js";
+import { DagExecutor, type DagCancelSummary } from "./src/dag/dag-executor.js";
+import { TemplateResolver } from "./src/dag/template-resolver.js";
 import { loadSettings, isToolEnabled, type AcpToolSettings } from "./src/settings/config.js";
 import { configureToolSettings } from "./src/settings/configure-tui.js";
 
@@ -115,6 +120,59 @@ export default function (pi: ExtensionAPI) {
     config.circuitBreakerResetMs ?? 60_000,
     config.stallTimeoutMs ?? 300_000,
   );
+
+  // DAG orchestration — file-backed store, validator, template resolver, and
+  // wave-based executor. Wired with existing infrastructure singletons below.
+  // The coordinator and async executor are created lazily per tool call where
+  // they already exist; the DagExecutor consults the coordinator on each step
+  // dispatch, so a placeholder is passed and the real coordinator is supplied
+  // at execute time inside acp_dag_submit.
+  const dagStore = new DagStore({
+    dagDir: runtimePaths.dagDir,
+    dagIndexFile: runtimePaths.dagIndexFile,
+  });
+  const dagValidator = new DagValidator();
+  const dagTemplateResolver = new TemplateResolver({
+    truncateChars: config.dagOutputTruncateChars ?? 8000,
+  });
+
+  // ── Resume-on-startup hook (task 7.3, specs/dag-resume "Resume from last
+  // checkpoint after pi restart") ──
+  // On extension load, discover DAGs persisted in `running` state and resume
+  // each from its last checkpoint. The resume pass is fire-and-forget: the
+  // coordinator/executor construction and resumeAll() run inside an async
+  // IIFE so a failure (e.g. unreadable runtime dir) is caught and logged
+  // rather than thrown into the synchronous extension load path.
+  (async () => {
+    try {
+      const resumeCoordinator = new AgentCoordinator(config, process.cwd(), {
+        isHealthyFn: (name) => cb.isHealthy(name),
+        recordSuccessFn: (name) => cb.recordSuccess(name),
+        recordFailureFn: (name) => cb.recordFailure(name),
+      });
+      const resumeAsyncExecutor = new AsyncExecutor(resumeCoordinator, runtimePaths.rootDir);
+      const resumeExecutor = new DagExecutor({
+        store: dagStore,
+        resolver: dagTemplateResolver,
+        coordinator: resumeCoordinator,
+        asyncExecutor: resumeAsyncExecutor,
+        circuitBreaker: cb,
+        logger,
+        eventLog,
+      });
+      // Mark stale DAGs before resuming — a DAG with no step transitions
+      // for longer than dagStaleTimeoutMs is transitioned to `stale` and
+      // excluded from resume (specs/dag-stale-detection).
+      const staleTimeoutMs = config.dagStaleTimeoutMs ?? 3_600_000;
+      resumeExecutor.markStale(staleTimeoutMs);
+
+      await resumeExecutor.resumeAll();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("DAG resume-on-startup failed", { error: message });
+      eventLog.append("dag_resume_failed", { error: message });
+    }
+  })();
 
   function archiveSession(handle: AcpSessionHandle): AcpArchivedSessionMetadata {
     return sessionArchiveStore.upsert(handle);
@@ -1519,6 +1577,178 @@ ${pr.text}`;
         content: [textContent(pruned.length > 0 ? `Pruned ${pruned.length} stale workers: ${pruned.join(", ")}` : "No stale workers found")],
         details: { pruned, count: pruned.length },
       };
+    },
+  });
+
+  // ── DAG tools ────────────────────────────────────────────────────────
+
+  if (isToolEnabled(toolSettings, "acp_dag_submit")) pi.registerTool({
+    name: "acp_dag_submit",
+    label: "ACP DAG Submit",
+    description: "Submit a complete DAG (directed acyclic graph) of ACP agent tasks in a single call. Validates statically (cycles, dangling refs, duplicate IDs, agent availability, reserved IDs), creates the DAG, starts wave-based background execution, and returns the dagId immediately.",
+    promptSnippet: "acp_dag_submit — submit a DAG of ACP agent tasks and start background execution",
+    parameters: Type.Object({
+      tasks: Type.Array(Type.Object({
+        id: Type.String({ description: "Unique step identifier" }),
+        agent: Type.String({ description: "Agent name (must exist in agent_servers config)" }),
+        prompt: Type.String({ description: "Prompt text. May contain {<step-id>.output}, {<step-id>.status}, {dag.args.<key>} template variables." }),
+        dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Step IDs this step depends on (default: [])" })),
+        gate: Type.Optional(Type.Union([Type.Literal("needs"), Type.Literal("after")], { description: "Gate type for ALL dependencies. needs = success-gate (default), after = completion-gate" })),
+      }), { description: "DAG task definitions" }),
+      args: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Workflow-level arguments for {dag.args.*} template variables" })),
+      options: Type.Optional(Type.Object({
+        failFast: Type.Optional(Type.Boolean({ description: "On failure, skip transitive dependents. Default: true" })),
+        maxRetries: Type.Optional(Type.Number({ description: "Retry attempts per step on failure. Default: 0" })),
+      })),
+      cwd: Type.Optional(Type.String({ description: "Working directory for all DAG steps" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const tasks = params.tasks;
+      if (!Array.isArray(tasks) || tasks.length === 0) {
+        return { content: [textContent("acp_dag_submit requires a non-empty \"tasks\" array.")], details: { error: "no tasks" } };
+      }
+
+      // 1. Static validation against the configured agent set.
+      const agentNames = new Set(Object.keys(config.agent_servers));
+      const validation = dagValidator.validate(tasks, agentNames);
+      if (!validation.valid) {
+        const message = `DAG validation failed: ${validation.errors.join("; ")}`;
+        eventLog.append("dag_submit_rejected", { errors: validation.errors });
+        return { content: [textContent(message)], details: { error: "validation_failed", violations: validation.errors } };
+      }
+
+      // 2. Create the DAG record via the file-backed store.
+      const record = dagStore.create({
+        tasks,
+        args: params.args,
+        options: params.options ?? {},
+      });
+
+      // 3. Build a per-call coordinator + executor with the current cwd and
+      //    circuit breaker, then kick off execution in the background
+      //    (fire-and-forget). The dagId is returned immediately.
+      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd, {
+        isHealthyFn: (name) => cb.isHealthy(name),
+        recordSuccessFn: (name) => cb.recordSuccess(name),
+        recordFailureFn: (name) => cb.recordFailure(name),
+      });
+      // Existing AsyncExecutor singleton wired into the DagExecutor (task
+      // 7.1). The wave loop is driven directly by the executor (design.md
+      // D2 / task 5.3), but the AsyncExecutor is retained on the instance
+      // for integration with the rest of the background-dispatch infra.
+      const asyncExecutor = new AsyncExecutor(coordinator, runtimePaths.rootDir);
+      const dagExecutor = new DagExecutor({
+        store: dagStore,
+        resolver: dagTemplateResolver,
+        coordinator,
+        asyncExecutor,
+        circuitBreaker: cb,
+        logger,
+        eventLog,
+      });
+
+      // Fire-and-forget: errors are captured per step into the DAG state file.
+      dagExecutor.execute(record.dagId).catch((err) => {
+        logger.error(`acp_dag_submit background execution failed for dagId=${record.dagId}`, { error: err instanceof Error ? err.message : String(err) });
+        eventLog.append("dag_execute_failed", { dagId: record.dagId, error: err instanceof Error ? err.message : String(err) });
+      });
+
+      eventLog.append("dag_submitted", { dagId: record.dagId, stepCount: tasks.length });
+      return {
+        content: [textContent(`Submitted DAG "${record.dagId}" with ${tasks.length} step(s). Execution started in the background.`)],
+        details: { dagId: record.dagId, stepCount: tasks.length },
+      };
+    },
+  });
+
+  if (isToolEnabled(toolSettings, "acp_dag_status")) pi.registerTool({
+    name: "acp_dag_status",
+    label: "ACP DAG Status",
+    description: "Query the execution state of a DAG. With a dagId, returns the full DAG state (status, all steps with their statuses, outputs, errors, dependencies, wave progress). Without a dagId, lists all DAGs with summary status.",
+    promptSnippet: "acp_dag_status — get full DAG state or list all DAGs",
+    parameters: Type.Object({
+      dagId: Type.Optional(Type.String({ description: "DAG ID to inspect. Omit to list all DAGs." })),
+    }),
+    async execute(_toolCallId, params): Promise<AgentToolResult<{ dagId?: string; status?: string; currentWave?: number; totalWaves?: number; dags?: DagIndexEntry[]; count?: number; error?: string }>> {
+      const dagId = params.dagId?.trim();
+
+      // Listing mode: no dagId provided → return all DAGs from the index.
+      if (!dagId) {
+        const dags = dagStore.listAll();
+        return {
+          content: [textContent(formatJson({ dags }))],
+          details: { dags, count: dags.length },
+        };
+      }
+
+      // Detail mode: dagId provided → return the full DAG record.
+      const record = dagStore.get(dagId);
+      if (!record) {
+        return {
+          content: [textContent(`DAG "${dagId}" not found`)],
+          details: { error: "not_found", dagId },
+        };
+      }
+
+      return {
+        content: [textContent(formatJson(record))],
+        details: { dagId, status: record.status, currentWave: record.currentWave, totalWaves: record.totalWaves },
+      };
+    },
+  });
+
+  if (isToolEnabled(toolSettings, "acp_dag_cancel")) pi.registerTool({
+    name: "acp_dag_cancel",
+    label: "ACP DAG Cancel",
+    description: "Cancel a running DAG. Aborts in-flight agent sessions, marks all pending/running steps as cancelled, transitions the DAG to cancelled, and returns a summary of the cancellation.",
+    promptSnippet: "acp_dag_cancel — cancel a running DAG and return a cancellation summary",
+    parameters: Type.Object({
+      dagId: Type.String({ description: "DAG ID to cancel" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<{ dagId: string; completed?: number; aborted?: number; cancelled?: number; error?: string }>> {
+      const dagId = (params.dagId ?? "").toString().trim();
+      if (!dagId) {
+        return {
+          content: [textContent("acp_dag_cancel requires a non-empty \"dagId\".")],
+          details: { dagId, error: "no_dagId" },
+        };
+      }
+
+      // Build a per-call coordinator + executor (same wiring as
+      // acp_dag_submit). DagExecutor.cancel() reads the persisted step states
+      // from the DagStore to tally the summary and abort in-flight sessions.
+      const coordinator = new AgentCoordinator(config, ctx.cwd, {
+        isHealthyFn: (name) => cb.isHealthy(name),
+        recordSuccessFn: (name) => cb.recordSuccess(name),
+        recordFailureFn: (name) => cb.recordFailure(name),
+      });
+      const asyncExecutor = new AsyncExecutor(coordinator, runtimePaths.rootDir);
+      const dagExecutor = new DagExecutor({
+        store: dagStore,
+        resolver: dagTemplateResolver,
+        coordinator,
+        asyncExecutor,
+        circuitBreaker: cb,
+        logger,
+        eventLog,
+      });
+
+      try {
+        const summary: DagCancelSummary = await dagExecutor.cancel(dagId);
+        eventLog.append("dag_cancelled", { dagId, ...summary });
+        return {
+          content: [textContent(formatJson({ dagId, ...summary }))],
+          details: { dagId, ...summary },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error(`acp_dag_cancel failed for dagId=${dagId}`, { error: message });
+        eventLog.append("dag_cancel_failed", { dagId, error: message });
+        return {
+          content: [textContent(message)],
+          details: { dagId, error: "cancel_failed" },
+        };
+      }
     },
   });
 

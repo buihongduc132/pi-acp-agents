@@ -152,6 +152,78 @@ Friendly session names are globally unique across ACP sessions, immutable once a
 
 **Compatibility aliases:** `/acp-doctor`, `/acp-config`
 
+### DAG Delegation
+
+Submit a complete DAG (directed acyclic graph) of ACP agent tasks in a single call. The DAG executor validates statically (cycles, dangling refs, duplicate IDs, agent availability), persists state to disk, executes in topological wave-order, and resumes automatically after pi restart.
+
+| Tool              | Description                                                            |
+| ----------------- | --------------------------------------------------------------------- |
+| `acp_dag_submit`  | Submit a DAG of tasks; validates, persists, starts background execution, returns `dagId` immediately |
+| `acp_dag_status`  | Get full DAG state by `dagId`, or list all DAGs when called without `dagId` |
+| `acp_dag_cancel`  | Cancel a running DAG; transitions to `cancelled`, prevents further dispatch |
+
+#### Submission JSON Shape
+
+```json
+{
+  "tasks": [
+    {
+      "id": "analyze",
+      "agent": "gemini",
+      "prompt": "Analyze the codebase for security issues"
+    },
+    {
+      "id": "fix",
+      "agent": "claude",
+      "prompt": "Fix the issues found: {analyze.output}",
+      "dependsOn": ["analyze"]
+    },
+    {
+      "id": "verify",
+      "agent": "gemini",
+      "prompt": "Verify the fixes: {fix.output}",
+      "dependsOn": ["fix"],
+      "gate": "after"
+    }
+  ],
+  "args": { "project": "my-app" },
+  "options": { "failFast": true, "maxRetries": 0 },
+  "cwd": "/path/to/project"
+}
+```
+
+#### Template Variable Syntax
+
+Step prompts support template variables that are resolved from upstream step outputs at dispatch time:
+
+| Variable | Resolves To |
+| -------- | ----------- |
+| `{<step-id>.output}` | Output text of the referenced step (truncated to `dagOutputTruncateChars`) |
+| `{<step-id>.status}` | Terminal status of the referenced step (`completed`, `failed`, `skipped`, `cancelled`) |
+| `{dag.args.<key>}` | Workflow-level argument from the `args` object passed at submission |
+
+Unresolvable variables (e.g. referencing a step that doesn't exist or hasn't completed) cause the step to fail at dispatch time.
+
+#### Gate Type Semantics
+
+The `gate` field controls when a step's dependencies are considered satisfied:
+
+| Gate | Behavior |
+| ---- | -------- |
+| `needs` (default) | **Success-gate.** All dependencies must complete successfully (`completed`). A failed dependency blocks dispatch and triggers `failFast` skip propagation to transitive dependents. |
+| `after` | **Completion-gate.** Dependencies only need to reach a terminal state (`completed`, `failed`, `skipped`, `cancelled`). Used for verification/cleanup steps that should run regardless of upstream success. |
+
+#### Config Options
+
+| Option | Type | Default | Description |
+| ------ | ---- | ------- | ----------- |
+| `dagStaleTimeoutMs` | `number` | `3_600_000` (1 hour) | A DAG with no step state transitions for this duration is marked `stale` |
+| `dagOutputTruncateChars` | `number` | `8000` | Maximum chars of a step output injected into downstream prompts before truncation |
+
+#### Deferred Plans
+
+The DAG executor persists all state to disk (`<runtimeDir>/dag/`). On pi restart, the `resumeAll()` hook discovers DAGs in `running` state and resumes from the last checkpoint — completed steps are not re-executed, running steps are retried. This enables fault-tolerant multi-step workflows that survive process restarts.
+
 ---
 
 ## Architecture

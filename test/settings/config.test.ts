@@ -67,7 +67,7 @@ describe("ACP tool settings — config", () => {
 	// ── 1. Default config has all tools enabled ──────────
 
 	it("DEFAULT_SETTINGS has all tools enabled", () => {
-		expect(ACP_TOOL_NAMES).toHaveLength(39);
+		expect(ACP_TOOL_NAMES).toHaveLength(42);
 		for (const name of ACP_TOOL_NAMES) {
 			expect(DEFAULT_SETTINGS.tools[name]).toBeDefined();
 			expect(DEFAULT_SETTINGS.tools[name].enabled).toBe(true);
@@ -92,6 +92,9 @@ describe("ACP tool settings — config", () => {
 			"acp_worker_shutdown",
 			"acp_worker_kill",
 			"acp_worker_prune",
+			"acp_dag_submit",
+			"acp_dag_status",
+			"acp_dag_cancel",
 		];
 		expect([...ACP_TOOL_NAMES].sort()).toEqual([...expected].sort());
 	});

@@ -51,6 +51,12 @@ describe("getRuntimePaths", () => {
 		// But global paths still match
 		expect(p1.sessionNameRegistryFile).toBe(p2.sessionNameRegistryFile);
 	});
+
+	it("exposes dagDir and dagIndexFile under rootDir", () => {
+		const paths = getRuntimePaths(tmpDir);
+		expect(paths.dagDir).toBe(join(tmpDir, "dag"));
+		expect(paths.dagIndexFile).toBe(join(tmpDir, "dag", "dag-index.json"));
+	});
 });
 
 describe("ensureRuntimeDir", () => {

@@ -27,6 +27,8 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 		governanceFile: "/mock/runtime/governance.json",
 		eventLogFile: "/mock/runtime/events.jsonl",
 		sessionArchiveFile: "/mock/runtime/session-archive.json",
+		dagDir: "/mock/runtime/dag",
+		dagIndexFile: "/mock/runtime/dag/dag-index.json",
 	}),
 }));
 vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }), createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
@@ -34,6 +36,10 @@ vi.mock("../src/core/circuit-breaker.js", () => ({ AcpCircuitBreaker: vi.fn() })
 vi.mock("../src/adapter-factory.js", () => ({ createAdapter: vi.fn() }));
 vi.mock("../src/coordination/coordinator.js", () => ({ AgentCoordinator: vi.fn() }));
 vi.mock("../src/acp-widget.js", () => ({ createAcpWidget: () => () => ({ render: vi.fn() }) }));
+vi.mock("../src/dag/dag-store.js", () => ({ DagStore: vi.fn() }));
+vi.mock("../src/dag/dag-validator.js", () => ({ DagValidator: vi.fn() }));
+vi.mock("../src/dag/dag-executor.js", () => ({ DagExecutor: vi.fn() }));
+vi.mock("../src/dag/template-resolver.js", () => ({ TemplateResolver: vi.fn() }));
 
 import main from "../index.js";
 import { loadConfig } from "../src/config/config.js";

@@ -28,6 +28,8 @@ export const DEFAULT_CONFIG: AcpConfig = {
 	workerShutdownTimeoutMs: 30_000,
 	workerOnlineMs: 60_000,
 	workerStaleMs: 60_000,
+	dagStaleTimeoutMs: 3_600_000, // 1 hour default DAG stale timeout
+	dagOutputTruncateChars: 8_000, // default truncation limit for injected step outputs
 	modelPolicy: {
 		allowedModels: [],
 		blockedModels: [],
@@ -132,6 +134,11 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 			DEFAULT_CONFIG.circuitBreakerMaxFailures,
 		circuitBreakerResetMs:
 			partial.circuitBreakerResetMs ?? DEFAULT_CONFIG.circuitBreakerResetMs,
+		dagStaleTimeoutMs:
+			partial.dagStaleTimeoutMs ?? DEFAULT_CONFIG.dagStaleTimeoutMs,
+		dagOutputTruncateChars:
+			partial.dagOutputTruncateChars ??
+			DEFAULT_CONFIG.dagOutputTruncateChars,
 		modelPolicy: {
 			...DEFAULT_CONFIG.modelPolicy,
 			...partial.modelPolicy,
@@ -159,6 +166,8 @@ function validateNumericFields(resolved: AcpConfig): void {
 		["staleTimeoutMs", resolved.staleTimeoutMs],
 		["healthCheckIntervalMs", resolved.healthCheckIntervalMs],
 		["circuitBreakerResetMs", resolved.circuitBreakerResetMs],
+		["dagStaleTimeoutMs", resolved.dagStaleTimeoutMs],
+		["dagOutputTruncateChars", resolved.dagOutputTruncateChars],
 	];
 	for (const [field, val] of numericFields) {
 		if (val !== undefined && val < 0) {
