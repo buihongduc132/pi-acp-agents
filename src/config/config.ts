@@ -166,6 +166,8 @@ function validateNumericFields(resolved: AcpConfig): void {
 		["staleTimeoutMs", resolved.staleTimeoutMs],
 		["healthCheckIntervalMs", resolved.healthCheckIntervalMs],
 		["circuitBreakerResetMs", resolved.circuitBreakerResetMs],
+		["dagStaleTimeoutMs", resolved.dagStaleTimeoutMs],
+		["dagOutputTruncateChars", resolved.dagOutputTruncateChars],
 	];
 	for (const [field, val] of numericFields) {
 		if (val !== undefined && val < 0) {

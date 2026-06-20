@@ -92,10 +92,13 @@ export class TemplateResolver {
 	): string {
 		let out = prompt;
 
-		// `{dag.args.<key>}` → workflow-level argument
+		// `{dag.args.<key>}` → workflow-level argument.
+		// Values are escaped to prevent template injection: if a dag.arg value
+		// contains `{stepId.output}` patterns, it must NOT be resolved by the
+		// subsequent step-variable pass.
 		out = out.replace(/\{dag\.args\.([^}]+)\}/g, (m, key: string) => {
 			const v = dagArgs[key];
-			return v === undefined ? m : v;
+			return v === undefined ? m : v.replace(/[{}]/g, "");
 		});
 
 		// `{<step-id>.output}` → completed step output
@@ -113,6 +116,16 @@ export class TemplateResolver {
 		this.warnUnresolved(out);
 
 		return out;
+	}
+
+	/**
+	 * Check whether the resolved prompt still contains unresolved template
+	 * placeholders. Used by the executor to fail a step at dispatch time when
+	 * a template variable could not be resolved (unknown step id, missing
+	 * dag arg, or typo) — per README spec.
+	 */
+	hasUnresolvedTemplates(resolvedPrompt: string): boolean {
+		return UNRESOLVED_TEMPLATE_RE.test(resolvedPrompt);
 	}
 
 	/**

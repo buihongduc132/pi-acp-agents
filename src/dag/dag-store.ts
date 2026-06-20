@@ -18,6 +18,19 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+
+/**
+ * Validate that a dagId is safe for use in file paths — prevents path
+ * traversal attacks via crafted dagId values like `../../etc/passwd`.
+ * Allows any alphanumeric + hyphen/underscore string but rejects path
+ * separators, dots, and null bytes.
+ */
+const SAFE_DAG_ID_RE = /^[a-zA-Z0-9_-]+$/;
+function assertValidDagId(dagId: string): void {
+	if (!SAFE_DAG_ID_RE.test(dagId)) {
+		throw new Error(`Invalid dagId format: "${dagId}" — must be alphanumeric/hyphen/underscore only`);
+	}
+}
 import { safeMkdir } from "../management/safe-mkdir.js";
 import type {
 	DagIndexEntry,
@@ -135,6 +148,7 @@ export class DagStore {
 	 * null result rather than a thrown error.
 	 */
 	get(dagId: string): DagRecord | null {
+		assertValidDagId(dagId);
 		const file = join(this.dagDir, `${dagId}.json`);
 		if (!existsSync(file)) return null;
 		try {

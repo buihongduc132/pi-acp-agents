@@ -417,6 +417,23 @@ export class DagExecutor {
 				statuses,
 				dagArgs,
 			);
+
+			// Fail the step if template variables remain unresolved (unknown
+			// step id, missing dag arg, or typo) — per README spec.
+			if (this.resolver.hasUnresolvedTemplates(resolvedPrompt)) {
+				const failedStep = this.store.updateStep(dagId, step.id, (s) => ({
+					...s,
+					status: "failed" as const,
+					output: null,
+					error: `Unresolved template variable in prompt: ${resolvedPrompt.match(/\{[^}]+\}/g)?.join(", ")}`,
+					completedAt: new Date().toISOString(),
+				}));
+				this.logStepEvent(dagId, step, "failed", 0);
+				return Promise.resolve(
+					failedStep ?? { ...step, status: "failed" as const, output: null },
+				);
+			}
+
 			return this.dispatchStep(dagId, step, resolvedPrompt, {
 				maxRetries: record.options?.maxRetries ?? 0,
 			});
@@ -628,7 +645,7 @@ export class DagExecutor {
 			const currentRetries = step.retryCount ?? 0;
 			if (maxRetries > 0 && currentRetries < maxRetries) {
 				const retriedStep = this.recordRetry(dagId, step, currentRetries);
-				return this.dispatchStep(dagId, retriedStep, resolvedPrompt, {
+				return await this.dispatchStep(dagId, retriedStep, resolvedPrompt, {
 					maxRetries,
 				});
 			}
