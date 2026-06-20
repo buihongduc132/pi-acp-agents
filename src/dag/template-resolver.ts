@@ -90,32 +90,31 @@ export class TemplateResolver {
 		stepStatuses: Record<string, string>,
 		dagArgs: Record<string, string>,
 	): string {
-		let out = prompt;
-
-		// `{dag.args.<key>}` → workflow-level argument.
-		// Values are escaped to prevent template injection: if a dag.arg value
-		// contains `{stepId.output}` patterns, it must NOT be resolved by the
-		// subsequent step-variable pass.
-		out = out.replace(/\{dag\.args\.([^}]+)\}/g, (m, key: string) => {
-			const v = dagArgs[key];
-			return v === undefined ? m : v.replace(/[{}]/g, "");
+		// Single-pass resolution prevents template injection: by resolving all
+		// three variable types in one regex pass, dag.args values containing
+		// `{stepId.output}` patterns are inserted as raw text and never
+		// re-processed by a subsequent pass.
+		const TEMPLATE_RE = /\{(dag\.args\.[^}]+|[a-zA-Z0-9_-]+\.(?:output|status))\}/g;
+		const result = prompt.replace(TEMPLATE_RE, (m, expr: string) => {
+			if (expr.startsWith("dag.args.")) {
+				const key = expr.slice("dag.args.".length);
+				const v = dagArgs[key];
+				return v === undefined ? m : v;
+			}
+			const dotIdx = expr.lastIndexOf(".");
+			const id = expr.slice(0, dotIdx);
+			const type = expr.slice(dotIdx + 1);
+			if (type === "output") {
+				const v = stepOutputs[id];
+				return v === undefined ? m : this.truncate(v);
+			} else {
+				const v = stepStatuses[id];
+				return v === undefined ? m : v;
+			}
 		});
 
-		// `{<step-id>.output}` → completed step output
-		out = out.replace(/\{([a-zA-Z0-9_-]+)\.output\}/g, (m, id: string) => {
-			const v = stepOutputs[id];
-			return v === undefined ? m : this.truncate(v);
-		});
-
-		// `{<step-id>.status}` → step lifecycle status
-		out = out.replace(/\{([a-zA-Z0-9_-]+)\.status\}/g, (m, id: string) => {
-			const v = stepStatuses[id];
-			return v === undefined ? m : v;
-		});
-
-		this.warnUnresolved(out);
-
-		return out;
+		this.warnUnresolved(result);
+		return result;
 	}
 
 	/**

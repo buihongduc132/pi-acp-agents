@@ -88,6 +88,9 @@ vi.mock("../src/dag/template-resolver.js", () => ({ TemplateResolver: vi.fn() })
 // mutable so individual tests can force rejection.
 const { dagExecutorInstances, DagExecutorMock } = vi.hoisted(() => {
 	const dagExecutorInstances: any[] = [];
+	// Module-level flag — setupMocks sets this before main() constructs instances.
+	let resumeAllShouldReject = false;
+
 	class DagExecutorMock {
 		execute!: ReturnType<typeof vi.fn>;
 		cancel!: ReturnType<typeof vi.fn>;
@@ -98,10 +101,16 @@ const { dagExecutorInstances, DagExecutorMock } = vi.hoisted(() => {
 			this.execute = vi.fn(async () => undefined);
 			this.cancel = vi.fn(async () => ({ completed: 0, aborted: 0, cancelled: 0 }));
 			this.markStale = vi.fn();
-			this.resumeAll = vi.fn(async () => []);
+			// Each instance gets its own resumeAll mock, respecting the
+			// rejection flag set by setupMocks({ resumeAllRejects: true }).
+			this.resumeAll = resumeAllShouldReject
+				? vi.fn(async () => { throw new Error("disk corruption"); })
+				: vi.fn(async () => []);
 			dagExecutorInstances.push(this);
 		}
 	}
+	// Expose flag setter for setupMocks
+	(DagExecutorMock as any)._setResumeAllRejects = (v: boolean) => { resumeAllShouldReject = v; };
 	return { dagExecutorInstances, DagExecutorMock };
 });
 vi.mock("../src/dag/dag-executor.js", () => ({ DagExecutor: DagExecutorMock }));
@@ -162,14 +171,9 @@ function setupMocks(overrides: { resumeAllRejects?: boolean } = {}) {
 
 	// Force any subsequently constructed DagExecutor's resumeAll to reject.
 	if (overrides.resumeAllRejects) {
-		const Orig = DagExecutorMock;
-		// Wrap by monkey-patching the prototype resumeAll via a class subclass
-		// is not possible post-mock; instead patch the prototype directly.
-		(Orig.prototype as any).resumeAll = vi.fn(async () => {
-			throw new Error("disk corruption");
-		});
+		(DagExecutorMock as any)._setResumeAllRejects(true);
 	} else {
-		(DagExecutorMock.prototype as any).resumeAll = vi.fn(async () => []);
+		(DagExecutorMock as any)._setResumeAllRejects(false);
 	}
 }
 
