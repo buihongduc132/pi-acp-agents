@@ -64,6 +64,8 @@ export interface TemplateResolverOptions {
 /** Regex for known template patterns only — used by hasUnresolvedTemplates
  * to avoid false positives on legitimate braces in dag.args values. */
 const TEMPLATE_PATTERN_RE = /\{(dag\.args\.[^}]+|[a-zA-Z0-9_-]+\.(?:output|status))\}/g;
+/** Non-global version for .test() — avoids /g lastIndex statefulness. */
+const TEMPLATE_PATTERN_RE_NON_GLOBAL = /\{(dag\.args\.[^}]+|[a-zA-Z0-9_-]+\.(?:output|status))\}/;
 
 export class TemplateResolver {
 	/** Configured truncation limit for injected step outputs. */
@@ -126,7 +128,7 @@ export class TemplateResolver {
 	 * dag arg, or typo) — per README spec.
 	 */
 	hasUnresolvedTemplates(resolvedPrompt: string): boolean {
-		return TEMPLATE_PATTERN_RE.test(resolvedPrompt);
+		return TEMPLATE_PATTERN_RE_NON_GLOBAL.test(resolvedPrompt);
 	}
 
 	/**
