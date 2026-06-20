@@ -61,7 +61,9 @@ export interface TemplateResolverOptions {
 }
 
 /** Regex matching any leftover `{...}` template placeholder. */
-const UNRESOLVED_TEMPLATE_RE = /\{[^}]+\}/g;
+/** Regex for known template patterns only — used by hasUnresolvedTemplates
+ * to avoid false positives on legitimate braces in dag.args values. */
+const TEMPLATE_PATTERN_RE = /\{(dag\.args\.[^}]+|[a-zA-Z0-9_-]+\.(?:output|status))\}/g;
 
 export class TemplateResolver {
 	/** Configured truncation limit for injected step outputs. */
@@ -124,7 +126,7 @@ export class TemplateResolver {
 	 * dag arg, or typo) — per README spec.
 	 */
 	hasUnresolvedTemplates(resolvedPrompt: string): boolean {
-		return UNRESOLVED_TEMPLATE_RE.test(resolvedPrompt);
+		return TEMPLATE_PATTERN_RE.test(resolvedPrompt);
 	}
 
 	/**
@@ -134,7 +136,7 @@ export class TemplateResolver {
 	 * value was unavailable (unknown step id, missing dag arg, or a typo).
 	 */
 	private warnUnresolved(resolved: string): void {
-		const matches = resolved.match(UNRESOLVED_TEMPLATE_RE);
+		const matches = resolved.match(TEMPLATE_PATTERN_RE);
 		if (!matches) {
 			return;
 		}
