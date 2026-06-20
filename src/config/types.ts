@@ -62,6 +62,10 @@ export interface AcpConfig {
 	agent_aliases?: Record<string, AcpAliasConfig>;
 	/** Timeout for race strategy in ms (default: 30_000 = 30s) */
 	raceTimeoutMs?: number;
+	/** DAG stale timeout in ms — a DAG with no step transitions for this long is marked `stale` (default: 3_600_000 = 1 hour). */
+	dagStaleTimeoutMs?: number;
+	/** Maximum chars of a step output injected into downstream prompts before truncation (default: 8000). */
+	dagOutputTruncateChars?: number;
 	runtimeDir?: string;
 	modelPolicy?: {
 		allowedModels?: string[];
@@ -200,4 +204,96 @@ export interface Logger {
 	info(msg: string, data?: unknown): void;
 	error(msg: string, data?: unknown): void;
 	debug(msg: string, data?: unknown): void;
+}
+
+// --- DAG delegation types (acp-dag-delegation) ---
+
+/**
+ * A single declarative task within a submitted DAG.
+ *
+ * Mirrors the `acp_dag_submit` task shape from design.md (D8).
+ */
+export interface DagTaskDefinition {
+	/** Unique step identifier (must not be a reserved word: dag, step, agent). */
+	id: string;
+	/** Agent name; must exist in `agent_servers` config. */
+	agent: string;
+	/** Prompt text; may contain `{<id>.output}`, `{<id>.status}`, `{dag.args.<key>}` template vars. */
+	prompt: string;
+	/** Step IDs this step depends on. Default: []. */
+	dependsOn?: string[];
+	/** Gate type applied to ALL dependencies. Default: "needs". */
+	gate?: "needs" | "after";
+}
+
+/** Lifecycle status for a DAG step. */
+export type DagStepStatus =
+	| "pending"
+	| "running"
+	| "completed"
+	| "failed"
+	| "skipped"
+	| "cancelled";
+
+/** Lifecycle status for a DAG as a whole. */
+export type DagStatus =
+	| "pending"
+	| "running"
+	| "completed"
+	| "failed"
+	| "cancelled"
+	| "stale";
+
+/** Runtime execution state for a single DAG step. */
+export interface DagStepRecord {
+	id: string;
+	agent: string;
+	prompt: string;
+	dependsOn: string[];
+	gate: "needs" | "after";
+	status: DagStepStatus;
+	/** Text result on success; null/undefined otherwise. */
+	output?: string | null;
+	/** Error message on failure. */
+	error?: string;
+	startedAt?: string;
+	completedAt?: string;
+	durationMs?: number;
+	/** Number of retries already attempted for this step. */
+	retryCount?: number;
+}
+
+/** DAG-level submission options. */
+export interface DagOptions {
+	/** Default: true. */
+	failFast?: boolean;
+	/** Default: 0. */
+	maxRetries?: number;
+}
+
+/** Full file-backed DAG record persisted to `~/.pi/acp-agents/dag/<dagId>.json`. */
+export interface DagRecord {
+	dagId: string;
+	tasks: DagTaskDefinition[];
+	args?: Record<string, string>;
+	options?: DagOptions;
+	status: DagStatus;
+	steps: Record<string, DagStepRecord>;
+	currentWave: number;
+	totalWaves: number;
+	createdAt: string;
+	updatedAt: string;
+	completedAt?: string;
+}
+
+/** Summary entry stored in `~/.pi/acp-agents/dag/dag-index.json`. */
+export interface DagIndexEntry {
+	dagId: string;
+	status: DagStatus;
+	totalSteps: number;
+	completedSteps: number;
+	failedSteps: number;
+	createdAt: string;
+	updatedAt: string;
+	completedAt?: string;
 }

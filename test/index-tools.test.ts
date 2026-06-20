@@ -40,7 +40,7 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 		rootDir: "/mock/runtime", tasksFile: "/mock/runtime/tasks.json",
 		mailboxesFile: "/mock/runtime/mailboxes.json", governanceFile: "/mock/runtime/governance.json",
 		eventLogFile: "/mock/runtime/events.jsonl", sessionArchiveFile: "/mock/runtime/session-archive.json",
-		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json",
+		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json", dagDir: "/mock/runtime/dag", dagIndexFile: "/mock/runtime/dag/dag-index.json",
 	}),
 }));
 vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }), createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
@@ -49,6 +49,10 @@ vi.mock("../src/core/health-monitor.js", () => ({ HealthMonitor: vi.fn() }));
 vi.mock("../src/adapter-factory.js", () => ({ createAdapter: vi.fn() }));
 vi.mock("../src/coordination/coordinator.js", () => ({ AgentCoordinator: vi.fn() }));
 vi.mock("../src/acp-widget.js", () => ({ createAcpWidget: () => () => ({ render: vi.fn() }) }));
+vi.mock("../src/dag/dag-store.js", () => ({ DagStore: vi.fn() }));
+vi.mock("../src/dag/dag-validator.js", () => ({ DagValidator: vi.fn() }));
+vi.mock("../src/dag/dag-executor.js", () => ({ DagExecutor: vi.fn() }));
+vi.mock("../src/dag/template-resolver.js", () => ({ TemplateResolver: vi.fn() }));
 
 import main from "../index.js";
 import { loadConfig } from "../src/config/config.js";
@@ -128,7 +132,7 @@ describe("ACP Extension Tools", () => {
 		return h;
 	}
 
-it("registers 13 tools", () => { expect(tools.size).toBe(13); });
+it("registers 16 tools", () => { expect(tools.size).toBe(16); });
 
 	it("acp_status overall", async () => { m.sm.size = 1; m.sm.list.mockReturnValue([mkSession("s1")]); const r = await exec("acp_status", {}); expect(r.content[0].text).toContain("Agent Servers: 2 configured"); });
 	it("acp_status specific", async () => { m.sm.get.mockReturnValue(mkSession("s1")); const r = await exec("acp_status", { session_id: "s1" }); expect(r.content[0].text).toContain("Session: s1"); });

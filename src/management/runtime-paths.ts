@@ -11,6 +11,10 @@ export interface AcpRuntimePaths {
   sessionArchiveFile: string;
   sessionNameRegistryFile: string;
   workersFile: string;
+  /** Directory holding DAG state files (`<dagId>.json` + `dag-index.json`). */
+  dagDir: string;
+  /** Index file tracking all DAGs with summary status. */
+  dagIndexFile: string;
 }
 
 export function getRuntimePaths(rootDir?: string, sessionId?: string): AcpRuntimePaths {
@@ -25,6 +29,8 @@ export function getRuntimePaths(rootDir?: string, sessionId?: string): AcpRuntim
     sessionArchiveFile: join(base, "session-archive.json"),
     sessionNameRegistryFile: join(base, "session-name-registry.json"),
     workersFile: join(sessionBase, "workers.json"),
+    dagDir: join(base, "dag"),
+    dagIndexFile: join(base, "dag", "dag-index.json"),
   };
 }
 

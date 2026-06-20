@@ -58,6 +58,9 @@ export const ACP_TOOL_NAMES = [
 	"acp_worker_shutdown",
 	"acp_worker_kill",
 	"acp_worker_prune",
+	"acp_dag_submit",
+	"acp_dag_status",
+	"acp_dag_cancel",
 ] as const;
 
 export type AcpToolName = (typeof ACP_TOOL_NAMES)[number];

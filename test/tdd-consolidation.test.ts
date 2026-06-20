@@ -93,7 +93,7 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 		governanceFile: "/mock/runtime/governance.json",
 		eventLogFile: "/mock/runtime/events.jsonl",
 		sessionArchiveFile: "/mock/runtime/session-archive.json",
-		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json",
+		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json", dagDir: "/mock/runtime/dag", dagIndexFile: "/mock/runtime/dag/dag-index.json",
 	}),
 }));
 vi.mock("../src/logger.js", () => ({
@@ -108,6 +108,10 @@ vi.mock("../src/coordination/coordinator.js", () => ({ AgentCoordinator: vi.fn()
 vi.mock("../src/acp-widget.js", () => ({
 	createAcpWidget: () => () => ({ render: vi.fn() }),
 }));
+vi.mock("../src/dag/dag-store.js", () => ({ DagStore: vi.fn() }));
+vi.mock("../src/dag/dag-validator.js", () => ({ DagValidator: vi.fn() }));
+vi.mock("../src/dag/dag-executor.js", () => ({ DagExecutor: vi.fn() }));
+vi.mock("../src/dag/template-resolver.js", () => ({ TemplateResolver: vi.fn() }));
 
 import main from "../index.js";
 import { loadConfig } from "../src/config/config.js";
@@ -318,8 +322,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 
 	describe("1. Tool Registration", () => {
 		// TODO: implement consolidation first — currently 33 tools, should be 7
-		it("registers exactly 13 tools after consolidation", () => {
-			expect(tools.size).toBe(13);
+		it("registers exactly 16 tools after consolidation", () => {
+			expect(tools.size).toBe(16);
 		});
 
 		const EXPECTED_TOOLS = [
