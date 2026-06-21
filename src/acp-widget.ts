@@ -11,6 +11,35 @@ import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 
 // ── Types ──────────────────────────────────────────────────────────
 
+/** DAG lifecycle status. Mirrors `DagStore` / `DagIndexEntry` status values. */
+export type DagStatus =
+	| "pending"
+	| "running"
+	| "completed"
+	| "failed"
+	| "cancelled"
+	| "stale";
+
+/**
+ * DAG summary row for the ACP widget.
+ *
+ * Mapped from `DagIndexEntry` (see `index.ts` wiring): `totalSteps` → `total`,
+ * `completedSteps` → `completed`, `failedSteps` → `failed`. Wave info is
+ * optional since the index entry doesn't always carry it.
+ */
+export interface AcpWidgetDag {
+	dagId: string;
+	status: DagStatus;
+	total: number;
+	completed: number;
+	failed: number;
+	cancelled: number;
+	currentWave?: number;
+	totalWaves?: number;
+	createdAt: Date;
+	updatedAt: Date;
+}
+
 export type AcpSessionStatus = "active" | "idle" | "stale" | "error";
 
 export interface AcpWidgetSession {
@@ -70,6 +99,8 @@ export interface AcpWidgetState {
 	defaultAgent?: string;
 	activity: AcpWidgetActivity;
 	workers?: AcpWidgetWorker[];
+	/** DAG progress rows, populated from `DagStore.listAll()` in `getWidgetState()`. Optional for backwards-compat with fixtures that predate DAGs. */
+	dags?: AcpWidgetDag[];
 }
 
 // ── Status styling ──────────────────────────────────────────────────
@@ -101,6 +132,19 @@ const WORKER_STATUS_ICON: Record<string, { icon: string; color: ThemeColor }> = 
 	offline: { icon: "✕", color: "dim" },
 };
 
+/**
+ * DAG status → `{ icon, color }` styling. Reuses the existing widget palette
+ * (`success`/`warning`/`error`/`muted`/`dim`/`accent`) — no new colors introduced.
+ */
+export const DAG_STATUS_ICON: Record<DagStatus, { icon: string; color: ThemeColor }> = {
+	running: { icon: "●", color: "accent" },
+	completed: { icon: "✓", color: "success" },
+	failed: { icon: "✕", color: "error" },
+	cancelled: { icon: "◻", color: "dim" },
+	pending: { icon: "·", color: "muted" },
+	stale: { icon: "◻", color: "warning" },
+};
+
 // ── Helpers ─────────────────────────────────────────────────────────
 
 /** Pad a string to a visible width, accounting for ANSI escape codes. */
@@ -120,6 +164,99 @@ function formatTokens(count: number): string {
 /** Short session ID — first 8 chars. */
 function shortId(id: string): string {
 	return id.length <= 8 ? id : id.slice(0, 8) + "…";
+}
+
+/**
+ * Format a DAG progress bar.
+ *
+ * Filled blocks (`█`) = `completed + failed`; empty blocks (`░`) = the
+ * remainder up to the bar width (`min(total, 8)`). When `total === 0` returns
+ * an empty string (no progress to show).
+ *
+ * Example: `formatProgress(2, 0, 5)` → `[██░░░] 2/5`.
+ */
+export function formatProgress(
+	completed: number,
+	failed: number,
+	total: number,
+): string {
+	if (total <= 0) return "";
+	const width = Math.min(total, 8);
+	const filled = Math.max(0, Math.min(completed + failed, width));
+	const empty = width - filled;
+	const bar = "█".repeat(filled) + "░".repeat(empty);
+	return `[${bar}] ${completed}/${total}`;
+}
+
+/**
+ * Render a single DAG summary row (plain text — no theme coloring).
+ *
+ * Format: `<icon> <dagId> <progress> wave <w>/<totalW> <age> [fail:<failed>]`
+ *  - the `wave <w>/<totalW>` segment is omitted when `totalWaves` is absent
+ *  - the `[fail:<failed>]` segment is omitted when `failed === 0`
+ *
+ * The `<icon>` comes from `DAG_STATUS_ICON[dag.status]`. `<progress>` comes
+ * from `formatProgress`. `<age>` comes from `timeAgo(dag.updatedAt)`.
+ */
+export function renderDagRow(dag: AcpWidgetDag): string {
+	const icon = DAG_STATUS_ICON[dag.status]?.icon ?? "○";
+	const parts: string[] = [icon, dag.dagId];
+
+	const progress = formatProgress(dag.completed, dag.failed, dag.total);
+	if (progress) parts.push(progress);
+
+	if (dag.totalWaves !== undefined) {
+		parts.push(`wave ${dag.currentWave ?? 0}/${dag.totalWaves}`);
+	}
+
+	parts.push(timeAgo(dag.updatedAt));
+
+	if (dag.failed > 0) {
+		parts.push(`[fail:${dag.failed}]`);
+	}
+
+	return parts.join(" ");
+}
+
+/**
+ * Render a collapsed one-line summary of recent DAGs (D2).
+ *
+ * Each entry renders as `<dagId>:<icon>` joined by single spaces. The list is
+ * capped at 5 entries (preserving input order) to keep the widget bounded.
+ *
+ * Example: `renderDagSummary([completed, failed])` → `a1b2c3:✓ d4e5f6:✕`.
+ */
+export function renderDagSummary(dags: AcpWidgetDag[]): string {
+	return dags
+		.slice(0, 5)
+		.map((dag) => `${dag.dagId}:${DAG_STATUS_ICON[dag.status]?.icon ?? "○"}`)
+		.join(" ");
+}
+
+/**
+ * Render the full DAG section for the widget state (task 2.3).
+ *
+ * Decision rules (see `design.md` D2/D3/D4):
+ *  - When `dags` is absent or empty → return `""` (no DAG section rendered).
+ *  - When any DAG has `status === "running"` → return one `renderDagRow` line per
+ *    entry (joined by `\n`), so users get live per-DAG progress.
+ *  - Otherwise (no running DAGs but some completed/failed/cancelled) → return a
+ *    collapsed `renderDagSummary` of the recent DAGs, capped at 5 entries.
+ *
+ * `pending` DAGs never contribute a row (they carry no progress worth surfacing).
+ */
+export function renderDagSection(state: AcpWidgetState): string {
+	const dags = state.dags;
+	if (!dags || dags.length === 0) return "";
+
+	const visible = dags.filter((d) => d.status !== "pending");
+	if (visible.length === 0) return "";
+
+	if (visible.some((d) => d.status === "running")) {
+		return visible.map(renderDagRow).join("\n");
+	}
+
+	return renderDagSummary(visible);
 }
 
 /** Time ago string. */
@@ -285,6 +422,18 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 
 					const row = ` ${icon} ${name}${friendlyName} ${id} ${statusLabel}${modelLabel} · ${activity}`;
 					lines.push(truncateToWidth(row, width));
+				}
+
+				// ── DAG progress rows (between sessions and workers — D4) ──
+				const dagSection = renderDagSection(state);
+				if (dagSection !== "") {
+					// Header line only when DAG rows are rendered (task 2.5)
+					lines.push(
+						truncateToWidth(" " + theme.fg("dim", "─ DAGs ─"), width),
+					);
+					for (const dagLine of dagSection.split("\n")) {
+						lines.push(truncateToWidth(` ${dagLine}`, width));
+					}
 				}
 
 				// ── Worker rows (persistent workers) ──
