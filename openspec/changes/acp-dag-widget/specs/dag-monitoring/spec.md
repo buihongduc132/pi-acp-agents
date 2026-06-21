@@ -39,4 +39,4 @@ The `AcpWidgetState` type SHALL include an optional `dags?: AcpWidgetDag[]` fiel
 
 #### Scenario: New DAG fixture renders correctly
 - **WHEN** a test calls `makeState({ dags: [ { dagId: "abc", status: "running", completed: 2, failed: 1, total: 5, currentWave: 2, totalWaves: 3 } ] })`
-- **THEN** the rendered output SHALL contain the DAG row with progress `[██░░░] 2/5`, wave `2/3`, and the failure marker.
+- **THEN** the rendered output SHALL contain the DAG row with progress `[███░░] 2/5`, wave `2/3`, and the failure marker.
