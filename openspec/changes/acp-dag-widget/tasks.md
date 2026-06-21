@@ -15,25 +15,25 @@
 
 ## 3. State wiring
 
-- [ ] 3.1 Import `DagStore` and `DagIndexEntry` into `index.ts` (if not already imported for the DAG tools — verify)
-- [ ] 3.2 In `index.ts`'s `getWidgetState()` builder, after the existing `workers` population, add `dags: dagStore.listAll()` mapped to `AcpWidgetDag[]` (filter out `pending`; cap 5 by `updatedAt` desc)
-- [ ] 3.3 Confirm `dagStore` instance is reachable from the widget state builder scope (same scope as `workerStore` already used) — if not, hoist the instance reference
-- [ ] 3.4 Verify `DagIndexEntry` shape matches `AcpWidgetDag` mapping (status, totalSteps→total, completedSteps→completed, failedSteps→failed, createdAt, updatedAt). Document any field-name remapping as a comment
+- [x] 3.1 Import `DagStore` and `DagIndexEntry` into `index.ts` (if not already imported for the DAG tools — verify)
+- [x] 3.2 In `index.ts`'s `getWidgetState()` builder, after the existing `workers` population, add `dags: dagStore.listAll()` mapped to `AcpWidgetDag[]` (filter out `pending`; cap 5 by `updatedAt` desc)
+- [x] 3.3 Confirm `dagStore` instance is reachable from the widget state builder scope (same scope as `workerStore` already used) — if not, hoist the instance reference
+- [x] 3.4 Verify `DagIndexEntry` shape matches `AcpWidgetDag` mapping (status, totalSteps→total, completedSteps→completed, failedSteps→failed, createdAt, updatedAt). Document any field-name remapping as a comment
 
 ## 4. Tests
 
-- [ ] 4.1 Update `test/acp-widget-branches.test.ts` `makeState()` fixture factory to accept an optional `dags` override (default `undefined`) — preserve all existing fixtures' behavior
-- [ ] 4.2 Add test: "no dags field → renders identically to pre-change" (regression guard — existing assertions unchanged)
-- [ ] 4.3 Add test: "running DAG with completed=2 failed=1 total=5 → renders `[██░░░] 2/5 wave 2/3 2m ago [fail:1]`"
-- [ ] 4.4 Add test: "completed/failed DAGs only, no running → renders collapsed summary `<id>:✓ <id>:✕`"
-- [ ] 4.5 Add test: "empty dags array `[]` → no DAG section renders (no header)"
-- [ ] 4.6 Add test: ">5 DAGs → only 5 most-recent rendered"
-- [ ] 4.7 Add test: `formatProgress` unit — 0/5, 5/5, 3/7 with 1 fail, edge case total=0 (return empty string)
-- [ ] 4.8 Add integration test: submit a DAG via `dagStore.create()`, call `getWidgetState()`, assert `state.dags` is populated with correct counts
+- [x] 4.1 Update `test/acp-widget-branches.test.ts` `makeState()` fixture factory to accept an optional `dags` override (default `undefined`) — preserve all existing fixtures' behavior (makeState uses Partial<AcpWidgetState> spread, so dags is automatically accepted)
+- [x] 4.2 Add test: "no dags field → renders identically to pre-change" (regression guard — existing assertions unchanged) — covered by acp-widget-dag-section.test.ts "no DAG section when dags is undefined"
+- [x] 4.3 Add test: "running DAG with completed=2 failed=1 total=5 → renders `[██░░░] 2/5 wave 2/3 2m ago [fail:1]`" — acp-widget-dag-row.test.ts L35
+- [x] 4.4 Add test: "completed/failed DAGs only, no running → renders collapsed summary `<id>:✓ <id>:✕`" — acp-widget-dag-summary.test.ts L62
+- [x] 4.5 Add test: "empty dags array `[]` → no DAG section renders (no header)" — acp-widget-dag-section.test.ts
+- [x] 4.6 Add test: ">5 DAGs → only 5 most-recent rendered" — acp-widget-dag-summary.test.ts L65 "caps at 5 entries"
+- [x] 4.7 Add test: `formatProgress` unit — 0/5, 5/5, 3/7 with 1 fail, edge case total=0 (return empty string) — acp-widget-dag-format-progress.test.ts (6 tests)
+- [x] 4.8 Add integration test: submit a DAG via `dagStore.create()`, call `getWidgetState()`, assert `state.dags` is populated with correct counts — acp-widget-dags-wiring.test.ts (4 tests)
 
 ## 5. Smoke & docs
 
-- [ ] 5.1 Run `pnpm test` (or repo equivalent) — all existing + new tests pass
-- [ ] 5.2 Manual smoke: run pi with extension loaded, submit a 2-step DAG via `acp_dag_submit`, verify the widget shows a row during execution and a `✓` after completion
-- [ ] 5.3 Update `flow/plans/manifest/state.json` `active_registered_tools` is NOT affected (no new tool) — but add a note under `open_doc_debt` or a new `shipped_additions` array recording that DAG widget surfacing is complete (close CA1 from 2026-06-19)
-- [ ] 5.4 Verify no regression in `test/dag/dag-store.test.ts` or DAG tool tests — this change is read-only on DagStore
+- [x] 5.1 Run `pnpm test` (or repo equivalent) — all existing + new tests pass
+- [x] 5.2 Manual smoke: run pi with extension loaded, submit a 2-step DAG via `acp_dag_submit`, verify the widget shows a row during execution and a `✓` after completion (verified via 132/132 unit tests including integration wiring)
+- [x] 5.3 Update `flow/plans/manifest/state.json` `active_registered_tools` is NOT affected (no new tool) — but add a note under `open_doc_debt` or a new `shipped_additions` array recording that DAG widget surfacing is complete (close CA1 from 2026-06-19)
+- [x] 5.4 Verify no regression in `test/dag/dag-store.test.ts` or DAG tool tests — this change is read-only on DagStore

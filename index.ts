@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { AgentToolResult, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { type AcpWidgetState, createAcpWidget } from "./src/acp-widget.js";
+import { type AcpWidgetState, type AcpWidgetDag, createAcpWidget } from "./src/acp-widget.js";
 import { createAdapter } from "./src/adapter-factory.js";
 import { loadConfig } from "./src/config/config.js";
 import type { AcpArchivedSessionMetadata, AcpConfig, AcpPromptResult, AcpSessionHandle, AcpWorkerStatus, DagIndexEntry } from "./src/config/types.js";
@@ -403,6 +403,30 @@ export default function (pi: ExtensionAPI) {
         currentTaskId: w.currentTaskId,
       };
     }),
+    // Task 3.2: populate `dags` from DagStore.listAll() — filter out
+    // `pending`, sort by `updatedAt` desc, cap at 5 entries. Field mapping:
+    //   status          → status
+    //   totalSteps      → total
+    //   completedSteps  → completed
+    //   failedSteps     → failed
+    //   cancelled       → 0 (DagIndexEntry does not carry cancelled count)
+    //   createdAt       → Date(createdAt)
+    //   updatedAt       → Date(updatedAt)
+    dags: dagStore
+      .listAll()
+      .filter((e) => e.status !== "pending")
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+      .slice(0, 5)
+      .map((e): AcpWidgetDag => ({
+        dagId: e.dagId,
+        status: e.status,
+        total: e.totalSteps,
+        completed: e.completedSteps,
+        failed: e.failedSteps,
+        cancelled: 0,
+        createdAt: new Date(e.createdAt),
+        updatedAt: new Date(e.updatedAt),
+      })),
   });
 
   const widgetFactory = createAcpWidget({ getState: getWidgetState });
