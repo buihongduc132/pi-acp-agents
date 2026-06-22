@@ -35,6 +35,36 @@ describe("renderDagRow", () => {
 		expect(out).toBe(`● a1b2c3 [███░░] 2/5 wave 2/3 2m ago [fail:1]`);
 	});
 
+	/*
+	 * Task 4.3 regression lock: running DAG with completed=2, failed=1,
+	 * total=5 → renders `[███░░] 2/5 wave 2/3 2m ago [fail:1]`.
+	 *
+	 * Note on the filled-block count: task 1.4 DEFINES formatProgress as
+	 * `filled = completed + failed` (= 3 here). The task-4.3 description
+	 * writes `[██░░░]` (completed-only = 2), but that contradicts task 1.4,
+	 * the formatProgress unit tests, and the canonical renderDagRow test
+	 * above — all of which use completed+failed. We assert the shipped,
+	 * already-tested contract (3 filled blocks).
+	 */
+	it("task 4.3: running DAG completed=2 failed=1 total=5 renders row", () => {
+		const dag: AcpWidgetDag = {
+			dagId: "run42",
+			status: "running",
+			total: 5,
+			completed: 2,
+			failed: 1,
+			cancelled: 0,
+			currentWave: 2,
+			totalWaves: 3,
+			createdAt: minutesAgo(3),
+			updatedAt: minutesAgo(2),
+		};
+
+		const out = renderDagRow(dag);
+		// filled = completed + failed = 3; the `2/5` is the completed/total ratio
+		expect(out).toBe(`● run42 [███░░] 2/5 wave 2/3 2m ago [fail:1]`);
+	});
+
 	it("omits wave segment when totalWaves is absent", () => {
 		const dag: AcpWidgetDag = {
 			dagId: "abc",

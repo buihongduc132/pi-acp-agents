@@ -2,7 +2,7 @@
  * Branch coverage for acp-widget.ts — full format
  */
 import { describe, it, expect } from "vitest";
-import { createAcpWidget, type AcpWidgetState, type AcpWidgetSession, type AcpWidgetDeps } from "../src/acp-widget.js";
+import { createAcpWidget, type AcpWidgetState, type AcpWidgetSession, type AcpWidgetDeps, type AcpWidgetDag } from "../src/acp-widget.js";
 
 const mockTheme: any = {
 	bold: (s: string) => `<b>${s}</>`,
@@ -32,6 +32,9 @@ function makeState(overrides: Partial<AcpWidgetState> = {}): AcpWidgetState {
 			activeCompares: 0,
 			delegations: [],
 		},
+		// Explicit `dags` default: undefined preserves pre-change rendering for
+		// every existing fixture; tests may override via `makeState({ dags })`.
+		dags: undefined,
 		...overrides,
 	};
 }
@@ -327,5 +330,48 @@ describe("acp-widget — branch coverage", () => {
 		expect(linesA.length).toBe(expectedLineCount(sessionsA));
 		expect(linesB.length).toBe(expectedLineCount(sessionsB));
 		expect(linesA.length).toBe(linesB.length);
+	});
+});
+
+describe("makeState fixture — no dags field regression guard", () => {
+	it("no dags field → renders identically to pre-change (no DAG section)", () => {
+		const sessions = [makeSession()];
+		const state = makeState({ sessions });
+		// Regression guard: `dags` is undefined, so the widget MUST NOT render
+		// any DAG-related section (no header, no rows, no summary).
+		expect(state.dags).toBeUndefined();
+		const lines = renderWidget(state);
+		const joined = lines.join("\n");
+		expect(joined).not.toContain("DAGs");
+		expect(joined).not.toContain("DAG");
+		// Line count must match the pre-change deterministic expected count.
+		expect(lines.length).toBe(expectedLineCount(sessions));
+	});
+});
+
+describe("makeState fixture — dags override", () => {
+	it("defaults dags to undefined when no override given (preserves existing fixtures)", () => {
+		const state = makeState();
+		expect(state.dags).toBeUndefined();
+	});
+
+	it("accepts a dags override and surfaces it on the returned state", () => {
+		const dags: AcpWidgetDag[] = [
+			{
+				dagId: "abc",
+				status: "running",
+				total: 5,
+				completed: 2,
+				failed: 1,
+				cancelled: 0,
+				currentWave: 2,
+				totalWaves: 3,
+				createdAt: new Date(),
+				updatedAt: new Date(),
+			},
+		];
+		const state = makeState({ dags });
+		expect(state.dags).toBe(dags);
+		expect(state.dags?.length).toBe(1);
 	});
 });

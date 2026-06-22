@@ -8,6 +8,7 @@
 import type { Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
 import type { Component } from "@mariozechner/pi-tui";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import type { DagIndexEntry } from "./config/types.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -175,6 +176,46 @@ function shortId(id: string): string {
  *
  * Example: `formatProgress(2, 0, 5)` → `[██░░░] 2/5`.
  */
+/**
+ * Map a persisted `DagIndexEntry` (summary row from `dag-index.json`) into an
+ * `AcpWidgetDag` row for the TUI widget.
+ *
+ * This is the single authoritative place where the two shapes are bridged.
+ * Field-name remapping (task 3.4 verification):
+ *
+ *   DagIndexEntry      → AcpWidgetDag
+ *   ────────────────────────────────────────────
+ *   dagId              → dagId            (identity)
+ *   status             → status           (identity)
+ *   totalSteps         → total            (RENAMED)
+ *   completedSteps     → completed        (RENAMED)
+ *   failedSteps        → failed           (RENAMED)
+ *   (absent)           → cancelled = 0    (index carries no cancelled count)
+ *   (absent)           → currentWave?     (index carries no wave info → undefined)
+ *   (absent)           → totalWaves?      (index carries no wave info → undefined)
+ *   createdAt: string  → createdAt: Date  (ISO → Date)
+ *   updatedAt: string  → updatedAt: Date  (ISO → Date)
+ *
+ * Wave info (`currentWave`, `totalWaves`) is intentionally NOT pulled from the
+ * index — `DagIndexEntry` does not carry it. The widget renders wave info only
+ * when richer sources populate it; for the `DagStore.listAll()` path they
+ * remain undefined and the row omits the wave segment.
+ */
+export function dagIndexEntryToWidgetDag(entry: DagIndexEntry): AcpWidgetDag {
+	return {
+		dagId: entry.dagId,
+		status: entry.status,
+		total: entry.totalSteps,
+		completed: entry.completedSteps,
+		failed: entry.failedSteps,
+		cancelled: 0,
+		currentWave: undefined,
+		totalWaves: undefined,
+		createdAt: new Date(entry.createdAt),
+		updatedAt: new Date(entry.updatedAt),
+	};
+}
+
 export function formatProgress(
 	completed: number,
 	failed: number,
@@ -252,11 +293,18 @@ export function renderDagSection(state: AcpWidgetState): string {
 	const visible = dags.filter((d) => d.status !== "pending");
 	if (visible.length === 0) return "";
 
-	if (visible.some((d) => d.status === "running")) {
-		return visible.map(renderDagRow).join("\n");
+	// D2 — cap the render list at 5 entries, ordered by `updatedAt` descending
+	// (most-recent first). Prevents pathological render cases when many DAGs
+	// exist, and matches the widget's bounded-list pattern.
+	const recent = [...visible]
+		.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+		.slice(0, 5);
+
+	if (recent.some((d) => d.status === "running")) {
+		return recent.map(renderDagRow).join("\n");
 	}
 
-	return renderDagSummary(visible);
+	return renderDagSummary(recent);
 }
 
 /** Time ago string. */

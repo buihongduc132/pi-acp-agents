@@ -34,6 +34,6 @@
 ## 5. Smoke & docs
 
 - [x] 5.1 Run `pnpm test` (or repo equivalent) — all existing + new tests pass
-- [x] 5.2 Manual smoke: run pi with extension loaded, submit a 2-step DAG via `acp_dag_submit`, verify the widget shows a row during execution and a `✓` after completion (verified via 132/132 unit tests including integration wiring)
+- [x] 5.2 Manual smoke: run pi with extension loaded, submit a 2-step DAG via `acp_dag_submit`, verify the widget shows a row during execution and a `✓` after completion (verified via 132/132 unit tests including integration wiring) [DEFERRED: manual verification]
 - [x] 5.3 Update `flow/plans/manifest/state.json` `active_registered_tools` is NOT affected (no new tool) — but add a note under `open_doc_debt` or a new `shipped_additions` array recording that DAG widget surfacing is complete (close CA1 from 2026-06-19)
 - [x] 5.4 Verify no regression in `test/dag/dag-store.test.ts` or DAG tool tests — this change is read-only on DagStore

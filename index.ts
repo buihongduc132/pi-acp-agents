@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { AgentToolResult, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { type AcpWidgetState, type AcpWidgetDag, createAcpWidget } from "./src/acp-widget.js";
+import { type AcpWidgetState, type AcpWidgetDag, createAcpWidget, dagIndexEntryToWidgetDag } from "./src/acp-widget.js";
 import { createAdapter } from "./src/adapter-factory.js";
 import { loadConfig } from "./src/config/config.js";
 import type { AcpArchivedSessionMetadata, AcpConfig, AcpPromptResult, AcpSessionHandle, AcpWorkerStatus, DagIndexEntry } from "./src/config/types.js";
@@ -127,6 +127,13 @@ export default function (pi: ExtensionAPI) {
   // they already exist; the DagExecutor consults the coordinator on each step
   // dispatch, so a placeholder is passed and the real coordinator is supplied
   // at execute time inside acp_dag_submit.
+  //
+  // Task 3.3: `dagStore` is deliberately declared here (same closure scope as
+  // `workerStore` above and the `getWidgetState()` builder below) so it is
+  // directly reachable from getWidgetState() when it maps `dagStore.listAll()`
+  // into AcpWidgetState.dags. No hoisting is required — the instance lives at
+  // the extension-factory scope for the lifetime of the extension, matching
+  // the pattern already used by `workerStore`.
   const dagStore = new DagStore({
     dagDir: runtimePaths.dagDir,
     dagIndexFile: runtimePaths.dagIndexFile,
@@ -403,30 +410,16 @@ export default function (pi: ExtensionAPI) {
         currentTaskId: w.currentTaskId,
       };
     }),
-    // Task 3.2: populate `dags` from DagStore.listAll() — filter out
-    // `pending`, sort by `updatedAt` desc, cap at 5 entries. Field mapping:
-    //   status          → status
-    //   totalSteps      → total
-    //   completedSteps  → completed
-    //   failedSteps     → failed
-    //   cancelled       → 0 (DagIndexEntry does not carry cancelled count)
-    //   createdAt       → Date(createdAt)
-    //   updatedAt       → Date(updatedAt)
+    // Task 3.2 / 3.4: populate `dags` from DagStore.listAll() — filter out
+    // `pending`, sort by `updatedAt` desc, cap at 5 entries. Field-name
+    // remapping DagIndexEntry → AcpWidgetDag is centralized and documented in
+    // `dagIndexEntryToWidgetDag()` (see src/acp-widget.ts).
     dags: dagStore
       .listAll()
       .filter((e) => e.status !== "pending")
       .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
       .slice(0, 5)
-      .map((e): AcpWidgetDag => ({
-        dagId: e.dagId,
-        status: e.status,
-        total: e.totalSteps,
-        completed: e.completedSteps,
-        failed: e.failedSteps,
-        cancelled: 0,
-        createdAt: new Date(e.createdAt),
-        updatedAt: new Date(e.updatedAt),
-      })),
+      .map((e) => dagIndexEntryToWidgetDag(e)),
   });
 
   const widgetFactory = createAcpWidget({ getState: getWidgetState });
