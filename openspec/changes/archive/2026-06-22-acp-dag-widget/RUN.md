@@ -5,6 +5,7 @@
 | iter81 (attempt 1) | d12a7393 | acp-dag-widget | 1/25 | cancelled | nohup insufficient — bun killed by bash pgroup |
 | iter81 (attempt 2) | d2bae5e6 | acp-dag-widget | 9/25 | failed | Section 3+ blocked: target branch missing PR#7 (CA41) |
 | iter82 | 33eee9610010db4ec6e21f66567ce92d | acp-dag-widget | 25/25 | merged | worktree from origin/main; PR#9 squash 4118825 |
+| iter84 | n/a (manual archive) | acp-dag-widget | 25/25 | archived | delta sync (3 widget reqs → dag-monitoring) + archive move; this PR |
 
 ## iter82 resolution
 - CA41 blocker (stale branch missing PR#7 DAG infra) resolved: PR#7 (f86448e) on origin/main
