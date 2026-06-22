@@ -82,7 +82,8 @@
     { "capability": "Persistent named workers + spawn/list/shutdown/kill/prune", "gap": "G-A",           "plan": "persistent-acp-workers.md", "status": "shipped", "evidence": "index.ts:1109-1490, WorkerStore 164 lines" },
     { "capability": "Auto-claim background loop",                                  "gap": "G-C",           "plan": "persistent-acp-workers.md", "status": "shipped", "evidence": "WorkerDispatcher.start() round-robin" },
     { "capability": "Active steer for live workers",                               "gap": "G-B (active half)", "plan": "persistent-acp-workers.md", "status": "shipped", "evidence": "acp_worker_steer + pendingSteer" },
-    { "capability": "Task tool consolidation (multiplex)",                         "gap": null,            "plan": "test/tdd-consolidation.test.ts", "status": "shipped", "evidence": "13 active tools" }
+    { "capability": "Task tool consolidation (multiplex)",                         "gap": null,            "plan": "test/tdd-consolidation.test.ts", "status": "shipped", "evidence": "13 active tools" },
+    { "capability": "DAG widget live surfacing in ACP TUI",                          "gap": "CA1 (2026-06-19)", "plan": "openspec/changes/acp-dag-widget", "status": "shipped", "evidence": "src/acp-widget.ts renderDagSection/renderDagRow/renderDagSummary/formatProgress + DAG_STATUS_ICON; index.ts getWidgetState() dags population from DagStore.listAll()" }
   ],
 
   "priority_order": [
