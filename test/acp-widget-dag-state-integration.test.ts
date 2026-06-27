@@ -1,28 +1,27 @@
 /**
- * RED test for task 3.2 — In `index.ts`'s `getWidgetState()` builder, after
- * the existing `workers` population, add `dags: dagStore.listAll()` mapped to
- * `AcpWidgetDag[]` (filter out `pending`; cap 5 by `updatedAt` desc).
+ * Task 4.8 — Integration test: submit a DAG via a real `DagStore.create()`,
+ * call the real `getWidgetState()` closure (captured via createAcpWidget's
+ * getState argument), and assert `state.dags` is populated with correct
+ * counts (mapping DagIndexEntry → AcpWidgetDag).
  *
- * Behavior under test: `getWidgetState()` MUST read `dagStore.listAll()`,
- * map each `DagIndexEntry` to an `AcpWidgetDag`, drop entries whose status is
- * `pending`, sort by `updatedAt` descending, and cap the result at 5 entries.
- *
- * Field mapping (per design.md D1 + task 3.4):
- *   status          → status
- *   totalSteps      → total
- *   completedSteps  → completed
- *   failedSteps     → failed
- *   createdAt        → createdAt (Date)
- *   updatedAt        → updatedAt (Date)
- *   cancelled is not carried by DagIndexEntry → defaults to 0
+ * Unlike `acp-widget-dags-wiring.test.ts` (task 3.2), which feeds
+ * `listAll()` mock data directly, this test uses a REAL `DagStore` backed by
+ * a tmp dir — exercising the full on-disk create → listAll → widget-mapping
+ * pipeline. The only mock is the surrounding `index.ts` infra
+ * (SessionManager, WorkerStore, etc.) that is irrelevant to the DAG path.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 vi.mock("../src/config/config.js", () => ({ loadConfig: vi.fn() }));
 vi.mock("../src/core/session-manager.js", () => ({ SessionManager: vi.fn() }));
 vi.mock("../src/management/task-store.js", () => ({ AcpTaskStore: vi.fn() }));
 vi.mock("../src/management/mailbox-manager.js", () => ({ MailboxManager: vi.fn() }));
-vi.mock("../src/management/governance-store.js", () => ({ GovernanceStore: vi.fn() }));
+vi.mock("../src/management/governance-store.js", () => ({
+	GovernanceStore: vi.fn(),
+}));
 vi.mock("../src/management/event-log.js", () => ({ AcpEventLog: vi.fn() }));
 vi.mock("../src/management/session-archive-store.js", () => ({
 	SessionArchiveStore: vi.fn(),
@@ -55,6 +54,7 @@ vi.mock("../src/coordination/coordinator.js", () => ({
 	AgentCoordinator: vi.fn(),
 }));
 vi.mock("../src/core/async-executor.js", () => ({ AsyncExecutor: vi.fn() }));
+vi.mock("../src/dag/dag-store.js", () => ({ DagStore: vi.fn() }));
 vi.mock("../src/dag/dag-validator.js", () => ({ DagValidator: vi.fn() }));
 vi.mock("../src/dag/template-resolver.js", () => ({ TemplateResolver: vi.fn() }));
 vi.mock("../src/dag/dag-executor.js", () => ({
@@ -83,8 +83,6 @@ vi.mock("../src/acp-widget.js", async (importOriginal) => {
 	};
 });
 
-vi.mock("../src/dag/dag-store.js", () => ({ DagStore: vi.fn() }));
-
 import main from "../index.js";
 import { loadConfig } from "../src/config/config.js";
 import { SessionManager } from "../src/core/session-manager.js";
@@ -100,7 +98,6 @@ import { AsyncExecutor } from "../src/core/async-executor.js";
 import { DagStore } from "../src/dag/dag-store.js";
 import { DagValidator } from "../src/dag/dag-validator.js";
 import { TemplateResolver } from "../src/dag/template-resolver.js";
-import type { DagIndexEntry } from "../src/config/types.js";
 
 const CFG = {
 	agent_servers: { gemini: { command: "gemini", args: ["--acp"] } },
@@ -114,24 +111,22 @@ const CFG = {
 	dagOutputTruncateChars: 8000,
 };
 
-function entry(overrides: Partial<DagIndexEntry>): DagIndexEntry {
-	return {
-		dagId: "dag",
-		status: "running",
-		totalSteps: 5,
-		completedSteps: 2,
-		failedSteps: 1,
-		createdAt: "2026-01-01T00:00:00.000Z",
-		updatedAt: "2026-01-01T00:00:00.000Z",
-		...overrides,
-	};
-}
+describe("Integration: getWidgetState().dags populated from dagStore.create() (task 4.8)", () => {
+	let tmpDir: string;
+	let dagStoreInstance: InstanceType<typeof DagStore>;
+	let RealDagStore: typeof DagStore;
 
-describe("getWidgetState() dags wiring — task 3.2", () => {
-	let dagStoreInstance: any;
+	beforeEach(async () => {
+		// Import the real DagStore class (the module is mocked so index.ts
+		// receives our instance instead of constructing its own).
+		const actual = await vi.importActual<typeof import("../src/dag/dag-store.js")>("../src/dag/dag-store.js");
+		RealDagStore = actual.DagStore;
 
-	beforeEach(() => {
-		dagStoreInstance = { listAll: vi.fn(() => []), create: vi.fn(), get: vi.fn(), updateStep: vi.fn(), updateDagStatus: vi.fn(), findRunning: vi.fn(() => []) };
+		tmpDir = mkdtempSync(join(tmpdir(), "acp-dag-widget-int-"));
+		const dagDir = join(tmpDir, "dag");
+		const dagIndexFile = join(dagDir, "dag-index.json");
+		dagStoreInstance = new RealDagStore({ dagDir, dagIndexFile });
+
 		(loadConfig as any).mockReturnValue(CFG);
 		(SessionManager as any).mockImplementation(function () {
 			return { add: vi.fn(), get: vi.fn(), list: vi.fn(() => []), remove: vi.fn(), disposeAll: vi.fn(), pruneStale: vi.fn(async () => ({ removedSessionIds: [] })), size: 0 };
@@ -182,58 +177,94 @@ describe("getWidgetState() dags wiring — task 3.2", () => {
 		} as any);
 	});
 
-	it("populates state.dags from dagStore.listAll() with mapped fields", () => {
-		dagStoreInstance.listAll.mockReturnValue([
-			entry({ dagId: "d1", status: "running", totalSteps: 7, completedSteps: 4, failedSteps: 2, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:05:00.000Z" }),
-		]);
+	afterEach(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
 
+	it("submits a DAG via dagStore.create(), reads getWidgetState(), and asserts state.dags counts after transition to running", () => {
+		// 1. Submit a 3-step DAG via the real DagStore.
+		const record = dagStoreInstance.create({
+			tasks: [
+				{ id: "a", agent: "gemini", prompt: "step a" },
+				{ id: "b", agent: "gemini", prompt: "step b", dependsOn: ["a"] },
+				{ id: "c", agent: "gemini", prompt: "step c", dependsOn: ["b"] },
+			],
+		});
+
+		// 2. Simulate the executor: transition the DAG to running, then mark
+		//    step a completed and step b failed (updateStep reconciles the
+		//    index counters; updateDagStatus reflects the DAG status).
+		dagStoreInstance.updateDagStatus(record.dagId, "running");
+		dagStoreInstance.updateStep(record.dagId, "a", (s) => ({
+			...s,
+			status: "completed",
+			output: "done",
+			completedAt: new Date().toISOString(),
+		}));
+		dagStoreInstance.updateStep(record.dagId, "b", (s) => ({
+			...s,
+			status: "failed",
+			error: "boom",
+			completedAt: new Date().toISOString(),
+		}));
+
+		// 3. Call the real getWidgetState() closure.
+		expect(capturedGetState.current).not.toBeNull();
 		const state = capturedGetState.current!();
+
+		// 4. Assert state.dags is populated with correct counts (field-name
+		//    remapping: totalSteps→total, completedSteps→completed,
+		//    failedSteps→failed).
 		expect(state.dags).toBeDefined();
 		expect(state.dags).toHaveLength(1);
-		const dag = state.dags![0];
-		expect(dag.dagId).toBe("d1");
+		const dag = state.dags[0];
+		expect(dag.dagId).toBe(record.dagId);
 		expect(dag.status).toBe("running");
-		expect(dag.total).toBe(7);
-		expect(dag.completed).toBe(4);
-		expect(dag.failed).toBe(2);
+		expect(dag.total).toBe(3);
+		expect(dag.completed).toBe(1);
+		expect(dag.failed).toBe(1);
 		expect(dag.cancelled).toBe(0);
-		expect(dag.createdAt).toEqual(new Date("2026-01-01T00:00:00.000Z"));
-		expect(dag.updatedAt).toEqual(new Date("2026-01-01T00:05:00.000Z"));
+		expect(dag.createdAt).toBeInstanceOf(Date);
+		expect(dag.updatedAt).toBeInstanceOf(Date);
 	});
 
-	it("filters out pending DAGs", () => {
-		dagStoreInstance.listAll.mockReturnValue([
-			entry({ dagId: "pending-1", status: "pending" }),
-			entry({ dagId: "running-1", status: "running" }),
-			entry({ dagId: "pending-2", status: "pending" }),
-			entry({ dagId: "completed-1", status: "completed" }),
-		]);
+	it("does not surface a freshly created (pending) DAG — pending is filtered", () => {
+		dagStoreInstance.create({
+			tasks: [{ id: "a", agent: "gemini", prompt: "x" }],
+		});
 
-		const state = capturedGetState.current!();
-		expect(state.dags!.map((d: any) => d.dagId).sort()).toEqual(["completed-1", "running-1"]);
-	});
-
-	it("sorts by updatedAt descending and caps at 5 entries", () => {
-		const entries: DagIndexEntry[] = [];
-		for (let i = 0; i < 7; i++) {
-			entries.push(entry({
-				dagId: `d${i}`,
-				status: "running",
-				// d0 oldest ... d6 newest
-				updatedAt: `2026-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
-			}));
-		}
-		dagStoreInstance.listAll.mockReturnValue(entries);
-
-		const state = capturedGetState.current!();
-		expect(state.dags).toHaveLength(5);
-		// Newest first → d6, d5, d4, d3, d2
-		expect(state.dags!.map((d: any) => d.dagId)).toEqual(["d6", "d5", "d4", "d3", "d2"]);
-	});
-
-	it("returns empty dags array when store has no DAGs", () => {
-		dagStoreInstance.listAll.mockReturnValue([]);
 		const state = capturedGetState.current!();
 		expect(state.dags).toEqual([]);
+	});
+
+	it("round-trips multiple submitted DAGs through getWidgetState()", () => {
+		const r1 = dagStoreInstance.create({
+			tasks: [{ id: "a", agent: "gemini", prompt: "x" }],
+		});
+		const r2 = dagStoreInstance.create({
+			tasks: [
+				{ id: "a", agent: "gemini", prompt: "x" },
+				{ id: "b", agent: "gemini", prompt: "y" },
+			],
+		});
+		dagStoreInstance.updateDagStatus(r1.dagId, "completed");
+		dagStoreInstance.updateDagStatus(r2.dagId, "running");
+		dagStoreInstance.updateStep(r2.dagId, "a", (s) => ({
+			...s,
+			status: "completed",
+			output: "done",
+			completedAt: new Date().toISOString(),
+		}));
+
+		const state = capturedGetState.current!();
+		expect(state.dags).toHaveLength(2);
+		// Newest first (updatedAt desc).
+		const ids = state.dags.map((d: any) => d.dagId);
+		expect(ids).toContain(r1.dagId);
+		expect(ids).toContain(r2.dagId);
+		const running = state.dags.find((d: any) => d.dagId === r2.dagId);
+		expect(running.status).toBe("running");
+		expect(running.total).toBe(2);
+		expect(running.completed).toBe(1);
 	});
 });
