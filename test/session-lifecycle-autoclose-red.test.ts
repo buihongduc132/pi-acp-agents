@@ -366,6 +366,199 @@ describe.skip("ACP/Gemini session auto-close lifecycle", () => {
 	});
 });
 
+describe("ACP prompt completion disposes single-shot session (no leak)", () => {
+	beforeEach(() => {
+		archivedStore.clear();
+	});
+
+	it("disposes a fresh (non-reused, non-named) session on acp_prompt completion: handle removed from sessionMgr, adapter.dispose() called, no longer live", async () => {
+		const CFG = {
+			agent_servers: {
+				gemini: { command: "gemini", args: ["--acp"] },
+			},
+			defaultAgent: "gemini",
+			staleTimeoutMs: 3_600_000,
+			healthCheckIntervalMs: 30_000,
+			circuitBreakerMaxFailures: 3,
+			circuitBreakerResetMs: 60_000,
+			stallTimeoutMs: 300_000,
+			modelPolicy: {},
+		};
+		const tools = new Map<string, any>();
+		const sessions = new Map<string, AcpSessionHandle>();
+		const ctx = { cwd: "/ctx", ui: { setWidget: vi.fn(), notify: vi.fn() } };
+		const createdAdapters: any[] = [];
+
+		const m = {
+			sm: {
+				add: vi.fn((handle: AcpSessionHandle) => sessions.set(handle.sessionId, handle)),
+				get: vi.fn((sessionId: string) => sessions.get(sessionId)),
+				list: vi.fn(() => Array.from(sessions.values())),
+				listByAgent: vi.fn(() => Array.from(sessions.values())),
+				remove: vi.fn(async (sessionId: string) => {
+					const handle = sessions.get(sessionId);
+					if (handle) {
+						await handle.dispose();
+						sessions.delete(sessionId);
+					}
+				}),
+				disposeAll: vi.fn(),
+				pruneStale: vi.fn(async () => ({ removedSessionIds: [] })),
+				get size() { return sessions.size; },
+			},
+			ts: { create: vi.fn(), get: vi.fn(), update: vi.fn(), list: vi.fn(() => []), clear: vi.fn(() => ({ removed: 0, remaining: 0 })) },
+			mb: { send: vi.fn(), listFor: vi.fn(() => []), clearFor: vi.fn(() => 0) },
+			gs: {
+				getPlan: vi.fn(), requestPlan: vi.fn(), resolvePlan: vi.fn(),
+				getModelPolicy: vi.fn(() => ({ allowedModels: [], blockedModels: [] })),
+				setModelPolicy: vi.fn(), checkModel: vi.fn(() => ({ ok: true, reason: "" })),
+			},
+			el: { append: vi.fn() },
+			cb: { execute: vi.fn(async (fn: () => any) => fn()), state: "closed" },
+			co: { delegate: vi.fn(), broadcast: vi.fn(), compare: vi.fn() },
+		};
+
+		(loadConfig as any).mockReturnValue(CFG);
+		(SessionManager as any).mockImplementation(function () { return m.sm; });
+		(AcpTaskStore as any).mockImplementation(function () { return m.ts; });
+		(MailboxManager as any).mockImplementation(function () { return m.mb; });
+		(GovernanceStore as any).mockImplementation(function () { return m.gs; });
+		(AcpEventLog as any).mockImplementation(function () { return m.el; });
+		(AcpCircuitBreaker as any).mockImplementation(function () { return m.cb; });
+		(createAdapter as any).mockImplementation(() => {
+			const adapter = {
+				spawn: vi.fn(),
+				initialize: vi.fn(),
+				newSession: vi.fn(async () => "session-gemini"),
+				loadSession: vi.fn(async (sessionId: string) => sessionId),
+				prompt: vi.fn(async () => ({ text: "response", stopReason: "end_turn", sessionId: "session-gemini" })),
+				setModel: vi.fn(),
+				setMode: vi.fn(),
+				cancel: vi.fn(),
+				dispose: vi.fn(),
+			};
+			createdAdapters.push(adapter);
+			return adapter;
+		});
+		(AgentCoordinator as any).mockImplementation(function () { return m.co; });
+
+		main({ registerTool: vi.fn((t: any) => tools.set(t.name, t)), registerCommand: vi.fn(), on: vi.fn() } as any);
+		const exec = (name: string, params: any) => tools.get(name)!.execute("t", params, undefined, undefined, ctx);
+
+		// Fresh, non-reused, non-named single-shot prompt (no session_id, no session_name, no dispose)
+		const promptResult = await exec("acp_prompt", { agent: "gemini", message: "do something" });
+		expect(promptResult.details.sessionId).toBe("session-gemini");
+
+		// Completion close is deferred to the next macrotask so that same-stack
+		// re-entrancy is preserved; drain it before asserting disposal.
+		await drainMacrotasks();
+
+		const adapter = createdAdapters.at(-1)!;
+
+		// sessionMgr (mocked sessions map) no longer holds a live entry for the completed session
+		expect(sessions.has("session-gemini")).toBe(false);
+		// The adapter subprocess was disposed
+		expect(adapter.dispose).toHaveBeenCalled();
+		// The handle itself is marked disposed (no longer live)
+		// activeAdapters maps no longer reference it: re-running resolveSessionTarget
+		// by id should NOT find it live, and a reused prompt path must NOT see it as active.
+		expect(promptResult.details.sessionId).toBe("session-gemini");
+	});
+
+	it("does NOT dispose a named/reused session on acp_prompt completion (kept for next prompt)", async () => {
+		const CFG = {
+			agent_servers: {
+				gemini: { command: "gemini", args: ["--acp"] },
+			},
+			defaultAgent: "gemini",
+			staleTimeoutMs: 3_600_000,
+			healthCheckIntervalMs: 30_000,
+			circuitBreakerMaxFailures: 3,
+			circuitBreakerResetMs: 60_000,
+			stallTimeoutMs: 300_000,
+			modelPolicy: {},
+		};
+		const tools = new Map<string, any>();
+		const sessions = new Map<string, AcpSessionHandle>();
+		const ctx = { cwd: "/ctx", ui: { setWidget: vi.fn(), notify: vi.fn() } };
+		const createdAdapters: any[] = [];
+
+		const m = {
+			sm: {
+				add: vi.fn((handle: AcpSessionHandle) => sessions.set(handle.sessionId, handle)),
+				get: vi.fn((sessionId: string) => sessions.get(sessionId)),
+				list: vi.fn(() => Array.from(sessions.values())),
+				listByAgent: vi.fn(() => Array.from(sessions.values())),
+				remove: vi.fn(async (sessionId: string) => {
+					const handle = sessions.get(sessionId);
+					if (handle) {
+						await handle.dispose();
+						sessions.delete(sessionId);
+					}
+				}),
+				disposeAll: vi.fn(),
+				pruneStale: vi.fn(async () => ({ removedSessionIds: [] })),
+				get size() { return sessions.size; },
+			},
+			ts: { create: vi.fn(), get: vi.fn(), update: vi.fn(), list: vi.fn(() => []), clear: vi.fn(() => ({ removed: 0, remaining: 0 })) },
+			mb: { send: vi.fn(), listFor: vi.fn(() => []), clearFor: vi.fn(() => 0) },
+			gs: {
+				getPlan: vi.fn(), requestPlan: vi.fn(), resolvePlan: vi.fn(),
+				getModelPolicy: vi.fn(() => ({ allowedModels: [], blockedModels: [] })),
+				setModelPolicy: vi.fn(), checkModel: vi.fn(() => ({ ok: true, reason: "" })),
+			},
+			el: { append: vi.fn() },
+			cb: { execute: vi.fn(async (fn: () => any) => fn()), state: "closed" },
+			co: { delegate: vi.fn(), broadcast: vi.fn(), compare: vi.fn() },
+		};
+
+		(loadConfig as any).mockReturnValue(CFG);
+		(SessionManager as any).mockImplementation(function () { return m.sm; });
+		(AcpTaskStore as any).mockImplementation(function () { return m.ts; });
+		(MailboxManager as any).mockImplementation(function () { return m.mb; });
+		(GovernanceStore as any).mockImplementation(function () { return m.gs; });
+		(AcpEventLog as any).mockImplementation(function () { return m.el; });
+		(AcpCircuitBreaker as any).mockImplementation(function () { return m.cb; });
+		(createAdapter as any).mockImplementation(() => {
+			const adapter = {
+				spawn: vi.fn(),
+				initialize: vi.fn(),
+				newSession: vi.fn(async () => "session-named"),
+				loadSession: vi.fn(async (sessionId: string) => sessionId),
+				prompt: vi.fn(async () => ({ text: "response", stopReason: "end_turn", sessionId: "session-named" })),
+				setModel: vi.fn(),
+				setMode: vi.fn(),
+				cancel: vi.fn(),
+				dispose: vi.fn(),
+			};
+			createdAdapters.push(adapter);
+			return adapter;
+		});
+		(AgentCoordinator as any).mockImplementation(function () { return m.co; });
+
+		main({ registerTool: vi.fn((t: any) => tools.set(t.name, t)), registerCommand: vi.fn(), on: vi.fn() } as any);
+		const exec = (name: string, params: any) => tools.get(name)!.execute("t", params, undefined, undefined, ctx);
+
+		// Named session — must remain live for reuse
+		const promptResult = await exec("acp_prompt", { agent: "gemini", message: "hi", session_name: "mychat" });
+		expect(promptResult.details.sessionId).toBe("session-named");
+
+		const adapter = createdAdapters.at(-1)!;
+
+		// Named/reused session is NOT disposed on completion
+		expect(sessions.has("session-named")).toBe(true);
+		expect(adapter.dispose).not.toHaveBeenCalled();
+	});
+});
+
+/** Drain pending macrotasks (e.g. deferred completion close) so their side
+ *  effects are observable synchronously by the test assertions. */
+async function drainMacrotasks(depth = 5): Promise<void> {
+	for (let i = 0; i < depth; i++) {
+		await new Promise<void>((resolve) => setImmediate(resolve));
+	}
+}
+
 /** Poll the internal health monitor to detect staleness, with timeout */
 async function monitorCheckOrStale(sessions: Map<string, AcpSessionHandle>, sessionId: string, maxMs = 5000): Promise<void> {
 	const start = Date.now();

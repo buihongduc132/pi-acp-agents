@@ -37,6 +37,8 @@ export interface AcpConfig {
 	logsDir?: string;
 	staleTimeoutMs?: number;
 	healthCheckIntervalMs?: number;
+	/** Shorter, dedicated TTL (ms) for completed (non-busy) idle sessions. Defaults to staleTimeoutMs (1h) when unset. */
+	completedIdleTtlMs?: number;
 	circuitBreakerMaxFailures?: number;
 	circuitBreakerResetMs?: number;
 	/** Stall timeout in milliseconds (default: 3_600_000 = 1 hour) */

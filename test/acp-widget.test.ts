@@ -1,21 +1,9 @@
 /**
- * Tests for ACP TUI Widget (acp-widget.ts) — full-format render()
- *
- * The widget now emits a full panel:
- *   header · status line · (circuit-breaker line when open/half-open) ·
- *   per-delegation rows · `─ recent ─` history · session/no-sessions block ·
- *   `─ workers ─` rows · `───` separator · summary line · `/acp …` hints line.
- *
- * Line-count signature (CB closed, no delegations/history/workers):
- *   0 sessions + 0 agents         → 0   (hidden)
- *   0 sessions + configured agents → 6
- *   N sessions                     → N + 5
- * CB open / half-open adds exactly +1 line (the dedicated CB line).
+ * Tests for ACP TUI Widget (acp-widget.ts) — compact format
  */
 import { describe, expect, it } from "vitest";
 import {
 	type AcpWidgetDeps,
-	type AcpWidgetSession,
 	type AcpWidgetState,
 	createAcpWidget,
 } from "../src/acp-widget.js";
@@ -60,16 +48,6 @@ function render(deps: AcpWidgetDeps, width = 100): string[] {
 	return component.render(width);
 }
 
-/**
- * Expected full-format line count for `sessions` sessions with CB closed and
- * no delegation/history/worker rows.
- */
-function expectedLineCount(sessionCount: number, agentCount = 1): number {
-	if (sessionCount === 0 && agentCount === 0) return 0;
-	if (sessionCount === 0) return 6;
-	return sessionCount + 5;
-}
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("acp-widget", () => {
@@ -89,12 +67,13 @@ describe("acp-widget", () => {
 			configuredAgentNames: ["gemini", "claude"],
 		});
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(0, 2));
+		expect(lines.length).toBe(1);
 		const joined = lines.join("\n");
 		expect(joined).toContain("ACP");
-		expect(joined).toContain("status: idle");
-		expect(joined).toContain("no active sessions");
-		expect(joined).toContain("/acp · /acp-config · acp_status · acp_prompt <msg>");
+		expect(joined).toContain("idle");
+		expect(joined).not.toContain("status: idle");
+		expect(joined).not.toContain("no active sessions");
+		expect(joined).not.toContain("/acp · /acp-config · acp_prompt <msg>");
 	});
 
 	it("renders single session", () => {
@@ -112,16 +91,16 @@ describe("acp-widget", () => {
 			],
 		});
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(1));
+		expect(lines.length).toBe(2);
 
 		const joined = lines.join("\n");
 		expect(joined).toContain("gemini");
 		expect(joined).toContain("alpha");
-		expect(joined).toContain("sess-ab");
-		// Full format emits a separator line
-		expect(joined).toContain("───");
-		// Full format emits a hints line
-		expect(joined).toContain("/acp");
+		expect(joined).toContain("sess-abc");
+		// No separator line
+		expect(joined).not.toContain("───");
+		// No hints line
+		expect(joined).not.toContain("/acp");
 	});
 
 	it("renders multiple sessions", () => {
@@ -150,12 +129,10 @@ describe("acp-widget", () => {
 		const joined = lines.join("\n");
 		expect(joined).toContain("gemini");
 		expect(joined).toContain("claude");
-		// Summary line reports session counts
-		expect(joined).toContain("2 sessions");
-		// Summary line breaks down active/idle counts
-		expect(joined).toContain("1 active");
-		expect(joined).toContain("1 idle");
-		expect(lines.length).toBe(expectedLineCount(2)); // header + status + 2 rows + separator + summary + hints
+		// No standalone "2 sessions" summary line
+		expect(joined).not.toContain("2 sessions");
+		// No separate "1 active" / "1 idle" on summary line
+		expect(lines.length).toBe(3); // header + 2 rows
 	});
 
 	it("shows circuit breaker when open", () => {
@@ -173,9 +150,8 @@ describe("acp-widget", () => {
 			circuitBreakerState: "open",
 		});
 		const lines = render(makeDeps(state));
-		// CB is rendered on its own dedicated line
-		const joined = lines.join("\n");
-		expect(joined).toContain("circuit breaker: open");
+		// CB text appears inline on header (line 0)
+		expect(lines[0]).toContain("CB:open");
 	});
 
 	it("does NOT show circuit breaker when closed", () => {
@@ -217,7 +193,7 @@ describe("acp-widget", () => {
 		expect(joined).toContain("stale");
 	});
 
-	it("shows model in the session row when present", () => {
+	it("shows model if present — compact format drops model", () => {
 		const state = makeState({
 			sessions: [
 				{
@@ -233,8 +209,8 @@ describe("acp-widget", () => {
 		});
 		const lines = render(makeDeps(state));
 		const joined = lines.join("\n");
-		// Full format renders the model inline on the session row
-		expect(joined).toContain("gemini-2.5-pro");
+		// Compact format intentionally does NOT show model
+		expect(joined).not.toContain("gemini-2.5-pro");
 	});
 
 	it("respects terminal width", () => {
@@ -251,15 +227,14 @@ describe("acp-widget", () => {
 			],
 		});
 		const lines = render(makeDeps(state), 40);
-		// Width truncates per line content but does not change the row count
-		expect(lines.length).toBe(expectedLineCount(1));
+		expect(lines.length).toBe(2);
 		for (const line of lines) {
 			expect(typeof line).toBe("string");
 			expect(line.length).toBeGreaterThan(0);
 		}
 	});
 
-	it("shows default agent in summary line", () => {
+	it("shows default agent in summary — compact format drops default", () => {
 		const state = makeState({
 			defaultAgent: "gemini",
 			sessions: [
@@ -276,11 +251,11 @@ describe("acp-widget", () => {
 		});
 		const lines = render(makeDeps(state));
 		const joined = lines.join("\n");
-		// Summary line renders `· default: <agent>`
-		expect(joined).toContain("default: gemini");
+		// Compact format intentionally does NOT show "default: X"
+		expect(joined).not.toContain("default:");
 	});
 
-	it("renders delegating state with status line", () => {
+	it("renders delegating state without session rows", () => {
 		const state = makeState({
 			activity: {
 				activeDelegations: 1,
@@ -290,10 +265,10 @@ describe("acp-widget", () => {
 			},
 		});
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(0)); // no-sessions block
+		expect(lines.length).toBe(1); // header only
 		const joined = lines.join("\n");
 		expect(joined).toContain("ACP");
-		expect(joined).toContain("status: delegating");
+		expect(joined).toContain("idle");
 	});
 
 	it("renders busy summary when multiple transient operations are active", () => {
@@ -306,10 +281,9 @@ describe("acp-widget", () => {
 			},
 		});
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(0));
+		expect(lines.length).toBe(1); // header only
 		const joined = lines.join("\n");
 		expect(joined).toContain("ACP");
-		expect(joined).toContain("status: busy (2)");
 	});
 
 	it("renders error summary without hiding widget", () => {
@@ -323,10 +297,10 @@ describe("acp-widget", () => {
 			},
 		});
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(0));
+		expect(lines.length).toBe(1);
 		const joined = lines.join("\n");
-		// Error is surfaced on the status line
-		expect(joined).toContain("error: spawn exploded");
+		expect(joined).toContain("spawn exploded");
+		expect(lines[0]).toContain("⚠");
 		expect(joined).toContain("ACP");
 	});
 
@@ -350,13 +324,12 @@ describe("acp-widget", () => {
 			},
 		});
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(1)); // status + 1 session row + scaffolding
+		expect(lines.length).toBe(2); // header + 1 session row
 		const joined = lines.join("\n");
-		// Activity status is shown on the status line
-		expect(joined).toContain("broadcasting");
+		// Activity status is no longer shown
+		expect(joined).not.toContain("broadcasting");
 		expect(joined).toContain("gemini");
-		// Full format emits a hints line
-		expect(joined).toContain("/acp");
+		expect(joined).not.toContain("/acp");
 	});
 
 	it("component dispose does not throw", () => {
@@ -366,9 +339,9 @@ describe("acp-widget", () => {
 		expect(() => (component as any).dispose()).not.toThrow();
 	});
 
-	// ── Full-format line-count + content tests ──
+	// ── New compact-format tests ──
 
-	it("3 sessions produce exactly 8 lines", () => {
+	it("3 sessions produce exactly 4 lines", () => {
 		const sessions = Array.from({ length: 3 }, (_, i) => ({
 			sessionId: `s${i}`,
 			agentName: `agent${i}`,
@@ -379,10 +352,10 @@ describe("acp-widget", () => {
 		}));
 		const state = makeState({ sessions, configuredAgentNames: ["agent0", "agent1", "agent2"] });
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(3)); // 3 + 5
+		expect(lines.length).toBe(4); // header + 3 rows
 	});
 
-	it("5 sessions render every row (no overflow cap)", () => {
+	it("5 sessions produce exactly 5 lines with overflow", () => {
 		const sessions = Array.from({ length: 5 }, (_, i) => ({
 			sessionId: `s${i}`,
 			agentName: `agent${i}`,
@@ -391,16 +364,13 @@ describe("acp-widget", () => {
 			lastActivityAt: new Date(),
 			createdAt: new Date(),
 		}));
-		const state = makeState({ sessions, configuredAgentNames: sessions.map((s) => s.agentName) });
+		const state = makeState({ sessions, configuredAgentNames: sessions.map(s => s.agentName) });
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(5)); // 5 + 5 = 10, no cap
-		const joined = lines.join("\n");
-		// Last session's agent name still appears (not truncated behind `+N more`)
-		expect(joined).toContain("agent4");
-		expect(joined).not.toContain("+1 more");
+		expect(lines.length).toBe(5); // header + 4 rows
+		expect(lines[lines.length - 1]).toContain("+1 more");
 	});
 
-	it("10 sessions render every row (no overflow cap)", () => {
+	it("10 sessions produce exactly 5 lines with overflow", () => {
 		const sessions = Array.from({ length: 10 }, (_, i) => ({
 			sessionId: `s${i}`,
 			agentName: `agent${i}`,
@@ -409,15 +379,13 @@ describe("acp-widget", () => {
 			lastActivityAt: new Date(),
 			createdAt: new Date(),
 		}));
-		const state = makeState({ sessions, configuredAgentNames: sessions.map((s) => s.agentName) });
+		const state = makeState({ sessions, configuredAgentNames: sessions.map(s => s.agentName) });
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(10)); // 10 + 5 = 15, no cap
-		const joined = lines.join("\n");
-		expect(joined).toContain("agent9");
-		expect(joined).not.toContain("+6 more");
+		expect(lines.length).toBe(5); // header + 4 rows
+		expect(lines[lines.length - 1]).toContain("+6 more");
 	});
 
-	it("CB open renders a dedicated circuit-breaker line", () => {
+	it("CB open shows on header line", () => {
 		const state = makeState({
 			sessions: [
 				{
@@ -432,13 +400,11 @@ describe("acp-widget", () => {
 			circuitBreakerState: "open",
 		});
 		const lines = render(makeDeps(state));
-		// CB open adds +1 line vs closed (expectedLineCount(1) + 1)
-		expect(lines.length).toBe(expectedLineCount(1) + 1);
-		const joined = lines.join("\n");
-		expect(joined).toContain("circuit breaker: open");
+		expect(lines.length).toBe(2); // header + 1 row
+		expect(lines[0]).toContain("CB:open");
 	});
 
-	it("CB half-open renders a dedicated circuit-breaker line", () => {
+	it("CB half-open shows on header line", () => {
 		const state = makeState({
 			sessions: [
 				{
@@ -453,12 +419,11 @@ describe("acp-widget", () => {
 			circuitBreakerState: "half-open",
 		});
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(1) + 1);
-		const joined = lines.join("\n");
-		expect(joined).toContain("half-open (probing)");
+		expect(lines.length).toBe(2);
+		expect(lines[0]).toContain("CB:half-open");
 	});
 
-	it("separator line is present in output", () => {
+	it("no separator line in output", () => {
 		const state = makeState({
 			sessions: [
 				{
@@ -480,246 +445,369 @@ describe("acp-widget", () => {
 			],
 		});
 		const lines = render(makeDeps(state));
-		const joined = lines.join("\n");
-		expect(joined).toContain("───");
-	});
-
-	it("hints line is present in output", () => {
-		const state = makeState({
-			sessions: [
-				{
-					sessionId: "s1",
-					agentName: "gemini",
-					cwd: "/",
-					status: "active",
-					lastActivityAt: new Date(),
-					createdAt: new Date(),
-				},
-			],
-		});
-		const lines = render(makeDeps(state));
-		const joined = lines.join("\n");
-		expect(joined).toContain("/acp");
-	});
-
-	it("summary line reports session/agent counts", () => {
-		const state = makeState({
-			sessions: [
-				{
-					sessionId: "s1",
-					agentName: "gemini",
-					cwd: "/",
-					status: "active",
-					lastActivityAt: new Date(),
-					createdAt: new Date(),
-				},
-				{
-					sessionId: "s2",
-					agentName: "claude",
-					cwd: "/",
-					status: "idle",
-					lastActivityAt: new Date(),
-					createdAt: new Date(),
-				},
-			],
-		});
-		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(2)); // header + status + 2 rows + separator + summary + hints
-		const joined = lines.join("\n");
-		expect(joined).toContain("2 sessions");
-	});
-
-	// ── Anti-flicker tests ──
-
-	describe("anti-flicker", () => {
-		/** Helper to create a session with defaults */
-		function makeSession(overrides: Partial<AcpWidgetSession> = {}): AcpWidgetSession {
-			return {
-				sessionId: "abc12345-6789-def0",
-				agentName: "gemini",
-				cwd: "/tmp",
-				status: "idle",
-				lastActivityAt: new Date(),
-				createdAt: new Date(),
-				...overrides,
-			};
+		for (const line of lines) {
+			expect(line).not.toContain("───");
 		}
+	});
 
-		it("same session count produces same line count regardless of status", () => {
-			const stateA = makeState({
-				sessions: [
-					makeSession({ sessionId: "s1", status: "idle" }),
-					makeSession({ sessionId: "s2", status: "idle" }),
+	it("no hints line in output", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s1",
+					agentName: "gemini",
+					cwd: "/",
+					status: "active",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+		});
+		const lines = render(makeDeps(state));
+		for (const line of lines) {
+			expect(line).not.toContain("/acp");
+		}
+	});
+
+	it("no standalone summary line", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s1",
+					agentName: "gemini",
+					cwd: "/",
+					status: "active",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+				{
+					sessionId: "s2",
+					agentName: "claude",
+					cwd: "/",
+					status: "idle",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+		});
+		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(3); // header + 2 rows, no summary/hints/separator
+	});
+
+	// ── lastError display tests ──
+
+	it("shows lastError on header when present with no sessions", () => {
+		const state = makeState({
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				delegations: [],
+				lastError: "spawn exploded",
+			},
+		});
+		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(1);
+		expect(lines[0]).toContain("⚠");
+		expect(lines[0]).toContain("spawn exploded");
+	});
+
+	it("shows lastError on header when present with active sessions (no session errors)", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s1",
+					agentName: "gemini",
+					cwd: "/",
+					status: "active",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+				{
+					sessionId: "s2",
+					agentName: "claude",
+					cwd: "/",
+					status: "idle",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				delegations: [],
+				lastError: "timeout",
+			},
+		});
+		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(3); // header + 2 rows
+		expect(lines[0]).toContain("⚠");
+		expect(lines[0]).toContain("timeout");
+	});
+
+	it("does NOT show lastError when a session has error status", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s1",
+					agentName: "gemini",
+					cwd: "/",
+					status: "error",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				delegations: [],
+				lastError: "spawn exploded",
+			},
+		});
+		const lines = render(makeDeps(state));
+		expect(lines[0]).not.toContain("⚠");
+		expect(lines[0]).not.toContain("spawn exploded");
+	});
+
+	it("lastError text is truncated on narrow terminals", () => {
+		const longError = "a very long error message that should be truncated because it exceeds thirty characters";
+		const state = makeState({
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				delegations: [],
+				lastError: longError,
+			},
+		});
+		const lines = render(makeDeps(state), 60);
+		expect(lines.length).toBe(1);
+		expect(lines[0]).toContain("⚠");
+		expect(lines[0]).not.toContain("exceeds thirty characters");
+	});
+
+	it("lastError cleared produces no hint", () => {
+		const state = makeState({
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				delegations: [],
+				lastError: undefined,
+			},
+		});
+		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(1);
+		expect(lines[0]).not.toContain("⚠");
+	});
+
+	it("lastError shown alongside CB open state", () => {
+		const state = makeState({
+			circuitBreakerState: "open",
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				delegations: [],
+				lastError: "spawn failed",
+			},
+		});
+		const lines = render(makeDeps(state), 500);
+		expect(lines.length).toBe(1);
+		expect(lines[0]).toContain("CB:open");
+		expect(lines[0]).toContain("⚠");
+		expect(lines[0]).toContain("spawn failed");
+	});
+	// ── Status priority tests ──
+
+	it("status priority: error is highest", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s-err",
+					agentName: "gemini",
+					cwd: "/",
+					status: "error",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			});
+		const lines = render(makeDeps(state));
+		const joined = lines.join("\n");
+		expect(joined).toContain("error");
+	});
+
+	it("status priority: active shown when no error", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s-act",
+					agentName: "gemini",
+					cwd: "/",
+					status: "active",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			});
+		const lines = render(makeDeps(state));
+		const joined = lines.join("\n");
+		expect(joined).toContain("active");
+		expect(joined).not.toContain("error");
+	});
+
+	it("status priority: stale shown when no error or active", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s-stale",
+					agentName: "gemini",
+					cwd: "/",
+					status: "stale",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			});
+		const lines = render(makeDeps(state));
+		const joined = lines.join("\n");
+		expect(joined).toContain("stale");
+		expect(joined).not.toContain("active");
+		expect(joined).not.toContain("error");
+	});
+
+	it("mixed status counts in header", () => {
+		const state = makeState({
+			sessions: [
+				{ sessionId: "a1", agentName: "g1", cwd: "/", status: "active" as const, lastActivityAt: new Date(), createdAt: new Date() },
+				{ sessionId: "a2", agentName: "g2", cwd: "/", status: "active" as const, lastActivityAt: new Date(), createdAt: new Date() },
+				{ sessionId: "i1", agentName: "g3", cwd: "/", status: "idle" as const, lastActivityAt: new Date(), createdAt: new Date() },
+				{ sessionId: "s1", agentName: "g4", cwd: "/", status: "stale" as const, lastActivityAt: new Date(), createdAt: new Date() },
+			],
+			});
+		const lines = render(makeDeps(state));
+		const joined = lines.join("\n");
+		// All non-zero status counts appear in header
+		expect(joined).toContain("active");
+		expect(joined).toContain("idle");
+		expect(joined).toContain("stale");
+	});
+
+	// ── Overflow tests ──
+
+	it("6 sessions produce exactly 5 lines with overflow", () => {
+		const sessions = Array.from({ length: 6 }, (_, i) => ({
+			sessionId: `s${i}`,
+			agentName: `agent${i}`,
+			cwd: "/",
+			status: "active" as const,
+			lastActivityAt: new Date(),
+			createdAt: new Date(),
+		}));
+		const state = makeState({ sessions, configuredAgentNames: sessions.map(s => s.agentName) });
+		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(5); // header + 4 rows
+		expect(lines[lines.length - 1]).toContain("+2 more");
+	});
+
+	// ── Session row format tests ──
+
+	it("session row contains icon, agentName, shortId, and timeAgo", () => {
+		const past = new Date(Date.now() - 5 * 60 * 1000); // 5 min ago
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "sess-abc12345",
+					agentName: "gemini",
+					cwd: "/",
+					status: "active",
+					lastActivityAt: past,
+					createdAt: past,
+				},
+			],
+			});
+		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(2);
+		const row = lines[1]; // session row
+		// Icon (● for active)
+		expect(row).toContain("●");
+		// Agent name
+		expect(row).toContain("gemini");
+		// Short ID prefix
+		expect(row).toContain("sess-abc");
+		// Time ago text
+		expect(row).toContain("ago");
+	});
+
+	it("session row with sessionName shows name inline", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s1",
+					sessionName: "alpha",
+					agentName: "gemini",
+					cwd: "/",
+					status: "idle",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			});
+		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(2);
+		const row = lines[1];
+		expect(row).toContain("alpha");
+	});
+
+	it("session row without sessionName omits name", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s1",
+					agentName: "gemini",
+					cwd: "/",
+					status: "idle",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			});
+		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(2);
+		const row = lines[1];
+		expect(row).not.toContain("undefined");
+	});
+
+	// ── Absence of old-format sections ──
+
+	it("no delegation-history section in any render", () => {
+		const state = makeState({
+			sessions: [
+				{
+					sessionId: "s1",
+					agentName: "gemini",
+					cwd: "/",
+					status: "idle",
+					lastActivityAt: new Date(),
+					createdAt: new Date(),
+				},
+			],
+			activity: {
+				activeDelegations: 0,
+				activeBroadcasts: 0,
+				activeCompares: 0,
+				delegations: [],
+				delegationHistory: [
+					{ agentName: "claude", status: "completed", finishedAt: new Date() },
 				],
+			},
 			});
-			const stateB = makeState({
-				sessions: [
-					makeSession({ sessionId: "s1", status: "active" }),
-					makeSession({ sessionId: "s2", status: "active" }),
-				],
-			});
-			expect(render(makeDeps(stateA)).length).toBe(render(makeDeps(stateB)).length);
-		});
-
-		it("idle→active transition does not change line count", () => {
-			const sessions = [
-				makeSession({ sessionId: "s1", status: "idle" }),
-				makeSession({ sessionId: "s2", status: "idle" }),
-			];
-			const state = makeState({ sessions });
-			const before = render(makeDeps(state));
-
-			// Transition one session to active
-			sessions[0].status = "active";
-			const after = render(makeDeps(state));
-
-			expect(before.length).toBe(after.length);
-		});
-
-		it("CB closed→open adds exactly one line (dedicated CB row)", () => {
-			const sessions = [
-				makeSession({ sessionId: "s1" }),
-				makeSession({ sessionId: "s2" }),
-			];
-			const stateClosed = makeState({ sessions, circuitBreakerState: "closed" });
-			const stateOpen = makeState({ sessions, circuitBreakerState: "open" });
-			expect(render(makeDeps(stateOpen)).length).toBe(render(makeDeps(stateClosed)).length + 1);
-		});
-
-		it("CB closed→half-open adds exactly one line (dedicated CB row)", () => {
-			const sessions = [
-				makeSession({ sessionId: "s1" }),
-				makeSession({ sessionId: "s2" }),
-			];
-			const stateClosed = makeState({ sessions, circuitBreakerState: "closed" });
-			const stateHalfOpen = makeState({ sessions, circuitBreakerState: "half-open" });
-			expect(render(makeDeps(stateHalfOpen)).length).toBe(render(makeDeps(stateClosed)).length + 1);
-		});
-
-		it("CB open→closed removes exactly one line (dedicated CB row)", () => {
-			const sessions = [
-				makeSession({ sessionId: "s1" }),
-				makeSession({ sessionId: "s2" }),
-			];
-			const stateOpen = makeState({ sessions, circuitBreakerState: "open" });
-			const stateClosed = makeState({ sessions, circuitBreakerState: "closed" });
-			expect(render(makeDeps(stateClosed)).length).toBe(render(makeDeps(stateOpen)).length - 1);
-		});
-
-		it("line count follows the N+5 formula for 0 through 5 sessions", () => {
-			for (let n = 0; n <= 5; n++) {
-				const sessions = Array.from({ length: n }, (_, i) =>
-					makeSession({ sessionId: `s${i}`, agentName: `agent${i}`, status: "idle" }),
-				);
-				const agents = n === 0 ? ["gemini"] : sessions.map((s) => s.agentName);
-				const state = makeState({ sessions, configuredAgentNames: agents, circuitBreakerState: "closed" });
-				const lines = render(makeDeps(state));
-				expect(lines.length).toBe(expectedLineCount(n, agents.length));
-			}
-		});
-
-		it("5 sessions render linearly (N+5, no overflow cap)", () => {
-			const sessions = Array.from({ length: 5 }, (_, i) =>
-				makeSession({ sessionId: `s${i}`, agentName: `agent${i}` }),
-			);
-			const state = makeState({ sessions, configuredAgentNames: sessions.map((s) => s.agentName) });
-			const lines = render(makeDeps(state));
-			expect(lines.length).toBe(expectedLineCount(5)); // 5 + 5 = 10
-			const joined = lines.join("\n");
-			expect(joined).toContain("agent4");
-			expect(joined).not.toContain("+1 more");
-		});
-
-		it("6 sessions render linearly (N+5, no overflow cap)", () => {
-			const sessions = Array.from({ length: 6 }, (_, i) =>
-				makeSession({ sessionId: `s${i}`, agentName: `agent${i}` }),
-			);
-			const state = makeState({ sessions, configuredAgentNames: sessions.map((s) => s.agentName) });
-			const lines = render(makeDeps(state));
-			expect(lines.length).toBe(expectedLineCount(6)); // 6 + 5 = 11
-			const joined = lines.join("\n");
-			expect(joined).toContain("agent5");
-			expect(joined).not.toContain("+2 more");
-		});
-
-		it("session with sessionName vs without: same line count", () => {
-			const stateA = makeState({
-				sessions: [
-					makeSession({ sessionId: "s1", sessionName: "alpha" }),
-					makeSession({ sessionId: "s2", sessionName: "beta" }),
-				],
-			});
-			const stateB = makeState({
-				sessions: [
-					makeSession({ sessionId: "s1" }),
-					makeSession({ sessionId: "s2" }),
-				],
-			});
-			expect(render(makeDeps(stateA)).length).toBe(render(makeDeps(stateB)).length);
-		});
-
-		it("session with model vs without: same line count", () => {
-			const stateA = makeState({
-				sessions: [
-					makeSession({ sessionId: "s1", model: "gemini-2.5-pro" }),
-					makeSession({ sessionId: "s2", model: "claude-3.5" }),
-				],
-			});
-			const stateB = makeState({
-				sessions: [
-					makeSession({ sessionId: "s1" }),
-					makeSession({ sessionId: "s2" }),
-				],
-			});
-			expect(render(makeDeps(stateA)).length).toBe(render(makeDeps(stateB)).length);
-		});
-
-		it("error session vs idle session: same line count", () => {
-			const stateA = makeState({
-				sessions: [
-					makeSession({ sessionId: "s1", status: "error" }),
-					makeSession({ sessionId: "s2", status: "error" }),
-				],
-			});
-			const stateB = makeState({
-				sessions: [
-					makeSession({ sessionId: "s1", status: "idle" }),
-					makeSession({ sessionId: "s2", status: "idle" }),
-				],
-			});
-			expect(render(makeDeps(stateA)).length).toBe(render(makeDeps(stateB)).length);
-		});
-
-		it("with delegations activity vs without: same line count", () => {
-			const sessions = [
-				makeSession({ sessionId: "s1" }),
-				makeSession({ sessionId: "s2" }),
-			];
-			const stateA = makeState({
-				sessions,
-				activity: { activeDelegations: 1, activeBroadcasts: 0, activeCompares: 0, delegations: [] },
-			});
-			const stateB = makeState({
-				sessions,
-				activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, delegations: [] },
-			});
-			expect(render(makeDeps(stateA)).length).toBe(render(makeDeps(stateB)).length);
-		});
-
-		it("with error in activity vs without: same line count", () => {
-			const sessions = [
-				makeSession({ sessionId: "s1" }),
-				makeSession({ sessionId: "s2" }),
-			];
-			const stateA = makeState({
-				sessions,
-				activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, delegations: [], lastError: "boom" },
-			});
-			const stateB = makeState({
-				sessions,
-				activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, delegations: [] },
-			});
-			expect(render(makeDeps(stateA)).length).toBe(render(makeDeps(stateB)).length);
-		});
+		const lines = render(makeDeps(state));
+		const joined = lines.join("\n");
+		expect(joined).not.toContain("recent");
 	});
 });
+

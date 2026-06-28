@@ -186,13 +186,52 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function closeSession(handle: AcpSessionHandle, closeReason: string, autoClosed = false): Promise<void> {
+    // Idempotent: a handle already torn down must be a no-op. This lets the
+    // completion / error call sites in acp_prompt invoke closeSession without
+    // risk of double-disposing (e.g. error path after a completion teardown).
+    if (handle.disposed) {
+      return;
+    }
     handle.autoClosed = autoClosed;
     handle.closeReason = closeReason;
     archiveSession(handle);
+    // Invoke the canonical teardown directly rather than relying on
+    // sessionMgr.remove to call handle.dispose(). This keeps teardown robust
+    // even when the SessionManager is instrumented/mocked, and double-dispose
+    // is prevented by the disposed guard on handle.dispose.
+    await handle.dispose();
     await sessionMgr.remove(handle.sessionId);
     activeAdapters.delete(handle.sessionId);
     busySessions.delete(handle.sessionId);
     eventLog.append("session_closed", { sessionId: handle.sessionId, agentName: handle.agentName, closeReason, autoClosed });
+  }
+
+  /** A session is single-shot (auto-close on completion) when the caller did
+   *  not request reuse via session_id/session_name. Such sessions are closed
+   *  through `closeSession` once the prompt completes, so the adapter
+   *  subprocess and registry entry do not leak.
+   *  `dispose:true` is handled separately (ephemeral) and excluded here. */
+  function shouldAutoCloseOnCompletion(params: { session_id?: string; session_name?: string; dispose?: boolean }): boolean {
+    return !params.dispose && !params.session_id && !normalizeOptionalSessionName(params.session_name);
+  }
+
+  /** Auto-close a completed single-shot session on the next macrotask.
+   *
+   *  Deferral (rather than an inline `await closeSession` in the finally
+   *  block) preserves re-entrancy for an immediate follow-up operation
+   *  issued within the same synchronous stack (e.g. an `acp_cancel` or a
+   *  reuse-by-id prompt that runs before control returns to the event
+   *  loop): such a call still observes the live adapter in `activeAdapters`.
+   *  Once the stack unwinds, the session is archived, the adapter subprocess
+   *  is disposed, and the registry entry is removed — so independent
+   *  subsequent operations no longer observe a leaked live session. */
+  function scheduleCompletionClose(handle: AcpSessionHandle, params: { session_id?: string; session_name?: string; dispose?: boolean }): void {
+    if (params.dispose || handle.disposed || !handle.completedAt) return;
+    if (!shouldAutoCloseOnCompletion(params)) return;
+    setImmediate(() => {
+      if (handle.disposed) return;
+      closeSession(handle, 'completed', false).catch((e) => logger.debug('deferred completion close failed', e));
+    });
   }
 
   function markPromptLifecycle(handle: AcpSessionHandle, promptResult: AcpPromptResult): void {
@@ -288,6 +327,7 @@ export default function (pi: ExtensionAPI) {
   const monitor = new HealthMonitor({
     intervalMs: config.healthCheckIntervalMs ?? 5_000,
     staleTimeoutMs: config.staleTimeoutMs ?? 600_000,
+    completedIdleTtlMs: config.completedIdleTtlMs ?? config.staleTimeoutMs ?? 600_000,
     needsAttentionMs: config.needsAttentionMs ?? 120_000,
     autoInterruptMs: config.autoInterruptMs ?? 300_000,
     interruptGraceMs: config.interruptGraceMs ?? 10_000,
@@ -304,7 +344,7 @@ export default function (pi: ExtensionAPI) {
 
       // Check if this is a prompt stall (activity-based) vs idle stale
       const isPromptStall = handle.isPrompting === true;
-      const closeReason = getSessionAutoCloseReason(handle, config.staleTimeoutMs ?? 600_000);
+      const closeReason = getSessionAutoCloseReason(handle, config.staleTimeoutMs ?? 600_000, undefined, config.completedIdleTtlMs ?? config.staleTimeoutMs ?? 600_000);
 
       if (isPromptStall) {
         // Escalation: cancel → grace → kill
@@ -383,7 +423,7 @@ export default function (pi: ExtensionAPI) {
         ? "error"
         : busySessions.get(s.sessionId)
           ? "active"
-          : getSessionAutoCloseReason(s, config.staleTimeoutMs ?? 600_000)
+          : getSessionAutoCloseReason(s, config.staleTimeoutMs ?? 600_000, undefined, config.completedIdleTtlMs ?? config.staleTimeoutMs ?? 600_000)
             ? "stale"
             : "idle",
       lastActivityAt: s.lastActivityAt,
@@ -505,6 +545,10 @@ export default function (pi: ExtensionAPI) {
       mode: metadata?.mode,
       planStatus: "none",
       dispose: async () => {
+        // Idempotent: a second dispose (e.g. closeSession after sessionMgr.remove
+        // already disposed, or a redundant teardown path) must be a no-op so we
+        // never double-dispose the adapter / subprocess.
+        if (handle.disposed) return;
         handle.disposed = true;
         archiveSession(handle);
         adapter.dispose();
@@ -671,6 +715,7 @@ ${pr.text}`;
                 return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
               } finally {
                 busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
+                scheduleCompletionClose(handle, params);
               }
             } catch (freshErr) { freshAdapter.dispose(); throw freshErr; }
           }
@@ -679,6 +724,7 @@ ${pr.text}`;
           const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
             onActivity: (sid) => monitor.touch(sid),
           });
+          let archivedHandle: AcpSessionHandle | undefined;
           try {
             await withTimeoutMs(adapter.spawn(), config.staleTimeoutMs, `acp_spawn(archived:${target.sessionId})`);
             await adapter.initialize();
@@ -711,6 +757,7 @@ ${pr.text}`;
                 const freshSessionId = await freshAdapter.newSession(params.cwd ?? ctx.cwd);
                 if (target.sessionName) sessionNameStore.register(target.sessionName, freshSessionId);
                 const handle = makeSessionHandle(freshSessionId, agentName, params.cwd ?? ctx.cwd, freshAdapter, undefined, target.sessionName);
+                archivedHandle = handle;
                 handle.busy = true; busySessions.set(freshSessionId, true);
                 try {
                   const pr = (await withTimeoutMs(freshAdapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(fresh:${freshSessionId})`)) as AcpPromptResult;
@@ -720,10 +767,19 @@ ${pr.text}`;
                   return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
                 } finally {
                   busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
+                  scheduleCompletionClose(handle, params);
                 }
-              } catch (freshErr) { freshAdapter.dispose(); throw freshErr; }
+              } catch (freshErr) {
+                if (archivedHandle) {
+                  await closeSession(archivedHandle, "error");
+                } else {
+                  freshAdapter.dispose();
+                }
+                throw freshErr;
+              }
             }
             const handle = makeSessionHandle(target.sessionId, agentName, archived.cwd ?? params.cwd ?? ctx.cwd, adapter, undefined, target.sessionName);
+            archivedHandle = handle;
             handle.busy = true; busySessions.set(target.sessionId, true);
             try {
               const pr = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(archived:${target.sessionId})`)) as AcpPromptResult;
@@ -731,13 +787,22 @@ ${pr.text}`;
               return { ...pr, sessionId: target.sessionId, sessionName: handle.sessionName };
             } finally {
               busySessions.delete(target.sessionId); handle.busy = false; archiveSession(handle);
+              scheduleCompletionClose(handle, params);
             }
-          } catch (err) { adapter.dispose(); throw err; }
+          } catch (err) {
+            if (archivedHandle) {
+              await closeSession(archivedHandle, "error");
+            } else {
+              adapter.dispose();
+            }
+            throw err;
+          }
         }
         const agentCfg = getAgentConfigOrThrow(agentName);
         const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
           onActivity: (sid) => monitor.touch(sid),
         });
+        let handle: AcpSessionHandle | undefined;
         try {
           await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_spawn(new:${agentName})`);
           await adapter.initialize();
@@ -747,7 +812,7 @@ ${pr.text}`;
           if (target.sessionName && !params.dispose) {
             sessionNameStore.register(target.sessionName, sessionId);
           }
-          const handle = makeSessionHandle(sessionId, agentName, params.cwd ?? ctx.cwd, adapter, undefined, params.dispose ? undefined : target.sessionName);
+          handle = makeSessionHandle(sessionId, agentName, params.cwd ?? ctx.cwd, adapter, undefined, params.dispose ? undefined : target.sessionName);
           handle.busy = true;
           busySessions.set(sessionId, true);
           handle.lastActivityAt = new Date();
@@ -766,10 +831,23 @@ ${pr.text}`;
             handle.isPrompting = false;
             monitor.markPromptEnd(sessionId);
             archiveSession(handle);
-            if (params.dispose) adapter.dispose();
+            if (params.dispose) {
+              await closeSession(handle, "completed-ephemeral");
+            }
+            scheduleCompletionClose(handle, params);
           }
         } catch (err) {
-          adapter.dispose();
+          // If a handle was already registered (spawn/initialize succeeded but
+          // the prompt threw), tear it down via the canonical closeSession path
+          // so the registry entry, monitor registration, and activeAdapters
+          // mapping are all cleaned up — not just the raw adapter. For the
+          // pre-handle failure case (spawn/initialize), no handle exists yet,
+          // so dispose the bare adapter directly.
+          if (handle) {
+            await closeSession(handle, "error");
+          } else {
+            adapter.dispose();
+          }
           throw err;
         }
       }, `acp_prompt(${agentName})`);

@@ -28,6 +28,10 @@ export type PromptStallReason = "slow-prompt" | "stalled-prompt";
 export interface HealthMonitorOptions {
   intervalMs: number;
   staleTimeoutMs: number;
+  /** Shorter, dedicated TTL for completed (non-busy) idle sessions.
+   * When set, reaps reuse sessions and their subprocesses sooner than the
+   * long stall `staleTimeoutMs`. Falls back to staleTimeoutMs if unset. */
+  completedIdleTtlMs?: number;
   /** Idle threshold (ms) before emitting needs-attention for active prompts. Default: 60_000 */
   needsAttentionMs?: number;
   /** Idle threshold (ms) before auto-interrupting stalled prompts. Default: 300_000, 0 = disabled */
@@ -135,6 +139,10 @@ export class HealthMonitor {
     const toRemove: string[] = [];
 
     for (const [id, entry] of this.entries) {
+      // Idempotency: a session already disposed by the completion hook (T1)
+      // or a prior reaper cycle (T2) must be cleanly dropped from the monitor
+      // on the next tick without being reprocessed as stale (which would route
+      // it back through onStale -> closeSession -> dispose, a double-dispose).
       if (entry.session.disposed) {
         toRemove.push(id);
         continue;
@@ -143,6 +151,13 @@ export class HealthMonitor {
       // Check idle/stale detection (existing)
       if (this.getStaleReason(entry.session)) {
         staleIds.push(id);
+        // The stale session is being handed off to the `onStale` callback,
+        // which is contractually responsible for closing it (dispose adapter,
+        // remove from sessionMgr). Drop it from the monitor's internal map now
+        // so `monitor.size` converges to zero within a single check() -> onStale
+        // cycle instead of lingering until the next tick. Idempotent with the
+        // disposed-detection branch above: a session already reaped is a no-op.
+        toRemove.push(id);
         continue;
       }
 
@@ -163,6 +178,10 @@ export class HealthMonitor {
       }
       if (stallReason === "stalled-prompt") {
         staleIds.push(id);
+        // Same as the idle/stale branch above: the stalled-prompt is handed
+        // to `onStale`, which escalates to cancel -> kill -> closeSession.
+        // Remove from the monitor map so size converges in one cycle.
+        toRemove.push(id);
         continue;
       }
     }
@@ -175,7 +194,7 @@ export class HealthMonitor {
   }
 
   private getStaleReason(session: HealthMonitorable): "stalled-no-response" | "completed-idle" | undefined {
-    return getSessionAutoCloseReason(session, this.opts.staleTimeoutMs);
+    return getSessionAutoCloseReason(session, this.opts.staleTimeoutMs, undefined, this.opts.completedIdleTtlMs);
   }
 
   /**

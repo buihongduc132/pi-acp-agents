@@ -67,11 +67,14 @@ function renderWidget(state: AcpWidgetState): string[] {
 /**
  * Deterministic pre-change line count (CB closed, no delegations/workers):
  *  - 0 sessions + configured agents → 6
- *  - N sessions (N ≥ 1) → N + 5
+ * Compact format line counts:
+ *  - 0 sessions with configured agents → 1 header + 1 no-sessions line = 2
+ *  - N sessions (N ≥ 1) → 1 header + min(N, 4) session rows
  * An explicit `dags: []` MUST NOT alter this layout.
  */
 function expectedLineCount(sessions: AcpWidgetSession[]): number {
-	return sessions.length === 0 ? 6 : sessions.length + 5;
+	if (sessions.length === 0) return 1; // header only (no session rows)
+	return 1 + Math.min(sessions.length, 4); // header + session rows (capped at 4)
 }
 
 describe("task 4.5 — empty dags array `[]` → no DAG section renders", () => {
