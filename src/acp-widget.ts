@@ -2,7 +2,9 @@
  * ACP TUI Widget — persistent panel for ACP agent status
  *
  * Renders in pi's TUI status area, similar to pi-agent-teams widget.
- * Shows: header, circuit breaker state, per-session rows, totals, hints.
+ * Compact format: 1 header line (with inline CB state + session summary)
+ * + up to 4 session rows (overflow collapsed into last row)
+ * + DAG progress section (when DAGs are active).
  */
 
 import type { Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
@@ -120,19 +122,6 @@ const STATUS_COLOR: Record<AcpSessionStatus, ThemeColor> = {
 	error: "error",
 };
 
-const CB_ICON: Record<string, { icon: string; color: ThemeColor }> = {
-	closed: { icon: "●", color: "success" },
-	open: { icon: "✕", color: "error" },
-	"half-open": { icon: "◐", color: "warning" },
-};
-
-const WORKER_STATUS_ICON: Record<string, { icon: string; color: ThemeColor }> = {
-	online: { icon: "●", color: "success" },
-	idle: { icon: "○", color: "muted" },
-	busy: { icon: "●", color: "accent" },
-	offline: { icon: "✕", color: "dim" },
-};
-
 /**
  * DAG status → `{ icon, color }` styling. Reuses the existing widget palette
  * (`success`/`warning`/`error`/`muted`/`dim`/`accent`) — no new colors introduced.
@@ -144,6 +133,13 @@ export const DAG_STATUS_ICON: Record<DagStatus, { icon: string; color: ThemeColo
 	cancelled: { icon: "◻", color: "dim" },
 	pending: { icon: "·", color: "muted" },
 	stale: { icon: "◻", color: "warning" },
+};
+
+const WORKER_STATUS_ICON: Record<string, { icon: string; color: ThemeColor }> = {
+	online: { icon: "●", color: "success" },
+	idle: { icon: "○", color: "muted" },
+	busy: { icon: "●", color: "accent" },
+	offline: { icon: "✕", color: "dim" },
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -173,15 +169,26 @@ function shortId(id: string): string {
  * Filled blocks (`█`) = `completed + failed`; empty blocks (`░`) = the
  * remainder up to the bar width (`min(total, 8)`). When `total === 0` returns
  * an empty string (no progress to show).
- *
- * Example: `formatProgress(2, 0, 5)` → `[██░░░] 2/5`.
  */
+export function formatProgress(
+	completed: number,
+	failed: number,
+	total: number,
+): string {
+	if (total <= 0) return "";
+	const width = Math.min(total, 8);
+	const filled = Math.max(0, Math.min(completed + failed, width));
+	const empty = width - filled;
+	const bar = "█".repeat(filled) + "░".repeat(empty);
+	return `[${bar}] ${completed}/${total}`;
+}
+
 /**
  * Map a persisted `DagIndexEntry` (summary row from `dag-index.json`) into an
  * `AcpWidgetDag` row for the TUI widget.
  *
  * This is the single authoritative place where the two shapes are bridged.
- * Field-name remapping (task 3.4 verification):
+ * Field-name remapping:
  *
  *   DagIndexEntry      → AcpWidgetDag
  *   ────────────────────────────────────────────
@@ -195,11 +202,6 @@ function shortId(id: string): string {
  *   (absent)           → totalWaves?      (index carries no wave info → undefined)
  *   createdAt: string  → createdAt: Date  (ISO → Date)
  *   updatedAt: string  → updatedAt: Date  (ISO → Date)
- *
- * Wave info (`currentWave`, `totalWaves`) is intentionally NOT pulled from the
- * index — `DagIndexEntry` does not carry it. The widget renders wave info only
- * when richer sources populate it; for the `DagStore.listAll()` path they
- * remain undefined and the row omits the wave segment.
  */
 export function dagIndexEntryToWidgetDag(entry: DagIndexEntry): AcpWidgetDag {
 	return {
@@ -216,28 +218,12 @@ export function dagIndexEntryToWidgetDag(entry: DagIndexEntry): AcpWidgetDag {
 	};
 }
 
-export function formatProgress(
-	completed: number,
-	failed: number,
-	total: number,
-): string {
-	if (total <= 0) return "";
-	const width = Math.min(total, 8);
-	const filled = Math.max(0, Math.min(completed + failed, width));
-	const empty = width - filled;
-	const bar = "█".repeat(filled) + "░".repeat(empty);
-	return `[${bar}] ${completed}/${total}`;
-}
-
 /**
  * Render a single DAG summary row (plain text — no theme coloring).
  *
  * Format: `<icon> <dagId> <progress> wave <w>/<totalW> <age> [fail:<failed>]`
  *  - the `wave <w>/<totalW>` segment is omitted when `totalWaves` is absent
  *  - the `[fail:<failed>]` segment is omitted when `failed === 0`
- *
- * The `<icon>` comes from `DAG_STATUS_ICON[dag.status]`. `<progress>` comes
- * from `formatProgress`. `<age>` comes from `timeAgo(dag.updatedAt)`.
  */
 export function renderDagRow(dag: AcpWidgetDag): string {
 	const icon = DAG_STATUS_ICON[dag.status]?.icon ?? "○";
@@ -260,12 +246,10 @@ export function renderDagRow(dag: AcpWidgetDag): string {
 }
 
 /**
- * Render a collapsed one-line summary of recent DAGs (D2).
+ * Render a collapsed one-line summary of recent DAGs.
  *
  * Each entry renders as `<dagId>:<icon>` joined by single spaces. The list is
  * capped at 5 entries (preserving input order) to keep the widget bounded.
- *
- * Example: `renderDagSummary([completed, failed])` → `a1b2c3:✓ d4e5f6:✕`.
  */
 export function renderDagSummary(dags: AcpWidgetDag[]): string {
 	return dags
@@ -275,9 +259,9 @@ export function renderDagSummary(dags: AcpWidgetDag[]): string {
 }
 
 /**
- * Render the full DAG section for the widget state (task 2.3).
+ * Render the full DAG section for the widget state.
  *
- * Decision rules (see `design.md` D2/D3/D4):
+ * Decision rules:
  *  - When `dags` is absent or empty → return `""` (no DAG section rendered).
  *  - When any DAG has `status === "running"` → return one `renderDagRow` line per
  *    entry (joined by `\n`), so users get live per-DAG progress.
@@ -293,9 +277,7 @@ export function renderDagSection(state: AcpWidgetState): string {
 	const visible = dags.filter((d) => d.status !== "pending");
 	if (visible.length === 0) return "";
 
-	// D2 — cap the render list at 5 entries, ordered by `updatedAt` descending
-	// (most-recent first). Prevents pathological render cases when many DAGs
-	// exist, and matches the widget's bounded-list pattern.
+	// Cap the render list at 5 entries, ordered by `updatedAt` descending
 	const recent = [...visible]
 		.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
 		.slice(0, 5);
@@ -342,140 +324,91 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 
 				// Hide when nothing to show
 				const hasWorkers = (state.workers?.length ?? 0) > 0;
+				const hasDags = (state.dags?.length ?? 0) > 0;
 				if (
 					state.sessions.length === 0 &&
 					state.configuredAgentNames.length === 0 &&
-					!hasWorkers
+					!hasWorkers &&
+					!hasDags
 				) {
 					return [];
 				}
 
 				const lines: string[] = [];
 
-				// ── Header ──
-				const header = " " + theme.bold(theme.fg("accent", "ACP Agents"));
+				// ── Compact header ──
+				// Build CB suffix
+				const cbSuffix =
+					state.circuitBreakerState === "open"
+						? " ⚠ CB:open"
+						: state.circuitBreakerState === "half-open"
+							? " ⚠ CB:half-open"
+							: "";
+				const cbColored = cbSuffix
+					? theme.fg("error", cbSuffix)
+					: "";
+
+				// Build session summary
+				let sessionSummary: string;
+				if (state.sessions.length === 0) {
+					sessionSummary = theme.fg("muted", "idle");
+				} else {
+					// Count sessions by status
+					const counts: Record<AcpSessionStatus, number> = {
+						active: 0, idle: 0, stale: 0, error: 0,
+					};
+					for (const s of state.sessions) counts[s.status]++;
+
+					const parts: string[] = [];
+					for (const status of ["active", "idle", "stale", "error"] as AcpSessionStatus[]) {
+						if (counts[status] > 0) {
+							parts.push(`${counts[status]} ${theme.fg(STATUS_COLOR[status], status)}`);
+						}
+					}
+					sessionSummary = parts.join(" · ");
+				}
+
+				const header = ` ${theme.bold(theme.fg("accent", "◉"))} ACP${cbColored} ${sessionSummary}`;
 				lines.push(truncateToWidth(header, width));
 
-				// ── Circuit breaker state (only show if not closed) ──
-				if (state.circuitBreakerState !== "closed") {
-					const cb = CB_ICON[state.circuitBreakerState] ?? CB_ICON["open"];
-					const cbLabel =
-						state.circuitBreakerState === "half-open"
-							? "half-open (probing)"
-							: state.circuitBreakerState;
-					lines.push(
-						truncateToWidth(
-							` ${theme.fg(cb.color, `${cb.icon} circuit breaker: ${cbLabel}`)}`,
-							width,
-						),
+				// ── Session rows (max 4, overflow on last) ──
+				if (state.sessions.length > 0) {
+					const maxShow = 4;
+					const sessions = state.sessions;
+					const nameWidth = Math.max(
+						...sessions.map((s) => visibleWidth(s.agentName)),
+						8,
 					);
-				}
+					const overflow = Math.max(0, sessions.length - maxShow);
+					const shown = sessions.slice(0, maxShow);
 
-				const totalTransient =
-					state.activity.activeDelegations +
-					state.activity.activeBroadcasts +
-					state.activity.activeCompares;
-				const activitySummary = state.activity.lastError
-					? `error: ${state.activity.lastError}`
-					: totalTransient > 1
-						? `busy (${totalTransient})`
-						: state.activity.activeDelegations > 0
-							? "delegating"
-							: state.activity.activeBroadcasts > 0
-								? "broadcasting"
-								: state.activity.activeCompares > 0
-									? "comparing"
-									: "idle";
-				const activityColor: ThemeColor = state.activity.lastError
-					? "error"
-					: totalTransient > 0
-						? "accent"
-						: "muted";
-				lines.push(
-					truncateToWidth(
-						` ${theme.fg(activityColor, `status: ${activitySummary}`)}`,
-						width,
-					),
-				);
+					for (let i = 0; i < shown.length; i++) {
+						const session = shown[i];
+						const icon = theme.fg(
+							STATUS_COLOR[session.status],
+							STATUS_ICON[session.status],
+						);
+						const name = padRight(session.agentName, nameWidth);
+						const friendlyName = session.sessionName
+							? ` ${theme.fg("accent", session.sessionName)}`
+							: "";
+						const id = theme.fg("dim", shortId(session.sessionId));
+						const time = theme.fg("dim", timeAgo(session.lastActivityAt));
 
-				// ── Delegation rows (when active) ──
-				if (state.activity.delegations && state.activity.delegations.length > 0) {
-					for (const del of state.activity.delegations) {
-						const phaseIcon = del.phase === "prompting" ? "\u27F3" : del.phase === "done" ? "\u2713" : "\u23F3";
-						const delLine = ` ${theme.fg("accent", `${phaseIcon} ${del.agentName}`)} ${theme.fg("dim", del.phase)}`;
-						const delText = del.text ? ` ${theme.fg("dim", truncateToWidth(del.text, 40))}` : "";
-						lines.push(truncateToWidth(`${delLine}${delText}`, width));
+						let row = ` ${icon} ${name}${friendlyName} ${id} · ${time}`;
+
+						// Append overflow count to last shown row
+						if (overflow > 0 && i === shown.length - 1) {
+							row += theme.fg("dim", ` +${overflow} more`);
+						}
+
+						lines.push(truncateToWidth(row, width));
 					}
 				}
 
-				// ── Recent delegations (from history) ──
-				if (state.activity.delegationHistory && state.activity.delegationHistory.length > 0) {
-					const recent = state.activity.delegationHistory.slice(-5);
-					lines.push(
-						truncateToWidth(
-							` ${theme.fg("dim", "─ recent ─")}`,
-							width,
-						),
-					);
-					for (const entry of recent) {
-						const icon = entry.status === "completed" ? "\u2713" : "\u2717";
-						const color = entry.status === "completed" ? "success" : "error";
-						const errText = entry.error ? ` ${theme.fg("error", truncateToWidth(entry.error, 40))}` : "";
-						const histLine = `   ${theme.fg(color, `${icon} ${entry.agentName}`)}${errText}`;
-						lines.push(truncateToWidth(histLine, width));
-					}
-				}
-
-				// ── No sessions ──
-				if (state.sessions.length === 0) {
-					const agentList = state.configuredAgentNames.join(", ") || "none";
-					lines.push(
-						truncateToWidth(
-							` ${theme.fg("dim", `(no active sessions)  agents: ${agentList}`)}`,
-							width,
-						),
-					);
-					// Don't return early — workers may still need rendering below
-				}
-
-				// ── Build rows ──
-				// Compute column widths
-				const nameWidth = Math.max(
-					...state.sessions.map((s) => visibleWidth(s.agentName)),
-					8, // minimum
-				);
-				const idWidth = 8; // short session ID
-
-				for (const session of state.sessions) {
-					const icon = theme.fg(
-						STATUS_COLOR[session.status],
-						STATUS_ICON[session.status],
-					);
-					const name = theme.bold(padRight(session.agentName, nameWidth));
-					const id = theme.fg(
-						"dim",
-						shortId(session.sessionId).padEnd(idWidth),
-					);
-					const friendlyName = session.sessionName
-						? ` ${theme.fg("accent", session.sessionName)}`
-						: "";
-					const statusLabel = theme.fg(
-						STATUS_COLOR[session.status],
-						padRight(session.status, 7),
-					);
-					const modelLabel = session.model
-						? ` ${theme.fg("muted", session.model)}`
-						: "";
-					const activity = theme.fg("dim", timeAgo(session.lastActivityAt));
-
-					const row = ` ${icon} ${name}${friendlyName} ${id} ${statusLabel}${modelLabel} · ${activity}`;
-					lines.push(truncateToWidth(row, width));
-				}
-
-				// ── DAG progress rows (between sessions and workers — D4) ──
+				// ── DAG progress section ──
 				const dagSection = renderDagSection(state);
 				if (dagSection !== "") {
-					// Header line only when DAG rows are rendered (task 2.5)
 					lines.push(
 						truncateToWidth(" " + theme.fg("dim", "─ DAGs ─"), width),
 					);
@@ -493,7 +426,6 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 						),
 					);
 					for (const w of state.workers) {
-						// Resolve status icon — use stale icon for stale workers, otherwise map by status
 						const statusBase = w.status.startsWith("stale") ? "offline" : w.status;
 						const wIcon = WORKER_STATUS_ICON[statusBase] ?? { icon: "○", color: "muted" as ThemeColor };
 						const statusColor: ThemeColor = w.status.startsWith("stale") ? "warning" : wIcon.color;
@@ -503,65 +435,6 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 						lines.push(truncateToWidth(workerLine, width));
 					}
 				}
-
-				// ── Separator + Summary ──
-				lines.push(
-					truncateToWidth(
-						" " + theme.fg("dim", "─".repeat(Math.max(0, width - 2))),
-						width,
-					),
-				);
-
-				const totalActive = state.sessions.filter(
-					(s) => s.status === "active",
-				).length;
-				const totalIdle = state.sessions.filter(
-					(s) => s.status === "idle",
-				).length;
-				const totalStale = state.sessions.filter(
-					(s) => s.status === "stale",
-				).length;
-				const totalSessions = state.sessions.length;
-
-				const summaryParts: string[] = [
-					`${totalSessions} session${totalSessions !== 1 ? "s" : ""}`,
-				];
-				if (totalActive > 0) summaryParts.push(`${totalActive} active`);
-				if (totalIdle > 0) summaryParts.push(`${totalIdle} idle`);
-				if (totalStale > 0) summaryParts.push(`${totalStale} stale`);
-
-				// Worker summary counts
-				const workerCount = (state.workers?.length ?? 0);
-				if (workerCount > 0) {
-					const wBusy = state.workers!.filter((w) => w.status === "busy").length;
-					const wStale = state.workers!.filter((w) => w.stale).length;
-					const wIdle = workerCount - wBusy - wStale - state.workers!.filter((w) => w.status === "offline").length;
-					const wParts: string[] = [`${workerCount} worker${workerCount !== 1 ? "s" : ""}`];
-					if (wBusy > 0) wParts.push(`${wBusy} busy`);
-					if (wIdle > 0) wParts.push(`${wIdle} idle`);
-					if (wStale > 0) wParts.push(`${wStale} stale`);
-					summaryParts.push(wParts.join(" "));
-				}
-
-				const agentsConfigured = state.configuredAgentNames.length;
-				const defaultLabel = state.defaultAgent
-					? ` · default: ${state.defaultAgent}`
-					: "";
-
-				lines.push(
-					truncateToWidth(
-						` ${theme.fg("muted", summaryParts.join(" · "))}  ${theme.fg("dim", `${agentsConfigured} agent${agentsConfigured !== 1 ? "s" : ""} configured${defaultLabel}`)}`,
-						width,
-					),
-				);
-
-				// ── Hints ──
-				lines.push(
-					truncateToWidth(
-						theme.fg("dim", " /acp · /acp-config · acp_status · acp_prompt <msg>"),
-						width,
-					),
-				);
 
 				return lines;
 			},

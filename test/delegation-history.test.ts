@@ -1,8 +1,8 @@
 /**
- * TDD Tests: Delegation History Tracking (T1) + Widget Recent Section (T2)
+ * TDD Tests: Delegation History Tracking (T1) + Widget Compact Format (T2)
  *
  * T1: Track completed delegations in a history array (cap 20)
- * T2: Widget shows recent delegation history section
+ * T2: Compact format does NOT render delegation history — verify no crash
  *
  * Run: npx vitest run test/delegation-history.test.ts
  */
@@ -45,7 +45,7 @@ function mkRecent(count: number): AcpDelegationHistoryEntry[] {
 
 // ── Widget render tests ──────────────────────────────────────────────
 
-describe("T2: Widget recent delegation section", () => {
+describe("T2: Widget delegation history — compact format", () => {
 	const mockTheme = {
 		bold: (s: string) => s,
 		fg: (_c: string, s: string) => s,
@@ -62,17 +62,19 @@ describe("T2: Widget recent delegation section", () => {
 		expect(recentLines.length).toBe(0);
 	});
 
-	it("renders recent delegations when present in activity.delegationHistory", () => {
+	it("renders header only when delegations present (compact format)", () => {
 		const recent = mkRecent(3);
 		const state = mkState({ activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, delegations: [], delegationHistory: recent } });
 		const factory = createAcpWidget({ getState: () => state });
 		const widget = factory({}, mockTheme as any);
 		const lines = widget.render(80);
+		// Compact format does not render "recent" section
+		expect(lines.length).toBe(1); // header only
 		const recentLines = lines.filter(l => l.includes("recent"));
-		expect(recentLines.length).toBeGreaterThan(0);
+		expect(recentLines.length).toBe(0);
 	});
 
-	it("renders recent delegations from activity.delegationHistory", () => {
+	it("renders header only for activity.delegationHistory (compact format)", () => {
 		const recent = mkRecent(2);
 		const state = mkState({ activity: {
 			activeDelegations: 0,
@@ -84,11 +86,12 @@ describe("T2: Widget recent delegation section", () => {
 		const factory = createAcpWidget({ getState: () => state });
 		const widget = factory({}, mockTheme as any);
 		const lines = widget.render(80);
+		expect(lines.length).toBe(1); // header only, no sessions
 		const recentLines2 = lines.filter(l => l.includes("recent"));
-		expect(recentLines2.length).toBeGreaterThan(0);
+		expect(recentLines2.length).toBe(0);
 	});
 
-	it("shows success indicator for successful delegations", () => {
+	it("compact format does not show history success entries", () => {
 		const recent: AcpDelegationHistoryEntry[] = [{
 			agentName: "gemini",
 			status: "completed",
@@ -98,11 +101,11 @@ describe("T2: Widget recent delegation section", () => {
 		const factory = createAcpWidget({ getState: () => state });
 		const widget = factory({}, mockTheme as any);
 		const lines = widget.render(80);
-		const geminiLines = lines.filter(l => l.includes("gemini"));
-		expect(geminiLines.length).toBeGreaterThan(0);
+		// Widget renders without error; header only
+		expect(lines.length).toBe(1);
 	});
 
-	it("shows error indicator for failed delegations", () => {
+	it("compact format does not show history error entries", () => {
 		const recent: AcpDelegationHistoryEntry[] = [{
 			agentName: "claude",
 			status: "error",
@@ -113,32 +116,27 @@ describe("T2: Widget recent delegation section", () => {
 		const factory = createAcpWidget({ getState: () => state });
 		const widget = factory({}, mockTheme as any);
 		const lines = widget.render(80);
-		const claudeLines = lines.filter(l => l.includes("claude"));
-		expect(claudeLines.length).toBeGreaterThan(0);
+		// Widget renders without error; header only
+		expect(lines.length).toBe(1);
 	});
 
-	it("caps display to 5 most recent entries", () => {
+	it("compact format does not render history entries (capped or not)", () => {
 		const recent = mkRecent(10);
 		const state = mkState({ activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, delegations: [], delegationHistory: recent } });
 		const factory = createAcpWidget({ getState: () => state });
 		const widget = factory({}, mockTheme as any);
 		const lines = widget.render(80);
-		// Should show at most 5 agent entries from 10 history items
-		const agentLines = lines.filter(l => l.includes("gemini") || l.includes("claude"));
-		// Widget shows last 5 entries from history
-		expect(agentLines.length).toBeGreaterThan(0);
+		// Compact format: header only, no history rows
+		expect(lines.length).toBe(1);
 	});
 
-	it("shows most recent first (reverse order)", () => {
+	it("compact format does not render history ordering", () => {
 		const recent = mkRecent(3);
-		// recent[0] is oldest, recent[2] is newest
 		const state = mkState({ activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, delegations: [], delegationHistory: recent } });
 		const factory = createAcpWidget({ getState: () => state });
 		const widget = factory({}, mockTheme as any);
 		const lines = widget.render(80);
-		const geminiIdx = lines.findIndex(l => l.includes("gemini"));
-		const claudeIdx = lines.findIndex(l => l.includes("claude"));
-		// Most recent (index 2, gemini) should appear before older (index 1, claude)
-		expect(geminiIdx).toBeLessThan(claudeIdx);
+		// Compact format: header only, no history rows
+		expect(lines.length).toBe(1);
 	});
 });

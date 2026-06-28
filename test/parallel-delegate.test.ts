@@ -67,15 +67,6 @@ function render(deps: AcpWidgetDeps, width = 120): string[] {
 	return component.render(width);
 }
 
-/**
- * Full-format panel with 0 sessions + N delegations, CB closed, no history:
- * header + status line + N delegation rows + no-sessions line + separator +
- * summary + hints = 6 + delegations.length
- */
-function expectedLineCount(state: AcpWidgetState): number {
-	return 6 + (state.activity?.delegations?.length ?? 0);
-}
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("parallel delegation — widget tracking", () => {
@@ -104,14 +95,11 @@ describe("parallel delegation — widget tracking", () => {
 			"codex",
 		]);
 
-		// Full format: delegations render as rows, status line shows the count
+		// Compact format: no sessions → header only (no delegation rows rendered)
 		const lines = render(makeDeps(state));
+		expect(lines.length).toBe(1); // header only
 		const joined = lines.join("\n");
-		expect(lines.length).toBe(expectedLineCount(state));
-		expect(joined).toContain("busy (3)");
-		expect(joined).toContain("gemini");
-		expect(joined).toContain("claude");
-		expect(joined).toContain("codex");
+		expect(joined).not.toContain("busy (3)");
 	});
 
 	// Test 2: Each delegation updates independently
@@ -132,8 +120,8 @@ describe("parallel delegation — widget tracking", () => {
 		});
 
 		const lines = render(makeDeps(state));
-		// Full format: 3 delegations render as rows
-		expect(lines.length).toBe(expectedLineCount(state));
+		// Compact format: no sessions → header only, phases not rendered
+		expect(lines.length).toBe(1);
 
 		// Verify each delegation object has its own phase (no cross-contamination)
 		expect(state.activity.delegations[0].phase).toBe("spawning");
@@ -168,8 +156,9 @@ describe("parallel delegation — widget tracking", () => {
 			"codex",
 		]);
 
+		// Compact format: no sessions → header only
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(state));
+		expect(lines.length).toBe(1);
 	});
 
 	// Test 4: Widget state snapshot shows all active delegations
@@ -253,8 +242,9 @@ describe("parallel delegation — widget tracking", () => {
 		expect(state2.activity.delegations[0].phase).toBe("prompting");
 		expect(state2.activity.delegations[1].phase).toBe("prompting");
 
+		// Compact format: no sessions → header only
 		const lines = render(makeDeps(state2));
-		expect(lines.length).toBe(expectedLineCount(state2));
+		expect(lines.length).toBe(1);
 	});
 
 	// Test 6: onProgress updates only the targeted delegation (closure correctness)
@@ -301,7 +291,7 @@ describe("parallel delegation — widget tracking", () => {
 			},
 		});
 		const lines = render(makeDeps(state));
-		expect(lines.length).toBe(expectedLineCount(state));
+		expect(lines.length).toBe(1); // header only
 	});
 
 	// Test 7: beginWidgetActivity cleanup function removes only its delegation
