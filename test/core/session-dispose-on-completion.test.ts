@@ -39,12 +39,16 @@ vi.mock("../../src/management/session-name-store.js", () => ({
 		register = (name: string, id: string) => { this.byName.set(name, id); this.byId.set(id, name); return { name, id }; };
 	},
 }));
+vi.mock("../../src/dag/dag-store.js", () => ({ DagStore: vi.fn() }));
+vi.mock("../../src/dag/dag-validator.js", () => ({ DagValidator: vi.fn() }));
+vi.mock("../../src/dag/template-resolver.js", () => ({ TemplateResolver: vi.fn() }));
 vi.mock("../../src/management/runtime-paths.js", () => ({
 	ensureRuntimeDir: () => ({
 		rootDir: "/mock/runtime", tasksFile: "/mock/runtime/tasks.json",
 		mailboxesFile: "/mock/runtime/mailboxes.json", governanceFile: "/mock/runtime/governance.json",
 		eventLogFile: "/mock/runtime/events.jsonl", sessionArchiveFile: "/mock/runtime/session-archive.json",
 		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json",
+		dagDir: "/mock/runtime/dags", dagIndexFile: "/mock/runtime/dag-index.json",
 	}),
 }));
 vi.mock("../../src/logger.js", () => ({
