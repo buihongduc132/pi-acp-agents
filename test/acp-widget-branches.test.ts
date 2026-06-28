@@ -136,15 +136,16 @@ describe("acp-widget — branch coverage", () => {
 		expect(lines.join("\n")).not.toContain("busy");
 	});
 
-	it("activity: error state — compact format does not show activity error", () => {
+	it("activity: error state — shows lastError hint on header", () => {
 		const lines = renderWidget(makeState({
 			sessions: [makeSession()],
 			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, lastError: "timeout", delegations: [] },
 		}));
 		expect(lines.length).toBe(2);
+		expect(lines[0]).toContain("⚠");
+		expect(lines[0]).toContain("timeout");
 		expect(lines.join("\n")).toContain("gemini");
-		expect(lines.join("\n")).not.toContain("error: timeout");
-	});
+});
 
 	it("session with model — compact format does not show model", () => {
 		const lines = renderWidget(makeState({
@@ -255,5 +256,62 @@ describe("acp-widget — branch coverage", () => {
 			circuitBreakerState: "half-open",
 		}));
 		expect(lines[0]).toContain("CB:half-open");
+	});
+
+	// ── lastError branch-coverage tests ──
+
+	it("lastError present, 0 sessions → shows error hint", () => {
+		const lines = renderWidget(makeState({
+			sessions: [],
+			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, lastError: "spawn exploded", delegations: [] },
+		}));
+		expect(lines.length).toBe(1);
+		expect(lines[0]).toContain("⚠");
+		expect(lines[0]).toContain("spawn exploded");
+	});
+
+	it("lastError present, sessions but none in error → shows error hint", () => {
+		const lines = renderWidget(makeState({
+			sessions: [
+				makeSession({ status: "active" }),
+				makeSession({ status: "idle", sessionId: "s2", agentName: "claude" }),
+				makeSession({ status: "stale", sessionId: "s3", agentName: "sonnet" }),
+			],
+			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, lastError: "timeout", delegations: [] },
+		}));
+		expect(lines.length).toBe(4); // header + 3 rows
+		expect(lines[0]).toContain("⚠");
+		expect(lines[0]).toContain("timeout");
+	});
+
+	it("lastError present, at least one session in error → no error hint", () => {
+		const lines = renderWidget(makeState({
+			sessions: [
+				makeSession({ status: "active" }),
+				makeSession({ status: "error", sessionId: "s2", agentName: "claude" }),
+			],
+			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, lastError: "spawn exploded", delegations: [] },
+		}));
+		expect(lines.length).toBe(3);
+		expect(lines[0]).not.toContain("⚠");
+		expect(lines[0]).not.toContain("spawn exploded");
+	});
+
+	it("lastError undefined → no error hint", () => {
+		const lines = renderWidget(makeState({
+			sessions: [],
+			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, lastError: undefined, delegations: [] },
+		}));
+		expect(lines.length).toBe(1);
+		expect(lines[0]).not.toContain("⚠");
+	});
+
+	it("lastError empty string → no error hint", () => {
+		const lines = renderWidget(makeState({
+			sessions: [],
+			activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, lastError: "", delegations: [] },
+		}));
+		expect(lines.length).toBe(1);
+		expect(lines[0]).not.toContain("⚠");
 	});
 });

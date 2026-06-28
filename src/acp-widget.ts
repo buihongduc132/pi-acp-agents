@@ -134,6 +134,7 @@ export const DAG_STATUS_ICON: Record<DagStatus, { icon: string; color: ThemeColo
 	pending: { icon: "·", color: "muted" },
 	stale: { icon: "◻", color: "warning" },
 };
+// CB_ICON removed (FN-008) — compact format uses inline cbSuffix instead
 
 const WORKER_STATUS_ICON: Record<string, { icon: string; color: ThemeColor }> = {
 	online: { icon: "●", color: "success" },
@@ -368,7 +369,16 @@ export function createAcpWidget(deps: AcpWidgetDeps): AcpWidgetFactory {
 					sessionSummary = parts.join(" · ");
 				}
 
-				const header = ` ${theme.bold(theme.fg("accent", "◉"))} ACP${cbColored} ${sessionSummary}`;
+				// Activity lastError hint — inline on header when present and no sessions are in error state
+				let lastErrorHint = "";
+				if (state.activity.lastError) {
+					const hasSessionError = state.sessions.some((s) => s.status === "error");
+					if (!hasSessionError) {
+						lastErrorHint = theme.fg("warning", ` ⚠ ${truncateToWidth(state.activity.lastError, 30)}`);
+					}
+				}
+
+				const header = ` ${theme.bold(theme.fg("accent", "◉"))} ACP${cbColored} ${sessionSummary}${lastErrorHint}`;
 				lines.push(truncateToWidth(header, width));
 
 				// ── Session rows (max 4, overflow on last) ──
