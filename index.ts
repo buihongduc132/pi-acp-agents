@@ -766,11 +766,12 @@ export default function (pi: ExtensionAPI) {
           // Persona injection: resolve per-alias systemPrompt (inline/file/gist-
           // deferred) and prepend to the first prompt of this fresh session.
           // Soft-fail: resolution never throws; warnings surface in the result.
+          // NOTE: use the already-resolved agentCfg (handles aliases) rather than
+          // config.agent_servers[agentName] (which misses alias-based spawns).
           const personaWarnings: string[] = [];
           if (params.prompt) {
-            const agentConfig = config.agent_servers[agentName];
-            const persona = agentConfig?.systemPrompt
-              ? resolvePersona(agentConfig.systemPrompt)
+            const persona = agentCfg?.systemPrompt
+              ? resolvePersona(agentCfg.systemPrompt as string)
               : undefined;
             if (persona?.warning) personaWarnings.push(persona.warning);
             const effectivePrompt = persona?.text
