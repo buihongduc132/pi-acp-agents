@@ -345,7 +345,7 @@ describe("ACP interactive TUI panel (RED contract)", () => {
 			panel.handleKey("i");
 			await panel.handleKey("Enter");
 			expect(sendMessage).toHaveBeenCalledTimes(1);
-			const [to, text] = sendMessage.mock.calls[0];
+			const [to, text] = sendMessage.mock.calls[0] as unknown as [string, string];
 			expect(to).toBe("e1");
 			expect(text).toContain("h");
 		});
@@ -414,7 +414,7 @@ describe("ACP interactive TUI panel (RED contract)", () => {
 			panel.selectEntity("e2"); // pick new owner
 			await panel.handleKey("Enter");
 			expect(reassignTask).toHaveBeenCalledTimes(1);
-			const [taskId, newOwner] = reassignTask.mock.calls[0];
+			const [taskId, newOwner] = reassignTask.mock.calls[0] as unknown as [string, string];
 			expect(taskId).toBe("task-1");
 			expect(newOwner).toBe("e2");
 		});
