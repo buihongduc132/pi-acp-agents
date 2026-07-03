@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema",
   "version": 1,
-  "verified_at": "2026-06-19",
-  "verified_by": "teammates grpA/B/C + index.ts registerTool audit",
-  "active_tool_count": 13,
-  "active_tool_source": "index.ts (pi.registerTool lines)",
+  "verified_at": "2026-07-03",
+  "verified_by": "verifier-1 + verifier-4 unanimous APPROVE (PR #13 merged)",
+  "active_tool_count": 11,
+  "active_tool_source": "index.ts (pi.registerTool lines) — unified surface merged via PR #13",
   "legacy_tool_list_note": "src/settings/config.ts:22-60 ACP_TOOL_NAMES is a legacy reference (39 names) — many consolidated-out. Do NOT use as truth.",
 
   "state_values": ["implemented", "partial", "stub", "planned", "deferred", "to-sunset"],
