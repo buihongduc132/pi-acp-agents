@@ -21,6 +21,18 @@ export interface AcpAgentConfig {
 	default_model?: string;
 	/** Default mode for sessions created with this agent */
 	default_mode?: string;
+	/** Persona / system prompt. Resolved by content shape at spawn time:
+	 * - contains whitespace → inline (the string IS the persona)
+	 * - starts with `http` → gist URL (**DEFERRED** — not yet implemented; soft-fails)
+	 * - otherwise → file path (readFileSync)
+	 *
+	 * Resolution failures soft-fail (callout to user, never throw). The resolved
+	 * persona is prepended to the first user message of a fresh session. NOTE:
+	 * ACP has no native system-prompt field, so this is a first-turn prefix
+	 * (practical high priority, not protocol-level). See
+	 * `flow/plans/acp-persona-system-prompt.md`.
+	 */
+	systemPrompt?: string;
 	/** Stall timeout in milliseconds for acpx mode */
 	stallTimeoutMs?: number;
 	/** Agent name for acpx session creation (defaults to adapter name) */
