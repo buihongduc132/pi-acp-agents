@@ -25,6 +25,9 @@ export interface AcpAgentConfig {
 	default_model?: string;
 	/** Default mode for sessions created with this agent */
 	default_mode?: string;
+	/** Persona / system prompt (resolved at spawn time by content shape —
+	 * see src/tui/persona-resolver.ts). Soft-fail: never throws. */
+	systemPrompt?: string;
 	/** Allow passthrough of unknown fields for forward compat */
 	[key: string]: unknown;
 }

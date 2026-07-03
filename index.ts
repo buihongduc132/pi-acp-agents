@@ -7,6 +7,7 @@ import { type AcpWidgetState, type AcpWidgetDag, dagIndexEntryToWidgetDag } from
 import { createAcpPanel, type AcpPanelTask } from "./src/tui/acp-panel.js";
 import { buildAcpPanelDepsReadOnly } from "./src/tui/panel-deps.js";
 import { buildAcpPanelDepsFull } from "./src/tui/panel-deps-full.js";
+import { resolvePersona } from "./src/tui/persona-resolver.js";
 import type { AcpTaskRecord } from "./src/management/task-store.js";
 import { createAdapter } from "./src/adapter-factory.js";
 import { loadConfig } from "./src/config/config.js";
@@ -762,7 +763,20 @@ export default function (pi: ExtensionAPI) {
           }
 
           let promptText: string | undefined;
+          // Persona injection: resolve per-alias systemPrompt (inline/file/gist-
+          // deferred) and prepend to the first prompt of this fresh session.
+          // Soft-fail: resolution never throws; warnings surface in the result.
+          // NOTE: use the already-resolved agentCfg (handles aliases) rather than
+          // config.agent_servers[agentName] (which misses alias-based spawns).
+          const personaWarnings: string[] = [];
           if (params.prompt) {
+            const persona = agentCfg?.systemPrompt
+              ? resolvePersona(agentCfg.systemPrompt as string)
+              : undefined;
+            if (persona?.warning) personaWarnings.push(persona.warning);
+            const effectivePrompt = persona?.text
+              ? `${persona.text}\n\n---\n\n${params.prompt}`
+              : params.prompt;
             busySessions.set(sessionId, true);
             handle.busy = true;
             handle.isPrompting = true;
@@ -770,7 +784,7 @@ export default function (pi: ExtensionAPI) {
             monitor.markPromptStart(sessionId);
             archiveSession(handle);
             try {
-              const pr = (await withTimeoutMs(adapter.prompt(params.prompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_spawn(prompt:${sessionId})`)) as AcpPromptResult;
+              const pr = (await withTimeoutMs(adapter.prompt(effectivePrompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_spawn(prompt:${sessionId})`)) as AcpPromptResult;
               markPromptLifecycle(handle, pr);
               promptText = pr.text;
             } finally {
@@ -786,7 +800,7 @@ export default function (pi: ExtensionAPI) {
             await closeSession(handle, "completed-oneshot", false);
           }
 
-          return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, text: promptText };
+          return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, text: promptText, warnings: personaWarnings.length > 0 ? personaWarnings : undefined };
         } catch (err) {
           if (handle) {
             await closeSession(handle, "error");
@@ -800,10 +814,11 @@ export default function (pi: ExtensionAPI) {
       refreshWidget(ctx);
       if (result.ok) {
         const v = result.value;
+        const warningLines = v.warnings && v.warnings.length > 0 ? v.warnings.map((w: string) => `⚠ ${w}`).join("\n") : "";
         const body = v.text != null ? v.text : `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""}`;
         return {
-          content: [textContent(body)],
-          details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker },
+          content: [textContent(warningLines ? `${body}\n\n${warningLines}` : body)],
+          details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, warnings: v.warnings },
         } as AgentToolResult<{ sessionId: string; agent: string; oneShot: boolean; worker: boolean }>;
       }
       const prefix = result.circuitOpen ? "Circuit breaker open — too many failures. Retry later.\n" : "";
