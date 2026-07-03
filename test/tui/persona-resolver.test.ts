@@ -18,7 +18,8 @@ beforeEach(() => {
 	try { mkdirSync(TMP, { recursive: true }); } catch { /* exists */ }
 });
 afterEach(() => {
-	try { rmSync(TMP, { recursive: true, force: true }); } catch { /* gone */ }
+		vi.restoreAllMocks();
+		try { rmSync(TMP, { recursive: true, force: true }); } catch { /* gone */ }
 });
 
 describe("resolvePersona", () => {
@@ -47,13 +48,16 @@ describe("resolvePersona", () => {
 
 	it("resolves http(s) gist URL as DEFERRED (no network call)", () => {
 		const fetchSpy = vi.spyOn(globalThis, "fetch");
-		const r = resolvePersona("https://gist.github.com/user/abc123");
-		expect(r.kind).toBe("gist");
-		expect(r.text).toBeUndefined();
-		expect(r.warning).toMatch(/deferred|not yet supported/i);
-		// CRITICAL: no network call attempted.
-		expect(fetchSpy).not.toHaveBeenCalled();
-		fetchSpy.mockRestore();
+		try {
+			const r = resolvePersona("https://gist.github.com/user/abc123");
+			expect(r.kind).toBe("gist");
+			expect(r.text).toBeUndefined();
+			expect(r.warning).toMatch(/deferred|not yet supported/i);
+			// CRITICAL: no network call attempted.
+			expect(fetchSpy).not.toHaveBeenCalled();
+		} finally {
+			fetchSpy.mockRestore();
+		}
 	});
 
 	it("resolves http:// (non-https) gist as deferred too", () => {
@@ -64,12 +68,14 @@ describe("resolvePersona", () => {
 
 	it("returns empty/inline for empty string (no persona)", () => {
 		const r = resolvePersona("");
+		expect(r.kind).toBe("none");
 		expect(r.text ?? "").toBe("");
 		expect(r.warning).toBeUndefined();
 	});
 
 	it("resolves undefined as no-op (no persona)", () => {
 		const r = resolvePersona(undefined);
+		expect(r.kind).toBe("none");
 		expect(r.text).toBeUndefined();
 		expect(r.warning).toBeUndefined();
 	});
@@ -81,8 +87,8 @@ describe("resolvePersona", () => {
 	});
 
 	it("single bare word with no whitespace is treated as file path", () => {
-		const r = resolvePersona("reviewer.md");
-		// Likely won't exist as a relative path from cwd → soft-fail warning.
+		// Deterministic: use a known-nonexistent temp path (cubic 3521686099).
+		const r = resolvePersona(join(TMP, "definitely-nonexistent-for-test.md"));
 		expect(r.warning).toBeDefined();
 	});
 });
