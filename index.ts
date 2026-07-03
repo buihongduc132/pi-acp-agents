@@ -480,16 +480,32 @@ export default function (pi: ExtensionAPI) {
     qualityGateStatus: (t.metadata?.qualityGateStatus as AcpPanelTask["qualityGateStatus"]) ?? null,
     qualityGateSummary: (t.metadata?.qualityGateSummary as string | undefined),
   });
+  // Cache the mapped task list to avoid synchronous disk reads (taskStore.list()
+  // calls readFileSync) on every TUI paint frame. TTL keeps data fresh enough
+  // for an overview while preventing I/O-per-frame stutter.
+  const TASKS_CACHE_TTL_MS = 1000;
+  let cachedTasks: AcpPanelTask[] | null = null;
+  let cachedTasksAt = 0;
+  const getPanelTasks = (): AcpPanelTask[] => {
+    const now = Date.now();
+    if (cachedTasks && now - cachedTasksAt < TASKS_CACHE_TTL_MS) return cachedTasks;
+    cachedTasks = taskStore().list().map(mapTaskToPanel);
+    cachedTasksAt = now;
+    return cachedTasks;
+  };
   const panelDeps = buildAcpPanelDepsReadOnly({
     getState: getWidgetState,
-    getTasks: () => taskStore().list().map(mapTaskToPanel),
+    getTasks: getPanelTasks,
   });
   const acpPanel = createAcpPanel(panelDeps);
+  // pi's Theme (fg/bold/italic/dim) is shape-compatible with AcpPanelTheme —
+  // pass it straight through so the panel renders with slot colors instead of
+  // the monochrome default. Width is forwarded so the panel respects the slot.
   const widgetFactory = (
-		_tui: unknown, _theme: unknown,
+		_tui: unknown, theme: unknown,
 	): { render(width: number): string[]; dispose?(): void } => ({
-		render(_width: number): string[] {
-			return acpPanel.render();
+		render(width: number): string[] {
+			return acpPanel.render(theme as Parameters<typeof acpPanel.render>[0], width);
 		},
 	});
 

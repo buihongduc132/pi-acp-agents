@@ -60,6 +60,9 @@ function sessionToEntity(s: AcpWidgetSession): AcpPanelEntity {
 
 function workerToEntity(w: AcpWidgetWorker): AcpPanelEntity {
 	const meta: AcpPanelEntityMetadata = {
+		// `claim: true` is the panel's own contract for the worker badge
+		// (acp-panel.ts: e.metadata?.claim === true → " [worker]").
+		claim: true,
 		kind: "worker",
 	};
 	if (w.currentTaskId) meta.currentTaskId = w.currentTaskId;
@@ -82,8 +85,8 @@ export function buildAcpPanelDepsReadOnly(sources: ReadOnlyPanelSources): AcpPan
 	return {
 		getEntities(): AcpPanelEntity[] {
 			const state = getState();
-			const sessions = state.sessions.map(sessionToEntity);
-			const workers = (state.workers ?? []).map(workerToEntity);
+			const sessions = (state?.sessions ?? []).map(sessionToEntity);
+			const workers = (state?.workers ?? []).map(workerToEntity);
 			return [...sessions, ...workers];
 		},
 		getTasks(): AcpPanelTask[] {

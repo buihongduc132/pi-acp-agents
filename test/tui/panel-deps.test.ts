@@ -148,6 +148,45 @@ describe("buildAcpPanelDepsReadOnly", () => {
 		const e = deps.getEntities().find((x) => x.metadata?.kind === "worker")!;
 		expect(e.metadata?.currentTaskId).toBe("t9");
 	});
+
+	it("worker entity carries claim:true (panel's worker-badge contract)", () => {
+		const deps = buildAcpPanelDepsReadOnly({
+			state: mkState({ workers: [mkWorker({ name: "w" })] }),
+			tasks: [],
+		});
+		const e = deps.getEntities()[0]!;
+		expect(e.metadata?.claim).toBe(true);
+	});
+
+	it("uses lazy getState when provided (preferred for live wiring)", () => {
+		let counter = 0;
+		const liveState = (): AcpWidgetState => {
+			counter++;
+			return mkState({ sessions: [mkSession({ sessionId: `ses_${counter}` })] });
+		};
+		const deps = buildAcpPanelDepsReadOnly({ getState: liveState, tasks: [] });
+		expect(deps.getEntities()[0]!.id).toBe("ses_1");
+		// Second call should re-invoke the getter (fresh data each render).
+		expect(deps.getEntities()[0]!.id).toBe("ses_2");
+		expect(counter).toBe(2);
+	});
+
+	it("lazy getTasks wins over eager tasks when both supplied", () => {
+		const eager: AcpPanelTask[] = [{ id: "eager", status: "pending" }];
+		const lazy: AcpPanelTask[] = [{ id: "lazy", status: "in_progress" }];
+		const deps = buildAcpPanelDepsReadOnly({
+			state: mkState(),
+			tasks: eager,
+			getTasks: () => lazy,
+		});
+		expect(deps.getTasks()).toBe(lazy);
+	});
+
+	it("falls back to EMPTY_STATE when neither state nor getState supplied", () => {
+		const deps = buildAcpPanelDepsReadOnly({ tasks: [] });
+		expect(deps.getEntities()).toEqual([]);
+		// No throw — defensive (comment 3521447759).
+	});
 });
 
 // Type-level guard: ensures ReadOnlyPanelSources is exported and shaped.
