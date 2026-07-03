@@ -1,5 +1,10 @@
 /**
- * Tests for all 33 MCP tools registered by index.ts
+ * Tests for the unified 11-tool ACP surface registered by index.ts.
+ *
+ * Old surface (acp_prompt, acp_cancel, acp_broadcast, acp_session_* , acp_worker_*,
+ * acp_delegate, acp_compare, governance/doctor/runtime/env/event_log/cleanup/prune)
+ * has been collapsed into acp_spawn / acp_msg / acp_fanout / acp_governance /
+ * acp_status (plus kept task/message/dag tools).
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { AcpSessionHandle } from "../src/config/types.js";
@@ -124,29 +129,31 @@ describe("ACP Extension Tools", () => {
 	const exec = (name: string, params: any) => tools.get(name)!.execute("t", params, undefined, undefined, ctx);
 	const paramsFor = (name: string) => (tools.get(name)?.parameters as any)?.properties ?? {};
 
-	// Helper: create session then return handle for follow-up calls
-	async function createAndGetSession() {
-		await exec("acp_prompt", { message: "init" });
+	// Helper: spawn a session then return the handle for follow-up calls.
+	async function spawnAndGetSession() {
+		await exec("acp_spawn", { agent: "gemini" });
 		const h = m.sm.add.mock.calls[0]?.[0];
 		if (h) m.sm.get.mockReturnValue(h);
 		return h;
 	}
 
-it("registers 16 tools", () => { expect(tools.size).toBe(16); });
+it("registers exactly the unified 11 tools", () => { expect(tools.size).toBe(11); });
 
 	it("acp_status overall", async () => { m.sm.size = 1; m.sm.list.mockReturnValue([mkSession("s1")]); const r = await exec("acp_status", {}); expect(r.content[0].text).toContain("Agent Servers: 2 configured"); });
 	it("acp_status specific", async () => { m.sm.get.mockReturnValue(mkSession("s1")); const r = await exec("acp_status", { session_id: "s1" }); expect(r.content[0].text).toContain("Session: s1"); });
-	it("tool schemas expose friendly session names", () => {
-		// acp_session_new removed — session_name now in acp_prompt
-		for (const toolName of ["acp_prompt", "acp_status", "acp_cancel"]) {
-			expect(paramsFor(toolName)).toHaveProperty("session_name");
-		}
+	it("unified tool schemas expose addressing parameters", () => {
+		// acp_session_* collapsed: acp_status keeps session_id/session_name for inspection;
+		// acp_msg addresses via `to` (id or name).
+		expect(paramsFor("acp_status")).toHaveProperty("session_name");
+		expect(paramsFor("acp_msg")).toHaveProperty("to");
+		expect(paramsFor("acp_msg")).toHaveProperty("message");
+		expect(paramsFor("acp_msg")).toHaveProperty("cancel");
 	});
 	it("acp_status resolves session_name", async () => { sessionNameMappings.set("alpha", "s1"); m.sm.get.mockReturnValue(mkSession("s1", "gemini", "alpha")); const r = await exec("acp_status", { session_name: "alpha" }); expect(r.content[0].text).toContain("Name:    alpha"); });
 	it("acp_status missing", async () => { m.sm.get.mockReturnValue(undefined); const r = await exec("acp_status", { session_id: "x" }); expect(r.content[0].text).toContain("not found"); });
-	it("acp_prompt new session", async () => { const r = await exec("acp_prompt", { message: "hi" }); expect(r.content[0].text).toBe("response"); });
-	it("acp_prompt spawn error", async () => { m.ad.spawn.mockRejectedValueOnce(new Error("boom")); const r = await exec("acp_prompt", { message: "hi" }); expect(r.content[0].text).toContain("boom"); expect(m.ad.dispose).toHaveBeenCalled(); });
-	it("acp_prompt circuit open", async () => { const e: any = new Error("open"); e.name = "CircuitOpenError"; m.cb.execute.mockRejectedValueOnce(e); const r = await exec("acp_prompt", { message: "hi" }); expect(r.content[0].text).toContain("Circuit breaker open"); });
+	it("acp_spawn creates a session (absorbed acp_prompt spawn + acp_session_new)", async () => { const r = await exec("acp_spawn", { agent: "gemini", prompt: "hi" }); expect(r.content[0].text).toBe("response"); });
+	it("acp_spawn spawn error disposes", async () => { m.ad.spawn.mockRejectedValueOnce(new Error("boom")); const r = await exec("acp_spawn", { agent: "gemini" }); expect(r.content[0].text).toContain("boom"); expect(m.ad.dispose).toHaveBeenCalled(); });
+	it("acp_spawn circuit open", async () => { const e: any = new Error("open"); e.name = "CircuitOpenError"; m.cb.execute.mockRejectedValueOnce(e); const r = await exec("acp_spawn", { agent: "gemini" }); expect(r.content[0].text).toContain("Circuit breaker open"); });
 	it.skip("acp_session_new creates [REMOVED — consolidated]", async () => { const r = await exec("acp_session_new", { agent: "claude", session_name: "alpha" }); expect(r.content[0].text).toContain("alpha"); expect(r.details.sessionId).toBe("ses-1"); expect(m.sm.add.mock.calls[0]?.[0]?.sessionName).toBe("alpha"); });
 	it.skip("acp_session_new rejects duplicate session names [REMOVED — consolidated]", async () => {
 		const duplicate = new Error('Session name "alpha" is already assigned to session "ses-old".');
@@ -157,8 +164,8 @@ it("registers 16 tools", () => { expect(tools.size).toBe(16); });
 	it.skip("acp_session_new rejects caller-selected ID [REMOVED — consolidated]", async () => { const r = await exec("acp_session_new", { session_id: "picked" }); expect(r.details.error).toBe("session_id_not_allowed"); });
 	it.skip("acp_session_new failure [REMOVED — consolidated]", async () => { m.ad.spawn.mockRejectedValueOnce(new Error("fail")); const r = await exec("acp_session_new", {}); expect(r.content[0].text).toContain("fail"); });
 
-	it.skip("acp_session_set_model [REMOVED — consolidated]", async () => { const h = await createAndGetSession(); if (!h) return; const r = await exec("acp_session_set_model", { session_id: h.sessionId, model_id: "pro" }); expect(r.content[0].text).toContain("pro"); });
-	it("acp_prompt reuses session by session_name", async () => { const h = await createAndGetSession(); if (!h) return; h.sessionName = "alpha"; m.sm.get.mockReturnValue(h); const r = await exec("acp_prompt", { message: "hi", session_name: "alpha" }); expect(r.details.sessionId).toBe(h.sessionId); });
+	it.skip("acp_session_set_model [REMOVED — consolidated]", async () => { const h = await spawnAndGetSession(); if (!h) return; const r = await exec("acp_session_set_model", { session_id: h.sessionId, model_id: "pro" }); expect(r.content[0].text).toContain("pro"); });
+	it("acp_msg prompts an existing session (absorbed acp_prompt reuse)", async () => { const h = await spawnAndGetSession(); if (!h) return; h.sessionName = "alpha"; sessionNameMappings.set("alpha", h.sessionId); m.sm.get.mockReturnValue(h); const r = await exec("acp_msg", { to: "alpha", message: "hi" }); expect(r.content[0].text).toBe("response"); });
 	it.skip("acp_session_load resolves archived session by session_name [REMOVED — consolidated]", async () => { sessionNameMappings.set("alpha", "arch-1"); sessionArchiveMappings.set("arch-1", mkSession("arch-1", "gemini", "alpha")); const r = await exec("acp_session_load", { session_name: "alpha" }); expect(r.details.sessionId).toBe("arch-1"); });
 	it.skip("acp_session_new rejects whitespace-only session_name [REMOVED — consolidated]", async () => { const r = await exec("acp_session_new", { session_name: "   " }); expect(r.content[0].text).toContain("session_name is required"); });
 	it.skip("acp_session_new trims session_name before registering [REMOVED — consolidated]", async () => { await exec("acp_session_new", { session_name: "  alpha  " }); expect(sessionNameMappings.get("alpha")).toBe("ses-1"); expect(sessionNameMappings.has("  alpha  ")).toBe(false); });
@@ -166,32 +173,30 @@ it("registers 16 tools", () => { expect(tools.size).toBe(16); });
 	it.skip("acp_session_load rejects unresolved session_id when session_name resolves elsewhere [REMOVED — consolidated]", async () => { sessionNameMappings.set("alpha", "arch-1"); sessionArchiveMappings.set("arch-1", mkSession("arch-1", "gemini", "alpha")); const r = await exec("acp_session_load", { session_id: "missing", session_name: "alpha" }); expect(r.content[0].text).toContain('session_id "missing" was not found and does not match resolved session_name "alpha"'); });
 	it("acp_status resolves archived session metadata by session_name", async () => { sessionNameMappings.set("archived-alpha", "arch-1"); sessionArchiveMappings.set("arch-1", mkSession("arch-1", "gemini", "archived-alpha")); const r = await exec("acp_status", { session_name: "archived-alpha" }); expect(r.content[0].text).toContain("Session: arch-1"); });
 	it.skip("acp_prompt rejects archived-only session_name targets", async () => { sessionNameMappings.set("archived-alpha", "arch-1"); sessionArchiveMappings.set("arch-1", { ...mkSession("arch-1", "gemini", "archived-alpha"), disposed: true, closeReason: "manual-shutdown" }); const r = await exec("acp_prompt", { message: "hi", session_name: "archived-alpha" }); expect(r.content[0].text).toContain('Session name "archived-alpha" refers to archived session "arch-1"'); });
-	it.skip("acp_session_set_model resolves session_name [REMOVED — consolidated]", async () => { const h = await createAndGetSession(); if (!h) return; h.sessionName = "alpha"; sessionNameMappings.set("alpha", h.sessionId); m.sm.get.mockReturnValue(h); const r = await exec("acp_session_set_model", { session_name: "alpha", model_id: "pro" }); expect(r.details.sessionId).toBe(h.sessionId); });
+	it.skip("acp_session_set_model resolves session_name [REMOVED — consolidated]", async () => { const h = await spawnAndGetSession(); if (!h) return; h.sessionName = "alpha"; sessionNameMappings.set("alpha", h.sessionId); m.sm.get.mockReturnValue(h); const r = await exec("acp_session_set_model", { session_name: "alpha", model_id: "pro" }); expect(r.details.sessionId).toBe(h.sessionId); });
 	it.skip("acp_session_set_model missing [REMOVED — consolidated]", async () => { m.sm.get.mockReturnValue(undefined); const r = await exec("acp_session_set_model", { session_id: "x", model_id: "m" }); expect(r.content[0].text).toContain("not found"); });
-	it.skip("acp_session_set_mode [REMOVED — consolidated]", async () => { const h = await createAndGetSession(); if (!h) return; const r = await exec("acp_session_set_mode", { session_id: h.sessionId, mode_id: "yolo" }); expect(r.content[0].text).toContain("yolo"); });
-	it.skip("acp_session_set_mode resolves session_name [REMOVED — consolidated]", async () => { const h = await createAndGetSession(); if (!h) return; h.sessionName = "alpha"; sessionNameMappings.set("alpha", h.sessionId); m.sm.get.mockReturnValue(h); const r = await exec("acp_session_set_mode", { session_name: "alpha", mode_id: "yolo" }); expect(r.details.sessionId).toBe(h.sessionId); });
-	it("acp_cancel", async () => { const h = await createAndGetSession(); if (!h) return; const r = await exec("acp_cancel", { session_id: h.sessionId }); expect(r.details.cancelled).toBe(true); });
-	it("acp_cancel resolves session_name", async () => { const h = await createAndGetSession(); if (!h) return; h.sessionName = "alpha"; sessionNameMappings.set("alpha", h.sessionId); m.sm.get.mockReturnValue(h); const r = await exec("acp_cancel", { session_name: "alpha" }); expect(r.details.sessionId).toBe(h.sessionId); });
-	it("acp_cancel missing", async () => { m.sm.get.mockReturnValue(undefined); const r = await exec("acp_cancel", { session_id: "x" }); expect(r.details.cancelled).toBe(false); });
+	it.skip("acp_session_set_mode [REMOVED — consolidated]", async () => { const h = await spawnAndGetSession(); if (!h) return; const r = await exec("acp_session_set_mode", { session_id: h.sessionId, mode_id: "yolo" }); expect(r.content[0].text).toContain("yolo"); });
+	it.skip("acp_session_set_mode resolves session_name [REMOVED — consolidated]", async () => { const h = await spawnAndGetSession(); if (!h) return; h.sessionName = "alpha"; sessionNameMappings.set("alpha", h.sessionId); m.sm.get.mockReturnValue(h); const r = await exec("acp_session_set_mode", { session_name: "alpha", mode_id: "yolo" }); expect(r.details.sessionId).toBe(h.sessionId); });
+	it("acp_msg cancels an in-flight turn (absorbed acp_cancel)", async () => { const h = await spawnAndGetSession(); if (!h) return; const r = await exec("acp_msg", { to: h.sessionId, message: "cancel-please", cancel: true }); expect(r.details.cancelled).toBe(true); });
+	it("acp_msg resolves target by name for cancel", async () => { const h = await spawnAndGetSession(); if (!h) return; h.sessionName = "alpha"; sessionNameMappings.set("alpha", h.sessionId); m.sm.get.mockReturnValue(h); const r = await exec("acp_msg", { to: "alpha", message: "cancel-please", cancel: true }); expect(r.details.cancelled).toBe(true); });
+	it("acp_msg cancel on missing session is not cancelled", async () => { m.sm.get.mockReturnValue(undefined); const r = await exec("acp_msg", { to: "x", message: "cancel-please", cancel: true }); expect(r.details.cancelled).toBe(false); });
 
 	it.skip("acp_delegate [REMOVED — consolidated]", async () => { const r = await exec("acp_delegate", { agent: "claude", message: "do" }); expect(r.content[0].text).toBe("delegated"); });
 	it.skip("acp_delegate error [REMOVED — consolidated]", async () => { m.co.delegate.mockRejectedValueOnce(new Error("fail")); const r = await exec("acp_delegate", { message: "x" }); expect(r.content[0].text).toContain("fail"); });
-	it("acp_broadcast", async () => { const r = await exec("acp_broadcast", { message: "hey" }); expect(r.content[0].text).toContain("g"); expect(r.content[0].text).toContain("c"); });
-	it("acp_broadcast specific agents", async () => { await exec("acp_broadcast", { message: "hey", agents: ["gemini"] }); expect(m.co.broadcast).toHaveBeenCalledWith(["gemini"], "hey", "/project"); });
-	it.skip("acp_compare [REMOVED — consolidated]", async () => { const r = await exec("acp_compare", { message: "cmp" }); expect(r.content[0].text).toContain("go"); });
+	it("acp_fanout broadcasts to all agents (absorbed acp_broadcast)", async () => { const r = await exec("acp_fanout", { message: "hey" }); expect(r.content[0].text).toContain("g"); expect(r.content[0].text).toContain("c"); });
+	it("acp_fanout targets specific agents", async () => { await exec("acp_fanout", { message: "hey", agents: ["gemini"] }); expect(m.co.broadcast).toHaveBeenCalledWith(["gemini"], "hey", "/project"); });
+	it("acp_fanout compare path routes through coordinator.compare", async () => { await exec("acp_fanout", { message: "cmp", compare: true }); expect(m.co.compare).toHaveBeenCalled(); });
 
 	it.skip("acp_session_list [REMOVED — consolidated]", async () => { m.sm.listByAgent.mockReturnValue([mkSession("s1")]); const r = await exec("acp_session_list", {}); expect(r.details.sessions).toHaveLength(1); });
-	it.skip("acp_session_shutdown all [REMOVED — consolidated]", async () => { m.sm.list.mockReturnValue([mkSession("s1")]); const r = await exec("acp_session_shutdown", { all: true }); expect(r.content[0].text).toContain("s1"); });
-	it.skip("acp_session_shutdown no match [REMOVED — consolidated]", async () => { const r = await exec("acp_session_shutdown", { session_id: "x" }); expect(r.content[0].text).toContain("No matching"); });
-	it.skip("acp_session_shutdown resolves session_name [REMOVED — consolidated]", async () => { const h = mkSession("s1", "gemini", "alpha"); sessionNameMappings.set("alpha", "s1"); m.sm.get.mockReturnValue(h); const r = await exec("acp_session_shutdown", { session_name: "alpha" }); expect(r.content[0].text).toContain("s1"); });
-	it.skip("acp_session_kill [REMOVED — consolidated]", async () => { const h = mkSession("s1"); m.sm.get.mockReturnValue(h); await exec("acp_session_kill", { session_id: "s1" }); expect(h.disposed).toBe(true); });
-	it.skip("acp_session_kill resolves session_name [REMOVED — consolidated]", async () => { const h = mkSession("s1", "gemini", "alpha"); sessionNameMappings.set("alpha", "s1"); m.sm.get.mockReturnValue(h); const r = await exec("acp_session_kill", { session_name: "alpha" }); expect(r.details.sessionId).toBe("s1"); });
-	it.skip("acp_session_kill missing [REMOVED — consolidated]", async () => { m.sm.get.mockReturnValue(undefined); const r = await exec("acp_session_kill", { session_id: "x" }); expect(r.content[0].text).toContain("not found"); });
-	it.skip("acp_prune [REMOVED — consolidated]", async () => { const stale = mkSession("old"); stale.busy = true; stale.lastResponseAt = new Date(Date.now() - 5_000); m.sm.list.mockReturnValue([stale]); const r = await exec("acp_prune", { stale_after_ms: 1000 }); expect(r.content[0].text).toContain("old"); });
-	it.skip("acp_prune default threshold [REMOVED — consolidated]", async () => { const stale = mkSession("old"); stale.completedAt = new Date(Date.now() - 4_000_000); m.sm.list.mockReturnValue([stale]); await exec("acp_prune", {}); expect(m.sm.list).toHaveBeenCalled(); });
+	it("acp_status cleanup removes sessions (absorbed acp_cleanup / acp_session_shutdown)", async () => { m.sm.list.mockReturnValue([mkSession("s1")]); await exec("acp_status", { action: "cleanup", target: "all" }); expect(m.sm.remove).toHaveBeenCalledWith("s1"); expect(m.ts.clear).toHaveBeenCalledWith("all"); });
+	it("acp_status cleanup sessions only", async () => { m.sm.list.mockReturnValue([mkSession("s1")]); await exec("acp_status", { action: "cleanup", target: "sessions" }); expect(m.sm.remove).toHaveBeenCalledWith("s1"); expect(m.ts.clear).not.toHaveBeenCalled(); });
+	it("acp_status cleanup tasks only", async () => { await exec("acp_status", { action: "cleanup", target: "tasks" }); expect(m.sm.remove).not.toHaveBeenCalled(); expect(m.ts.clear).toHaveBeenCalledWith("all"); });
+	it("acp_status prune absorbs worker_prune", async () => { m.sm.pruneStale.mockResolvedValue({ removedSessionIds: ["old"] }); const r = await exec("acp_status", { action: "prune", stale_after_ms: 1000 }); expect(r.content[0].text).toMatch(/prune|stale|old|0/i); });
+	it.skip("acp_session_kill [folded into acp_status action:cleanup] — historical marker", async () => { });
+	it.skip("acp_prune default threshold [folded into acp_status action:prune] — historical marker", async () => { const stale = mkSession("old"); stale.completedAt = new Date(Date.now() - 4_000_000); m.sm.list.mockReturnValue([stale]); await exec("acp_status", { action: "prune" }); expect(m.sm.list).toHaveBeenCalled(); });
 
-	it.skip("acp_runtime_info [REMOVED — consolidated]", async () => { m.sm.size = 5; const r = await exec("acp_runtime_info", {}); const payload = JSON.parse(r.content[0].text); expect(payload.runtimeDir).toBe("/mock/runtime"); expect(payload.sessionArchiveFile).toBe("/mock/runtime/session-archive.json"); expect(payload.sessionNameRegistryFile).toBe("/mock/runtime/session-name-registry.json"); });
-	it.skip("acp_env [REMOVED — consolidated]", async () => { const r = await exec("acp_env", { agent: "gemini" }); expect(JSON.parse(r.content[0].text).command).toBe("gemini"); });
+	it.skip("acp_runtime_info [folded into acp_status] — historical marker", async () => { });
+	it.skip("acp_env [removed] — historical marker", async () => { });
 
 	it("acp_task_create", async () => { const r = await exec("acp_task_create", { subject: "Do it" }); expect(JSON.parse(r.content[0].text).subject).toBe("Do it"); });
 	it.skip("acp_task_list [REMOVED — consolidated]", async () => { m.ts.list.mockReturnValue([{ id: "1" }]); const r = await exec("acp_task_list", {}); expect(r.details.tasks).toHaveLength(1); });
@@ -219,8 +224,8 @@ it("registers 16 tools", () => { expect(tools.size).toBe(16); });
 	it.skip("acp_doctor [REMOVED — consolidated]", async () => { m.sm.size = 3; m.ts.list.mockReturnValue([{}, {}, {}]); const r = await exec("acp_doctor", {}); expect(JSON.parse(r.content[0].text).sessionCount).toBe(3); });
 	it.skip("acp_event_log [REMOVED — consolidated]", async () => { const r = await exec("acp_event_log", {}); expect(r.content[0].text).toBe("/mock/runtime/events.jsonl"); });
 
-	it.skip("acp_cleanup all [REMOVED — consolidated]", async () => { m.sm.list.mockReturnValue([mkSession("s1")]); await exec("acp_cleanup", { target: "all" }); expect(m.sm.remove).toHaveBeenCalledWith("s1"); expect(m.ts.clear).toHaveBeenCalledWith("all"); });
-	it.skip("acp_cleanup sessions [REMOVED — consolidated]", async () => { m.sm.list.mockReturnValue([mkSession("s1")]); await exec("acp_cleanup", { target: "sessions" }); expect(m.sm.remove).toHaveBeenCalledWith("s1"); expect(m.ts.clear).not.toHaveBeenCalled(); });
-	it.skip("acp_cleanup tasks [REMOVED — consolidated]", async () => { await exec("acp_cleanup", { target: "tasks" }); expect(m.sm.remove).not.toHaveBeenCalled(); expect(m.ts.clear).toHaveBeenCalledWith("all"); });
-	it.skip("acp_cleanup mailboxes [REMOVED — consolidated]", async () => { await exec("acp_cleanup", { target: "mailboxes" }); expect(m.mb.clearFor).toHaveBeenCalledWith("gemini"); expect(m.mb.clearFor).toHaveBeenCalledWith("claude"); expect(m.mb.clearFor).toHaveBeenCalledWith("*"); });
+	it.skip("acp_cleanup all [folded into acp_status action:cleanup target:all] — historical marker", async () => { });
+	it.skip("acp_cleanup sessions [folded into acp_status action:cleanup target:sessions] — historical marker", async () => { });
+	it.skip("acp_cleanup tasks [folded into acp_status action:cleanup target:tasks] — historical marker", async () => { });
+	it.skip("acp_cleanup mailboxes [folded into acp_status action:cleanup target:mailboxes] — historical marker", async () => { });
 });

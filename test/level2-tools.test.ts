@@ -1,15 +1,17 @@
-import { describe, it, expect, vi } from "vitest";
-import { Type } from "typebox";
-import type { Static } from "typebox";
+import { describe, it, expect } from "vitest";
 
 /**
- * Level 2 — Verify new tools exist in the extension entry point.
+ * Level 2 — Verify the unified tool surface is registered in the extension entry point.
  *
  * We dynamically import index.ts and inspect registered tools.
  * Since pi's ExtensionAPI is not available in test, we mock it.
+ *
+ * The unified surface collapsed the old session_* / cancel / prompt tools into
+ * acp_spawn / acp_msg. These tests verify the consolidated tools register and
+ * carry the addressing parameters (to / name) that replaced session_id/session_name.
  */
 function createMockPi() {
-  const tools: Array<{ name: string; parameters: Static<typeof Type.Object> }> = [];
+  const tools: Array<{ name: string; parameters: any }> = [];
   const commands: Array<{ name: string; description: string }> = [];
 
   return {
@@ -25,60 +27,60 @@ function createMockPi() {
   };
 }
 
-describe("Level 2 — Tool registration", () => {
-  it("registers acp_session_load tool", async () => {
+describe("Level 2 — Unified tool registration", () => {
+  async function registeredNames() {
     const mock = createMockPi();
     const mod = await import("../index.js");
     (mod.default as any)(mock);
-    const names = mock.tools.map((t: any) => t.name);
-    // acp_session_load removed — consolidated into acp_prompt
-    expect(names).toContain("acp_prompt");
+    return { names: mock.tools.map((t: any) => t.name), mock };
+  }
+
+  it("registers acp_spawn (absorbed acp_session_new + acp_worker_spawn)", async () => {
+    const { names } = await registeredNames();
+    expect(names).toContain("acp_spawn");
   });
 
-  it("registers acp_session_set_model tool", async () => {
-    const mock = createMockPi();
-    const mod = await import("../index.js");
-    (mod.default as any)(mock);
-    const names = mock.tools.map((t: any) => t.name);
-    // acp_session_set_model removed — model param on acp_prompt
-    expect(names).toContain("acp_task_update");
+  it("registers acp_msg (absorbed acp_session_load + acp_cancel + acp_prompt)", async () => {
+    const { names } = await registeredNames();
+    expect(names).toContain("acp_msg");
   });
 
-  it("registers acp_session_set_mode tool", async () => {
-    const mock = createMockPi();
-    const mod = await import("../index.js");
-    (mod.default as any)(mock);
-    const names = mock.tools.map((t: any) => t.name);
-    // acp_session_set_mode removed — mode param on acp_prompt
-    expect(names).toContain("acp_message");
+  it("registers acp_status (absorbed acp_session_list)", async () => {
+    const { names } = await registeredNames();
+    expect(names).toContain("acp_status");
   });
 
-  it("registers acp_cancel tool", async () => {
-    const mock = createMockPi();
-    const mod = await import("../index.js");
-    (mod.default as any)(mock);
-    const names = mock.tools.map((t: any) => t.name);
-    expect(names).toContain("acp_cancel");
-  });
-
-  it("all Level 2 tools have session_id and session_name parameters", async () => {
-    const mock = createMockPi();
-    const mod = await import("../index.js");
-    (mod.default as any)(mock);
-    const l2Tools = mock.tools.filter((t: any) =>
-      [
-        "acp_session_load",
-        "acp_session_set_model",
-        "acp_session_set_mode",
-        "acp_cancel",
-      ].includes(t.name),
-    );
-    for (const tool of l2Tools) {
-      if (tool.name === "acp_session_new") continue; // doesn't need session_id
-      const props = (tool.parameters as any)?.properties;
-      expect(props).toBeDefined();
-      expect(props).toHaveProperty("session_id");
-      expect(props).toHaveProperty("session_name");
+  it("does NOT register removed session_* / cancel tools", async () => {
+    const { names } = await registeredNames();
+    for (const removed of [
+      "acp_session_load",
+      "acp_session_set_model",
+      "acp_session_set_mode",
+      "acp_cancel",
+      "acp_session_new",
+    ]) {
+      expect(names).not.toContain(removed);
     }
+  });
+
+  it("acp_msg has an addressing parameter (to) replacing session_id/session_name", async () => {
+    const { mock } = await registeredNames();
+    const msg = mock.tools.find((t: any) => t.name === "acp_msg");
+    expect(msg).toBeDefined();
+    const props = msg!.parameters?.properties;
+    expect(props).toBeDefined();
+    // acp_msg addresses by `to` (id or name); auto-resolves alive/disposed.
+    expect(props).toHaveProperty("to");
+    expect(props).toHaveProperty("message");
+  });
+
+  it("acp_spawn has agent + optional name/prompt/claim parameters", async () => {
+    const { mock } = await registeredNames();
+    const spawn = mock.tools.find((t: any) => t.name === "acp_spawn");
+    expect(spawn).toBeDefined();
+    const props = spawn!.parameters?.properties;
+    expect(props).toHaveProperty("agent");
+    expect(props).toHaveProperty("name");
+    expect(props).toHaveProperty("claim");
   });
 });
