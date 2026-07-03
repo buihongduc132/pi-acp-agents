@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { type AcpWidgetState, type AcpWidgetDag, dagIndexEntryToWidgetDag } from "./src/acp-widget.js";
 import { createAcpPanel, type AcpPanelTask } from "./src/tui/acp-panel.js";
 import { buildAcpPanelDepsReadOnly } from "./src/tui/panel-deps.js";
+import { buildAcpPanelDepsFull } from "./src/tui/panel-deps-full.js";
 import type { AcpTaskRecord } from "./src/management/task-store.js";
 import { createAdapter } from "./src/adapter-factory.js";
 import { loadConfig } from "./src/config/config.js";
@@ -1378,6 +1379,76 @@ export default function (pi: ExtensionAPI) {
     refreshWidget(ctx);
   }
 
+  /**
+   * D2: open the interactive ACP panel overlay via ctx.ui.custom().
+   *
+   * The overlay wraps `createAcpPanel` with full mutation deps (sendMessage,
+   * abort/kill, task reassign/unassign, transcript). Esc or `q` exits and
+   * restores editor focus via `done()`.
+   */
+  async function openAcpPanelOverlay(ctx: {
+    ui: { custom: Function; notify: Function; setWidget: Function };
+    cwd?: string;
+  }): Promise<void> {
+    // Full mutation deps — best-effort, never throw (panel re-renders on state).
+    const fullSources = {
+      getState: getWidgetState,
+      getTasks: getPanelTasks,
+      sendMessage: async (to: string, text: string): Promise<void> => {
+        mailboxManager().send({ from: hostSessionId ?? "panel", to, message: text, kind: "dm" });
+      },
+      abortEntity: (entityId: string): void => {
+        const handle = sessionMgr.get(entityId);
+        const adapter = handle ? activeAdapters.get(handle.sessionId) : undefined;
+        if (adapter) { adapter.cancel().catch(() => {}); }
+      },
+      killEntity: (entityId: string): void => {
+        const handle = sessionMgr.get(entityId);
+        if (handle) { closeSession(handle, "panel-kill").catch(() => {}); }
+        else { workerStore().updateStatus(entityId, "offline"); }
+      },
+      reassignTask: async (taskId: string, newOwner: string): Promise<boolean> => {
+        taskStore().update(taskId, (t) => { t.assignee = newOwner; });
+        return true;
+      },
+      unassignTask: async (taskId: string): Promise<boolean> => {
+        taskStore().update(taskId, (t) => { t.assignee = undefined; });
+        return true;
+      },
+      getTranscript: (): [] => [],
+    };
+    const panelDeps = buildAcpPanelDepsFull(fullSources);
+    const acpPanel = createAcpPanel(panelDeps);
+
+    try {
+      await ctx.ui.custom(
+        (_tui: unknown, theme: unknown, _kb: unknown, done: (result: unknown) => void) => ({
+          render(width: number): string[] {
+            return acpPanel.render(theme as Parameters<typeof acpPanel.render>[0], width);
+          },
+          invalidate(): void {
+            // Panel reads live state each render via deps; nothing to invalidate.
+          },
+          async handleInput(data: string): Promise<void> {
+            // Esc / q exits the overlay.
+            if (data === "\u001b" || data === "q") {
+              done(undefined);
+              return;
+            }
+            try {
+              await acpPanel.handleKey(data);
+            } catch (e) {
+              logger.debug("panel handleKey failed", e);
+            }
+          },
+        }),
+        { overlay: true },
+      );
+    } catch (e) {
+      ctx.ui.notify(`Failed to open ACP panel: ${e instanceof Error ? e.message : String(e)}`, "error");
+    }
+  }
+
   const acpCommandGroups = {
     session: ["new", "load", "list", "shutdown", "kill", "prune", "set-model", "set-mode", "cancel"],
     prompt: [],
@@ -1389,6 +1460,7 @@ export default function (pi: ExtensionAPI) {
     plan: ["request", "resolve"],
     runtime: ["status", "config", "env", "info", "event-log", "cleanup", "doctor"],
     settings: [],
+    panel: [],
   } as const;
 
   function renderAcpCommandSurface(): string {
@@ -1403,6 +1475,7 @@ export default function (pi: ExtensionAPI) {
       "/acp message <send|list>",
       "/acp plan <request|resolve>",
       "/acp runtime <status|config|env|info|event-log|cleanup|doctor>",
+      "/acp panel — open interactive 5-mode overlay (Esc/q to exit)",
       "/acp settings — configure tool visibility",
       "Aliases: /acp-doctor, /acp-config",
     ];
@@ -1438,6 +1511,13 @@ export default function (pi: ExtensionAPI) {
       }
       if (group === "runtime" && subcommand === "config") {
         showAcpConfig(ctx);
+        return;
+      }
+
+      // D2: `/acp panel` opens the interactive 5-mode overlay (overview/session/
+      // dm/tasks/reassign) via ctx.ui.custom(). Esc or `q` exits.
+      if (group === "panel") {
+        await openAcpPanelOverlay(ctx);
         return;
       }
 
