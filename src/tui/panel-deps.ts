@@ -21,15 +21,32 @@ import type {
 	AcpPanelTranscriptEntry,
 } from "./acp-panel.js";
 
-/** Inputs the read-only adapter consumes. */
+/** Inputs the read-only adapter consumes.
+ *
+ * Either eager snapshots (`state`, `tasks`) or lazy getters (`getState`,
+ * `getTasks`) are accepted. Lazy getters are preferred for live wiring so each
+ * `getEntities()` / `getTasks()` call reads fresh data without rebuilding the
+ * panel. If both are supplied, the lazy getter wins.
+ */
 export interface ReadOnlyPanelSources {
 	/** Snapshot of the widget state (sessions + workers + activity). */
-	state: AcpWidgetState;
+	state?: AcpWidgetState;
+	/** Lazy widget state (preferred for live wiring). */
+	getState?: () => AcpWidgetState;
 	/** Current task list (passed through unchanged). */
-	tasks: AcpPanelTask[];
+	tasks?: AcpPanelTask[];
+	/** Lazy task list (preferred for live wiring). */
+	getTasks?: () => AcpPanelTask[];
 }
 
 const READ_ONLY_MSG = "read-only slot — overview mode does not support mutations";
+
+const EMPTY_STATE: AcpWidgetState = {
+	sessions: [],
+	circuitBreakerState: "closed",
+	configuredAgentNames: [],
+	activity: { activeDelegations: 0, activeBroadcasts: 0, activeCompares: 0, delegations: [] },
+};
 
 function sessionToEntity(s: AcpWidgetSession): AcpPanelEntity {
 	const meta: AcpPanelEntityMetadata = { kind: "session" };
@@ -60,15 +77,17 @@ function workerToEntity(w: AcpWidgetWorker): AcpPanelEntity {
  * Mutations throw a typed error (overview mode never calls them).
  */
 export function buildAcpPanelDepsReadOnly(sources: ReadOnlyPanelSources): AcpPanelDeps {
-	const { state, tasks } = sources;
+	const getState = (): AcpWidgetState => sources.getState?.() ?? sources.state ?? EMPTY_STATE;
+	const getTasksList = (): AcpPanelTask[] => sources.getTasks?.() ?? sources.tasks ?? [];
 	return {
 		getEntities(): AcpPanelEntity[] {
+			const state = getState();
 			const sessions = state.sessions.map(sessionToEntity);
 			const workers = (state.workers ?? []).map(workerToEntity);
 			return [...sessions, ...workers];
 		},
 		getTasks(): AcpPanelTask[] {
-			return tasks;
+			return getTasksList();
 		},
 		async sendMessage(): Promise<void> {
 			throw new Error(READ_ONLY_MSG);
