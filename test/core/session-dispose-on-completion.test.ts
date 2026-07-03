@@ -2,15 +2,14 @@
  * RED test — Pillar A (dispose-on-completion).
  *
  * Drives the REAL (un-mocked) SessionManager + HealthMonitor through the
- * registered `acp_prompt` tool with a fake adapter and `params.dispose = true`.
+ * registered `acp_spawn` tool with a fake adapter and `idleTtlMs: 0` (one-shot).
  * After the tool resolves, the ephemeral session must be fully torn down:
  *   - sessionMgr.size === 0 (session removed)
  *   - the handle is gone from the registry
  *   - handle.disposed === true
  *
- * Today this FAILS because index.ts only calls raw `adapter.dispose()` in the
- * ephemeral-completion branch, leaving the handle registered with
- * `disposed === false`.
+ * Under the unified surface, the old `acp_prompt { dispose: true }` one-shot
+ * semantics are expressed as `acp_spawn { prompt, idleTtlMs: 0 }`.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { AcpSessionHandle } from "../../src/config/types.js";
@@ -84,7 +83,7 @@ const CFG = {
 	modelPolicy: {},
 };
 
-describe("acp_prompt ephemeral dispose-on-completion (T1)", () => {
+describe("acp_spawn one-shot (idleTtlMs:0) dispose-on-completion (T1)", () => {
 	let tools: Map<string, any>;
 	let fakeAdapter: any;
 	let capturedHandle: AcpSessionHandle | undefined;
@@ -134,10 +133,10 @@ describe("acp_prompt ephemeral dispose-on-completion (T1)", () => {
 		main({ registerTool: vi.fn((t: any) => tools.set(t.name, t)), registerCommand: vi.fn(), on: vi.fn() } as any);
 	});
 
-	it("tears down an ephemeral (dispose:true) session after successful completion", async () => {
-		const result = await tools.get("acp_prompt").execute(
+	it("tears down a one-shot (idleTtlMs:0) session after successful completion", async () => {
+		const result = await tools.get("acp_spawn").execute(
 			"t",
-			{ message: "hi", dispose: true },
+			{ agent: "gemini", prompt: "hi", idleTtlMs: 0 },
 			undefined,
 			undefined,
 			ctx,
@@ -168,17 +167,17 @@ describe("acp_prompt ephemeral dispose-on-completion (T1)", () => {
 		// created (new-session path).
 		fakeAdapter.prompt.mockRejectedValueOnce(new Error("boom"));
 
-		// Invoke acp_prompt via the new-session path. The tool's safeExecute
+		// Invoke acp_spawn (one-shot) via the prompt path. The tool's safeExecute
 		// wrapper catches the error and returns an error result rather than
 		// rejecting.
-		const result = await tools.get("acp_prompt").execute(
+		const result = await tools.get("acp_spawn").execute(
 			"t",
-			{ message: "hi" },
+			{ agent: "gemini", prompt: "hi", idleTtlMs: 0 },
 			undefined,
 			undefined,
 			ctx,
 		);
-		expect(result.details.stopReason).toBe("error");
+		expect(result.details.error).toBeTruthy();
 
 		// Sanity: a handle was created before prompt threw.
 		expect(capturedHandle).toBeDefined();

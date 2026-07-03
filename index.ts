@@ -693,13 +693,14 @@ export default function (pi: ExtensionAPI) {
           onActivity: (sid) => monitor.touch(sid),
           onSessionUpdate: heartbeatConsumer,
         });
+        let handle: AcpSessionHandle | undefined;
         try {
           await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_spawn(spawn:${agentName})`);
           await adapter.initialize();
           const sessionId = await adapter.newSession(effectiveCwd);
           if (params.model) await adapter.setModel(params.model);
           if (params.mode) await adapter.setMode(params.mode);
-          const handle = makeSessionHandle(sessionId, agentName, effectiveCwd, adapter, undefined, sessionName);
+          handle = makeSessionHandle(sessionId, agentName, effectiveCwd, adapter, undefined, sessionName);
           activeAdapters.set(sessionId, adapter);
 
           if (isWorker && sessionName) {
@@ -737,7 +738,11 @@ export default function (pi: ExtensionAPI) {
 
           return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, text: promptText };
         } catch (err) {
-          adapter.dispose();
+          if (handle) {
+            await closeSession(handle, "error");
+          } else {
+            adapter.dispose();
+          }
           throw new Error(err instanceof Error ? err.message : String(err), { cause: err });
         }
       }, `acp_spawn(${agentName})`);
@@ -895,13 +900,37 @@ export default function (pi: ExtensionAPI) {
         try {
           await withTimeoutMs(adapter.spawn(), config.staleTimeoutMs, `acp_msg(spawn:${agentName})`);
           await adapter.initialize();
+          // ── Session-loadability tracking (restored from main) ──
+          // When reopening an archived/disposed session, attempt to reload the
+          // prior conversation. Track success/failure so permanently-unloadable
+          // sessions skip the futile loadSession call and fall back to fresh.
           let newSessionId: string;
-          if (sessionId && resolved.metadata && !liveHandle) {
-            try {
-              await adapter.loadSession(sessionId);
-              newSessionId = sessionId;
-            } catch {
+          let warningPrefix = ""; // prepended to the response when we could not recover history.
+          const archived = (sessionId && resolved.metadata && !liveHandle) ? resolved.metadata : undefined;
+          if (archived) {
+            // Phase 3.4: Permanently unloadable (>=3 failed attempts) — skip loadSession.
+            if (archived.loadStatus === "unloadable" && (archived.loadAttemptCount ?? 0) >= 3) {
               newSessionId = await adapter.newSession(effectiveCwd);
+              warningPrefix = `[WARNING: Previous session could not be recovered. This is an entirely new session with no conversation history. Previous session was marked permanently unloadable after ${archived.loadAttemptCount} failed attempts.]\n`;
+            } else {
+              try {
+                await adapter.loadSession(sessionId!);
+                // Phase 3.3: successful load
+                archived.loadStatus = "loadable";
+                archived.lastLoadAttemptAt = new Date().toISOString();
+                archived.loadAttemptCount = (archived.loadAttemptCount ?? 0) + 1;
+                archiveSession(archived as AcpSessionHandle);
+                newSessionId = sessionId!;
+              } catch (loadErr) {
+                // Phase 3.3: failed load — record and fall back to fresh.
+                archived.loadStatus = "unloadable";
+                archived.lastLoadAttemptAt = new Date().toISOString();
+                archived.lastLoadError = (loadErr as Error).message;
+                archived.loadAttemptCount = (archived.loadAttemptCount ?? 0) + 1;
+                archiveSession(archived as AcpSessionHandle);
+                newSessionId = await adapter.newSession(effectiveCwd);
+                warningPrefix = `[WARNING: Previous session could not be recovered. This is an entirely new session with no conversation history. Error: ${(loadErr as Error).message}]\n`;
+              }
             }
           } else {
             newSessionId = await adapter.newSession(effectiveCwd);
@@ -917,6 +946,7 @@ export default function (pi: ExtensionAPI) {
           archiveSession(handle);
           try {
             const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_msg(prompt:${newSessionId})`)) as AcpPromptResult;
+            if (warningPrefix) pr.text = `${warningPrefix}${pr.text}`;
             markPromptLifecycle(handle, pr);
             eventLog.append("msg_prompt", { sessionId: newSessionId, sessionName: handle.sessionName });
             return pr;

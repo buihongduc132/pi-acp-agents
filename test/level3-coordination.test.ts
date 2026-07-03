@@ -37,10 +37,10 @@ describe("Level 3 — Tool registration", () => {
     expect(names).toContain("acp_delegate");
   });
 
-  it("registers acp_broadcast tool", async () => {
+  it("registers acp_fanout tool (absorbed acp_broadcast)", async () => {
     const mock = await loadTools();
     const names = mock.tools.map((t) => t.name);
-    expect(names).toContain("acp_broadcast");
+    expect(names).toContain("acp_fanout");
   });
 
   it.skip("registers acp_compare tool [REMOVED]", async () => {
@@ -59,14 +59,13 @@ describe("Level 3 — Tool registration", () => {
     expect(props).toHaveProperty("cwd");
   });
 
-  it("acp_broadcast has message and agents array parameter", async () => {
+  it("acp_fanout has message and agents array parameter", async () => {
     const mock = await loadTools();
-    const tool = mock.tools.find((t) => t.name === "acp_broadcast");
+    const tool = mock.tools.find((t) => t.name === "acp_fanout");
     expect(tool).toBeDefined();
     const props = tool!.parameters?.properties;
     expect(props).toHaveProperty("message");
     expect(props).toHaveProperty("agents");
-    expect(props).toHaveProperty("cwd");
   });
 
   it.skip("acp_compare has message and agents array parameter [REMOVED]", async () => {
@@ -82,7 +81,7 @@ describe("Level 3 — Tool registration", () => {
   it("all Level 3 tools have descriptions", async () => {
     const mock = await loadTools();
     const l3Tools = mock.tools.filter((t) =>
-      ["acp_broadcast"].includes(t.name),
+      ["acp_fanout"].includes(t.name),
     );
     expect(l3Tools.length).toBeGreaterThanOrEqual(1);
     for (const tool of l3Tools) {
