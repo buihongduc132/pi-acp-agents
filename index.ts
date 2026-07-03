@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { AgentToolResult, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { type AcpWidgetState, type AcpWidgetDag, createAcpWidget, dagIndexEntryToWidgetDag } from "./src/acp-widget.js";
+import { type AcpWidgetState, type AcpWidgetDag, dagIndexEntryToWidgetDag } from "./src/acp-widget.js";
+import { createAcpPanel, type AcpPanelTask } from "./src/tui/acp-panel.js";
+import { buildAcpPanelDepsReadOnly } from "./src/tui/panel-deps.js";
+import type { AcpTaskRecord } from "./src/management/task-store.js";
 import { createAdapter } from "./src/adapter-factory.js";
 import { loadConfig } from "./src/config/config.js";
 import type { AcpArchivedSessionMetadata, AcpConfig, AcpPromptResult, AcpSessionHandle, AcpWorkerStatus, DagIndexEntry } from "./src/config/types.js";
@@ -465,7 +468,53 @@ export default function (pi: ExtensionAPI) {
       .map((e) => dagIndexEntryToWidgetDag(e)),
   });
 
-  const widgetFactory = createAcpWidget({ getState: getWidgetState });
+  // D1: render the interactive panel's overview mode into the live status slot.
+  // Lazy getters ensure each render reads fresh state without rebuilding the
+  // panel (which holds mode/selection state across renders). Mutation deps
+  // throw (overview is read-only); D2 wires full mutations via ctx.ui.custom.
+  const mapTaskToPanel = (t: AcpTaskRecord): AcpPanelTask => ({
+    id: t.id,
+    status: t.status,
+    ownerId: t.assignee,
+    blockedBy: t.blockedBy,
+    qualityGateStatus: (t.metadata?.qualityGateStatus as AcpPanelTask["qualityGateStatus"]) ?? null,
+    qualityGateSummary: (t.metadata?.qualityGateSummary as string | undefined),
+  });
+  // Cache the mapped task list to avoid synchronous disk reads (taskStore.list()
+  // calls readFileSync) on every TUI paint frame. TTL keeps data fresh enough
+  // for an overview while preventing I/O-per-frame stutter. Cache is also keyed
+  // by store identity so a session/project switch (different store instance)
+  // invalidates immediately rather than serving up to 1s of stale tasks.
+  const TASKS_CACHE_TTL_MS = 1000;
+  let cachedTasks: AcpPanelTask[] | null = null;
+  let cachedTasksAt = 0;
+  let cachedTasksStore: unknown = null;
+  const getPanelTasks = (): AcpPanelTask[] => {
+    const now = Date.now();
+    const store = taskStore();
+    if (cachedTasks && cachedTasksStore === store && now - cachedTasksAt < TASKS_CACHE_TTL_MS) {
+      return cachedTasks;
+    }
+    cachedTasks = store.list().map(mapTaskToPanel);
+    cachedTasksAt = now;
+    cachedTasksStore = store;
+    return cachedTasks;
+  };
+  const panelDeps = buildAcpPanelDepsReadOnly({
+    getState: getWidgetState,
+    getTasks: getPanelTasks,
+  });
+  const acpPanel = createAcpPanel(panelDeps);
+  // pi's Theme (fg/bold/italic/dim) is shape-compatible with AcpPanelTheme —
+  // pass it straight through so the panel renders with slot colors instead of
+  // the monochrome default. Width is forwarded so the panel respects the slot.
+  const widgetFactory = (
+		_tui: unknown, theme: unknown,
+	): { render(width: number): string[]; dispose?(): void } => ({
+		render(width: number): string[] {
+			return acpPanel.render(theme as Parameters<typeof acpPanel.render>[0], width);
+		},
+	});
 
   function ensureWidget(ctx: { ui: { setWidget: Function } }) {
     if (widgetRegistered) return;

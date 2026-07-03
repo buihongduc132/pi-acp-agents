@@ -67,7 +67,7 @@ vi.mock("../src/dag/dag-executor.js", () => ({
 	}),
 }));
 
-// Capture the getState function passed to createAcpWidget so the test can
+// Capture the getState function passed to the panel deps adapter so the test can
 // invoke it directly and inspect the produced AcpWidgetState.dags.
 const { capturedGetState } = vi.hoisted(() => ({
 	capturedGetState: { current: null as null | (() => any) },
@@ -79,6 +79,16 @@ vi.mock("../src/acp-widget.js", async (importOriginal) => {
 		createAcpWidget: (opts: any) => {
 			capturedGetState.current = opts.getState;
 			return () => ({ render: vi.fn() });
+		},
+	};
+});
+vi.mock("../src/tui/panel-deps.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/tui/panel-deps.js")>();
+	return {
+		...actual,
+		buildAcpPanelDepsReadOnly: (sources: any) => {
+			if (sources?.getState) capturedGetState.current = sources.getState;
+			return actual.buildAcpPanelDepsReadOnly(sources);
 		},
 	};
 });
