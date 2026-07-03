@@ -99,4 +99,39 @@ describe("buildAcpPanelDepsFull", () => {
 		const deps = buildAcpPanelDepsFull(mkSources({ getTasks: () => tasks }));
 		expect(deps.getTasks()).toBe(tasks);
 	});
+
+	it("swallows sendMessage errors (best-effort, never throws)", async () => {
+		const deps = buildAcpPanelDepsFull(mkSources({
+			sendMessage: vi.fn(async () => { throw new Error("boom"); }),
+		}));
+		await expect(deps.sendMessage("x", "y")).resolves.toBeUndefined();
+	});
+
+	it("swallows abortEntity errors", () => {
+		const deps = buildAcpPanelDepsFull(mkSources({
+			abortEntity: () => { throw new Error("boom"); },
+		}));
+		expect(() => deps.abortEntity("x")).not.toThrow();
+	});
+
+	it("swallows killEntity errors", () => {
+		const deps = buildAcpPanelDepsFull(mkSources({
+			killEntity: () => { throw new Error("boom"); },
+		}));
+		expect(() => deps.killEntity("x")).not.toThrow();
+	});
+
+	it("reassignTask returns false on source error", async () => {
+		const deps = buildAcpPanelDepsFull(mkSources({
+			reassignTask: vi.fn(async () => { throw new Error("boom"); }),
+		}));
+		expect(await deps.reassignTask("t1", "o")).toBe(false);
+	});
+
+	it("unassignTask returns false on source error", async () => {
+		const deps = buildAcpPanelDepsFull(mkSources({
+			unassignTask: vi.fn(async () => { throw new Error("boom"); }),
+		}));
+		expect(await deps.unassignTask("t1")).toBe(false);
+	});
 });

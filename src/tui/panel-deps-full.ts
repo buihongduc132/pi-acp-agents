@@ -48,19 +48,39 @@ export function buildAcpPanelDepsFull(sources: FullPanelSources): AcpPanelDeps {
 		getEntities: (): AcpPanelEntity[] => readOnly.getEntities(),
 		getTasks: (): AcpPanelTask[] => readOnly.getTasks(),
 		async sendMessage(to: string, text: string): Promise<void> {
-			await sources.sendMessage(to, text);
+			try {
+				await sources.sendMessage(to, text);
+			} catch (e) {
+				// Best-effort: swallow — panel re-renders with current state.
+			}
 		},
 		abortEntity(entityId: string): void {
-			sources.abortEntity(entityId);
+			try {
+				sources.abortEntity(entityId);
+			} catch (e) {
+				// Best-effort: swallow.
+			}
 		},
 		killEntity(entityId: string): void {
-			sources.killEntity(entityId);
+			try {
+				sources.killEntity(entityId);
+			} catch (e) {
+				// Best-effort: swallow.
+			}
 		},
 		async reassignTask(taskId: string, newOwner: string): Promise<boolean> {
-			return sources.reassignTask(taskId, newOwner);
+			try {
+				return await sources.reassignTask(taskId, newOwner);
+			} catch (e) {
+				return false;
+			}
 		},
 		async unassignTask(taskId: string): Promise<boolean> {
-			return sources.unassignTask(taskId);
+			try {
+				return await sources.unassignTask(taskId);
+			} catch (e) {
+				return false;
+			}
 		},
 		getTranscript(entityId: string): AcpPanelTranscriptEntry[] {
 			return sources.getTranscript(entityId);
