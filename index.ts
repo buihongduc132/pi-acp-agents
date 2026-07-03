@@ -482,15 +482,22 @@ export default function (pi: ExtensionAPI) {
   });
   // Cache the mapped task list to avoid synchronous disk reads (taskStore.list()
   // calls readFileSync) on every TUI paint frame. TTL keeps data fresh enough
-  // for an overview while preventing I/O-per-frame stutter.
+  // for an overview while preventing I/O-per-frame stutter. Cache is also keyed
+  // by store identity so a session/project switch (different store instance)
+  // invalidates immediately rather than serving up to 1s of stale tasks.
   const TASKS_CACHE_TTL_MS = 1000;
   let cachedTasks: AcpPanelTask[] | null = null;
   let cachedTasksAt = 0;
+  let cachedTasksStore: unknown = null;
   const getPanelTasks = (): AcpPanelTask[] => {
     const now = Date.now();
-    if (cachedTasks && now - cachedTasksAt < TASKS_CACHE_TTL_MS) return cachedTasks;
-    cachedTasks = taskStore().list().map(mapTaskToPanel);
+    const store = taskStore();
+    if (cachedTasks && cachedTasksStore === store && now - cachedTasksAt < TASKS_CACHE_TTL_MS) {
+      return cachedTasks;
+    }
+    cachedTasks = store.list().map(mapTaskToPanel);
     cachedTasksAt = now;
+    cachedTasksStore = store;
     return cachedTasks;
   };
   const panelDeps = buildAcpPanelDepsReadOnly({
