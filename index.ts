@@ -1398,22 +1398,36 @@ export default function (pi: ExtensionAPI) {
         mailboxManager().send({ from: hostSessionId ?? "panel", to, message: text, kind: "dm" });
       },
       abortEntity: (entityId: string): void => {
-        const handle = sessionMgr.get(entityId);
+        // entityId may be a worker name (workers map id→name) or a sessionId.
+        // Resolve to the underlying sessionId before touching sessionMgr.
+        const sessionId = workerStore().get(entityId)?.sessionId ?? entityId;
+        const handle = sessionMgr.get(sessionId);
         const adapter = handle ? activeAdapters.get(handle.sessionId) : undefined;
         if (adapter) { adapter.cancel().catch(() => {}); }
       },
       killEntity: (entityId: string): void => {
-        const handle = sessionMgr.get(entityId);
+        const sessionId = workerStore().get(entityId)?.sessionId ?? entityId;
+        const handle = sessionMgr.get(sessionId);
         if (handle) { closeSession(handle, "panel-kill").catch(() => {}); }
         else { workerStore().updateStatus(entityId, "offline"); }
       },
       reassignTask: async (taskId: string, newOwner: string): Promise<boolean> => {
-        taskStore().update(taskId, (t) => { t.assignee = newOwner; });
-        return true;
+        try {
+          taskStore().update(taskId, (t) => { t.assignee = newOwner; });
+          return true;
+        } catch (e) {
+          logger.debug("panel reassignTask failed", e);
+          return false;
+        }
       },
       unassignTask: async (taskId: string): Promise<boolean> => {
-        taskStore().update(taskId, (t) => { t.assignee = undefined; });
-        return true;
+        try {
+          taskStore().update(taskId, (t) => { t.assignee = undefined; });
+          return true;
+        } catch (e) {
+          logger.debug("panel unassignTask failed", e);
+          return false;
+        }
       },
       getTranscript: (): [] => [],
     };
@@ -1430,13 +1444,18 @@ export default function (pi: ExtensionAPI) {
             // Panel reads live state each render via deps; nothing to invalidate.
           },
           async handleInput(data: string): Promise<void> {
-            // Esc / q exits the overlay.
-            if (data === "\u001b" || data === "q") {
+            // Map raw escape byte to the panel's expected "Escape" key name.
+            const key = data === "\u001b" ? "Escape" : data;
+            const currentMode = acpPanel.getMode();
+            // Only Esc/q exits the overlay, and only from overview mode — so
+            // Esc in a sub-mode returns to overview (panel's own behavior) and
+            // 'q' in dm compose is typed, not treated as exit.
+            if (currentMode === "overview" && (key === "Escape" || key === "q")) {
               done(undefined);
               return;
             }
             try {
-              await acpPanel.handleKey(data);
+              await acpPanel.handleKey(key);
             } catch (e) {
               logger.debug("panel handleKey failed", e);
             }
