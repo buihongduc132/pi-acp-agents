@@ -419,13 +419,12 @@ export default function (pi: ExtensionAPI) {
       sessionName: s.sessionName,
       agentName: s.agentName,
       cwd: s.cwd,
-      status: s.disposed
-        ? "error"
-        : busySessions.get(s.sessionId)
-          ? "active"
-          : getSessionAutoCloseReason(s, config.staleTimeoutMs ?? 600_000, undefined, config.completedIdleTtlMs ?? config.staleTimeoutMs ?? 600_000)
-            ? "stale"
-            : "idle",
+      status: ((): "error" | "active" | "stale" | "idle" => {
+        if (s.disposed) return "error";
+        if (busySessions.get(s.sessionId)) return "active";
+        if (getSessionAutoCloseReason(s, config.staleTimeoutMs ?? 600_000, undefined, config.completedIdleTtlMs ?? config.staleTimeoutMs ?? 600_000)) return "stale";
+        return "idle";
+      })(),
       lastActivityAt: s.lastActivityAt,
       createdAt: s.createdAt,
       model: s.model,
@@ -457,7 +456,11 @@ export default function (pi: ExtensionAPI) {
     dags: dagStore
       .listAll()
       .filter((e) => e.status !== "pending")
-      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+      .sort((a, b) => {
+        if (a.updatedAt < b.updatedAt) return 1;
+        if (a.updatedAt > b.updatedAt) return -1;
+        return 0;
+      })
       .slice(0, 5)
       .map((e) => dagIndexEntryToWidgetDag(e)),
   });
@@ -633,19 +636,28 @@ export default function (pi: ExtensionAPI) {
   // Load tool visibility settings
   const toolSettings: AcpToolSettings = loadSettings(process.cwd());
 
-  // Core tools
-  if (isToolEnabled(toolSettings, "acp_prompt")) pi.registerTool({
-    name: "acp_prompt",
-    label: "ACP Prompt",
-    description: "Send a prompt to an ACP-compatible agent (e.g., Gemini CLI). Returns the agent's text response. Creates a new session if needed.",
-    promptSnippet: "acp_prompt — send a prompt to an ACP agent and get the response",
+  // ── Unified tool surface (11 tools) ────────────────────────────────
+  // acp_spawn : create a session (long-lived, one-shot with idleTtlMs:0,
+  //             or worker with claim:true).
+  // acp_msg   : prompt/cancel/steer a session or worker (alive/disposed/busy).
+  // acp_fanout: broadcast/compare across multiple agents.
+  // acp_governance: plan + model-policy actions.
+  // acp_status: status display + action: cleanup|prune.
+  // Consolidated task/message/dag tools retained as-is.
+
+  // ── acp_spawn ──
+  if (isToolEnabled(toolSettings, "acp_spawn")) pi.registerTool({
+    name: "acp_spawn",
+    label: "ACP Spawn",
+    description: "Spawn an ACP agent session. Long-lived by default. With idleTtlMs:0 + prompt, runs one-shot and disposes after responding. With claim:true, registers as a persistent auto-claim worker.",
+    promptSnippet: "acp_spawn — spawn an ACP agent session (long-lived, one-shot, or worker)",
     parameters: Type.Object({
-      message: Type.String({ description: "The message/prompt to send to the agent" }),
-      agent: Type.Optional(Type.String({ description: "Agent name from config. Default: use defaultAgent setting" })),
-      session_id: Type.Optional(Type.String({ description: "Existing session ID to reuse" })),
-      session_name: Type.Optional(Type.String({ description: "Friendly session name to reuse or assign when creating" })),
+      agent: Type.Optional(Type.String({ description: "Agent name from config. Default: defaultAgent setting" })),
+      name: Type.Optional(Type.String({ description: "Friendly session/worker name. Required when claim:true." })),
+      prompt: Type.Optional(Type.String({ description: "Optional initial prompt to send immediately" })),
+      claim: Type.Optional(Type.Boolean({ description: "If true, register this spawn as a persistent worker in the auto-claim pool." })),
+      idleTtlMs: Type.Optional(Type.Number({ description: "Idle TTL in ms. 0 = one-shot (dispose after first response). Default: long-lived." })),
       cwd: Type.Optional(Type.String({ description: "Working directory for the agent" })),
-      dispose: Type.Optional(Type.Boolean({ description: "Create ephemeral session and dispose after response" })),
       model: Type.Optional(Type.String({ description: "Model to set on the session" })),
       mode: Type.Optional(Type.String({ description: "Mode/thinking level to set on the session" })),
     }),
@@ -657,222 +669,331 @@ export default function (pi: ExtensionAPI) {
         return { content: [textContent(String((error as Error).message))], details: { agent: agentName, error: "not found" } };
       }
 
+      const oneShot = params.idleTtlMs === 0;
+      const isWorker = !!params.claim;
+      const sessionName = params.name?.trim() || undefined;
+
+      if (isWorker) {
+        if (!sessionName) {
+          return { content: [textContent("claim:true requires a 'name' for the worker.")], details: { error: "missing_name" } };
+        }
+        if (!/^[a-zA-Z0-9_-]{1,64}$/.test(sessionName)) {
+          return { content: [textContent("Worker name must be 1-64 characters and contain only alphanumeric characters, hyphens, and underscores.")], details: { error: "invalid_name" } };
+        }
+        const existing = workerStore().get(sessionName);
+        if (existing) {
+          return { content: [textContent(`Worker '${sessionName}' already exists`)], details: { error: "duplicate_name", name: sessionName } };
+        }
+      }
+
       const result = await safeExecute(async () => {
-        const target = resolveSessionTarget(params);
-        if (target.sessionId && activeAdapters.has(target.sessionId)) {
-          const handle = sessionMgr.get(target.sessionId);
-          if (!handle || handle.disposed) {
-            throw new Error(`Session \"${target.sessionId}\" not found or disposed.`);
-          }
-          if (busySessions.get(target.sessionId)) {
-            throw new Error(`Session \"${target.sessionId}\" is busy. Try again later.`);
-          }
-          busySessions.set(target.sessionId, true);
-          handle.busy = true;
-          handle.lastActivityAt = new Date();
-          handle.isPrompting = true;
-          handle.promptStartedAt = new Date();
-          monitor.markPromptStart(target.sessionId);
-          archiveSession(handle);
-          try {
-            const adapter = activeAdapters.get(target.sessionId)!;
-            const promptResult = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_prompt(reused:${target.sessionId})`)) as AcpPromptResult;
-            markPromptLifecycle(handle, promptResult);
-            eventLog.append("prompt_reused_session", { agentName, sessionId: target.sessionId, sessionName: handle.sessionName });
-            return { ...promptResult, sessionId: target.sessionId, sessionName: handle.sessionName };
-          } finally {
-            busySessions.delete(target.sessionId);
-            handle.busy = false;
-            handle.isPrompting = false;
-            monitor.markPromptEnd(target.sessionId);
-            archiveSession(handle);
-          }
-        }
-
-        if (target.sessionId && target.metadata) {
-          // Auto-reload archived session if it exists
-          const archived = target.metadata;
-
-          // Phase 3.4: Skip loadSession for known-unloadable sessions
-          if (archived.loadStatus === "unloadable" && (archived.loadAttemptCount ?? 0) >= 3) {
-            // Permanently unloadable — go straight to fresh session with warning
-            const freshAgentCfg = getAgentConfigOrThrow(agentName);
-            const freshAdapter = createAdapter(agentName, freshAgentCfg, config, params.cwd ?? ctx.cwd, {
-              onActivity: (sid) => monitor.touch(sid),
-            });
-            try {
-              await withTimeoutMs(freshAdapter.spawn(), config.staleTimeoutMs, `acp_spawn(unloadable:${target.sessionId})`);
-              await freshAdapter.initialize();
-              const freshSessionId = await freshAdapter.newSession(params.cwd ?? ctx.cwd);
-              if (target.sessionName) sessionNameStore.register(target.sessionName, freshSessionId);
-              const handle = makeSessionHandle(freshSessionId, agentName, params.cwd ?? ctx.cwd, freshAdapter, undefined, target.sessionName);
-              handle.busy = true; busySessions.set(freshSessionId, true);
-              try {
-                const pr = (await withTimeoutMs(freshAdapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(unloadable:${freshSessionId})`)) as AcpPromptResult;
-                markPromptLifecycle(handle, pr);
-                pr.text = `[WARNING: Previous session could not be recovered. This is an entirely new session with no conversation history. Previous session was marked permanently unloadable after ${archived.loadAttemptCount} failed attempts.]
-${pr.text}`;
-                return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
-              } finally {
-                busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
-                scheduleCompletionClose(handle, params);
-              }
-            } catch (freshErr) { freshAdapter.dispose(); throw freshErr; }
-          }
-
-          const agentCfg = getAgentConfigOrThrow(agentName);
-          const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
-            onActivity: (sid) => monitor.touch(sid),
-          });
-          let archivedHandle: AcpSessionHandle | undefined;
-          try {
-            await withTimeoutMs(adapter.spawn(), config.staleTimeoutMs, `acp_spawn(archived:${target.sessionId})`);
-            await adapter.initialize();
-            try {
-              await adapter.loadSession(target.sessionId);
-              // Phase 3.3: Track successful load
-              if (archived) {
-                archived.loadStatus = "loadable";
-                archived.lastLoadAttemptAt = new Date().toISOString();
-                archived.loadAttemptCount = (archived.loadAttemptCount ?? 0) + 1;
-                archiveSession(archived as AcpSessionHandle);
-              }
-            } catch (loadErr) {
-              // Phase 3.3: Track failed load
-              if (archived) {
-                archived.loadStatus = "unloadable";
-                archived.lastLoadAttemptAt = new Date().toISOString();
-                archived.lastLoadError = (loadErr as Error).message;
-                archived.loadAttemptCount = (archived.loadAttemptCount ?? 0) + 1;
-                archiveSession(archived as AcpSessionHandle);
-              }
-              // Archived session cannot be reloaded — fall back to fresh
-              adapter.dispose();
-              const freshAdapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
-                onActivity: (sid) => monitor.touch(sid),
-              });
-              try {
-                await withTimeoutMs(freshAdapter.spawn(), config.staleTimeoutMs, `acp_spawn(fresh:${target.sessionId})`);
-                await freshAdapter.initialize();
-                const freshSessionId = await freshAdapter.newSession(params.cwd ?? ctx.cwd);
-                if (target.sessionName) sessionNameStore.register(target.sessionName, freshSessionId);
-                const handle = makeSessionHandle(freshSessionId, agentName, params.cwd ?? ctx.cwd, freshAdapter, undefined, target.sessionName);
-                archivedHandle = handle;
-                handle.busy = true; busySessions.set(freshSessionId, true);
-                try {
-                  const pr = (await withTimeoutMs(freshAdapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(fresh:${freshSessionId})`)) as AcpPromptResult;
-                  markPromptLifecycle(handle, pr);
-                  pr.text = `[WARNING: Previous session could not be recovered. This is an entirely new session with no conversation history. Error: ${(loadErr as Error).message}]
-${pr.text}`;
-                  return { ...pr, sessionId: freshSessionId, sessionName: handle.sessionName };
-                } finally {
-                  busySessions.delete(freshSessionId); handle.busy = false; archiveSession(handle);
-                  scheduleCompletionClose(handle, params);
-                }
-              } catch (freshErr) {
-                if (archivedHandle) {
-                  await closeSession(archivedHandle, "error");
-                } else {
-                  freshAdapter.dispose();
-                }
-                throw freshErr;
-              }
-            }
-            const handle = makeSessionHandle(target.sessionId, agentName, archived.cwd ?? params.cwd ?? ctx.cwd, adapter, undefined, target.sessionName);
-            archivedHandle = handle;
-            handle.busy = true; busySessions.set(target.sessionId, true);
-            try {
-              const pr = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_prompt(archived:${target.sessionId})`)) as AcpPromptResult;
-              markPromptLifecycle(handle, pr);
-              return { ...pr, sessionId: target.sessionId, sessionName: handle.sessionName };
-            } finally {
-              busySessions.delete(target.sessionId); handle.busy = false; archiveSession(handle);
-              scheduleCompletionClose(handle, params);
-            }
-          } catch (err) {
-            if (archivedHandle) {
-              await closeSession(archivedHandle, "error");
-            } else {
-              adapter.dispose();
-            }
-            throw err;
-          }
-        }
         const agentCfg = getAgentConfigOrThrow(agentName);
-        const adapter = createAdapter(agentName, agentCfg, config, params.cwd ?? ctx.cwd, {
+        const effectiveCwd = params.cwd ?? ctx.cwd;
+        const adapter = createAdapter(agentName, agentCfg, config, effectiveCwd, {
           onActivity: (sid) => monitor.touch(sid),
+          onSessionUpdate: heartbeatConsumer,
+        });
+        try {
+          await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_spawn(spawn:${agentName})`);
+          await adapter.initialize();
+          const sessionId = await adapter.newSession(effectiveCwd);
+          if (params.model) await adapter.setModel(params.model);
+          if (params.mode) await adapter.setMode(params.mode);
+          const handle = makeSessionHandle(sessionId, agentName, effectiveCwd, adapter, undefined, sessionName);
+          activeAdapters.set(sessionId, adapter);
+
+          if (isWorker && sessionName) {
+            workerStore().register({ name: sessionName, sessionId, agentName });
+            workerSessionMap.set(sessionId, sessionName);
+            eventLog.append("worker_spawn", { name: sessionName, sessionId, agentName });
+          } else if (sessionName) {
+            sessionNameStore.register(sessionName, sessionId);
+          }
+
+          let promptText: string | undefined;
+          if (params.prompt) {
+            busySessions.set(sessionId, true);
+            handle.busy = true;
+            handle.isPrompting = true;
+            handle.promptStartedAt = new Date();
+            monitor.markPromptStart(sessionId);
+            archiveSession(handle);
+            try {
+              const pr = (await withTimeoutMs(adapter.prompt(params.prompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_spawn(prompt:${sessionId})`)) as AcpPromptResult;
+              markPromptLifecycle(handle, pr);
+              promptText = pr.text;
+            } finally {
+              busySessions.delete(sessionId);
+              handle.busy = false;
+              handle.isPrompting = false;
+              monitor.markPromptEnd(sessionId);
+              archiveSession(handle);
+            }
+          }
+
+          if (oneShot) {
+            await closeSession(handle, "completed-oneshot", false);
+          }
+
+          return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, text: promptText };
+        } catch (err) {
+          adapter.dispose();
+          throw new Error(err instanceof Error ? err.message : String(err), { cause: err });
+        }
+      }, `acp_spawn(${agentName})`);
+
+      refreshWidget(ctx);
+      if (result.ok) {
+        const v = result.value;
+        const body = v.text != null ? v.text : `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""}`;
+        return {
+          content: [textContent(body)],
+          details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker },
+        } as AgentToolResult<{ sessionId: string; agent: string; oneShot: boolean; worker: boolean }>;
+      }
+      const prefix = result.circuitOpen ? "Circuit breaker open — too many failures. Retry later.\n" : "";
+      return {
+        content: [textContent(`${prefix}ACP spawn error (${agentName}): ${result.error}`)],
+        details: { sessionId: "", agent: agentName, error: result.error, circuitOpen: result.circuitOpen },
+      };
+    },
+  });
+
+  // ── acp_msg ──
+  if (isToolEnabled(toolSettings, "acp_msg")) pi.registerTool({
+    name: "acp_msg",
+    label: "ACP Msg",
+    description: "Send a message to an ACP session or worker (live or archived). Auto-detects state: alive->prompt, disposed->reopen, busy->queue steer. cancel:true aborts the in-flight turn.",
+    promptSnippet: "acp_msg — message/prompt/cancel/steer a session or worker",
+    parameters: Type.Object({
+      to: Type.String({ description: "Target: session id, session name, or worker name" }),
+      message: Type.String({ description: "Message/prompt text to send (or steer text when queued)" }),
+      cancel: Type.Optional(Type.Boolean({ description: "If true, cancel the in-flight turn instead of prompting." })),
+      queue: Type.Optional(Type.Boolean({ description: "Force queue-as-steer even if target is idle." })),
+      agent: Type.Optional(Type.String({ description: "Agent override when reopening an archived session" })),
+      cwd: Type.Optional(Type.String({ description: "Working directory when reopening" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const target = requireString(params.to, "to");
+      const message = requireString(params.message, "message");
+
+      // (1) Worker resolution.
+      const worker = workerStore().get(target);
+      if (worker) {
+        const sessionId = worker.sessionId;
+        if (params.cancel) {
+          // Best-effort cancel: prefer the tracked adapter, but fall back to a
+          // fresh one if the reference was lost (e.g. across hot reloads) so a
+          // cancel request is always propagated to the provider.
+          let adapter = activeAdapters.get(sessionId);
+          if (!adapter) {
+            try {
+              const agentCfg = getAgentConfigOrThrow(worker.agentName);
+              adapter = createAdapter(worker.agentName, agentCfg, config, params.cwd ?? ctx.cwd, { onActivity: (sid) => monitor.touch(sid) });
+            } catch { /* agent unknown — leave adapter undefined */ }
+          }
+          if (adapter) { try { await adapter.cancel(); } catch { /* ignore */ } }
+          eventLog.append("worker_cancel", { name: target, sessionId });
+          refreshWidget(ctx);
+          return { content: [textContent(`Cancel sent to worker '${target}'.`)], details: { name: target, sessionId, cancelled: true } };
+        }
+        const isBusy = !!worker.currentTaskId || !!busySessions.get(sessionId);
+        if (isBusy || params.queue) {
+          workerStore().updateMetadata(target, { pendingSteer: message });
+          eventLog.append("worker_steer_queued", { name: target, sessionId, message, reason: isBusy ? "busy" : "forced" });
+          refreshWidget(ctx);
+          return { content: [textContent(`Steer queued for worker '${target}': ${message}`)], details: { name: target, message, queued: true } };
+        }
+        const adapter = activeAdapters.get(sessionId);
+        if (adapter) {
+          busySessions.set(sessionId, true);
+          try {
+            const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_msg(worker:${sessionId})`)) as AcpPromptResult;
+            return { content: [textContent(pr.text || "(no response)")], details: { sessionId, name: target, agent: worker.agentName, queued: false } };
+          } finally {
+            busySessions.delete(sessionId);
+          }
+        }
+      }
+
+      // (2) Session name/id resolution. `to` is ONE of {session name, session id}; resolving
+      // it as both would trip resolveSessionTarget's id/name conflict guard, so try name first,
+      // then fall back to treating it as a raw session id.
+      let resolved = resolveSessionTarget({ session_name: target, agent: params.agent });
+      if (!resolved.sessionId) {
+        resolved = resolveSessionTarget({ session_id: target, agent: params.agent });
+      }
+      const sessionId = resolved.sessionId;
+      const liveHandle = sessionId ? sessionMgr.get(sessionId) : undefined;
+
+      if (params.cancel) {
+        if (!liveHandle || liveHandle.disposed) {
+          return { content: [textContent(`Session "${target}" not found or disposed.`)], details: { sessionId, cancelled: false } };
+        }
+        const cancelResult = await safeExecute(async () => {
+          const adapter = activeAdapters.get(liveHandle.sessionId) ?? createAdapter(liveHandle.agentName, getAgentConfigOrThrow(liveHandle.agentName), config, params.cwd ?? ctx.cwd, { onActivity: (sid) => monitor.touch(sid) });
+          await adapter.cancel();
+          const now = new Date();
+          liveHandle.lastActivityAt = now;
+          liveHandle.completedAt = now;
+          archiveSession(liveHandle);
+          eventLog.append("session_cancel", { sessionId: liveHandle.sessionId });
+          return true;
+        }, "acp_msg(cancel)");
+        refreshWidget(ctx);
+        if (cancelResult.ok) {
+          return { content: [textContent(`Cancelled prompt on session ${liveHandle.sessionId}`)], details: { sessionId: liveHandle.sessionId, cancelled: true } };
+        }
+        return { content: [textContent(`Failed to cancel: ${cancelResult.error}`)], details: { sessionId: liveHandle.sessionId, cancelled: false } };
+      }
+
+      // Alive live session — reuse adapter.
+      if (liveHandle && !liveHandle.disposed && sessionId && activeAdapters.has(sessionId)) {
+        if (busySessions.get(sessionId)) {
+          return { content: [textContent(`Session "${sessionId}" is busy; message queued.`)], details: { sessionId, queued: true } };
+        }
+        const reused = await safeExecute(async () => {
+          busySessions.set(sessionId, true);
+          liveHandle.busy = true;
+          liveHandle.isPrompting = true;
+          liveHandle.promptStartedAt = new Date();
+          monitor.markPromptStart(sessionId);
+          archiveSession(liveHandle);
+          try {
+            const adapter = activeAdapters.get(sessionId)!;
+            const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_msg(reused:${sessionId})`)) as AcpPromptResult;
+            markPromptLifecycle(liveHandle, pr);
+            eventLog.append("msg_reused_session", { sessionId, sessionName: liveHandle.sessionName });
+            return pr;
+          } finally {
+            busySessions.delete(sessionId);
+            liveHandle.busy = false;
+            liveHandle.isPrompting = false;
+            monitor.markPromptEnd(sessionId);
+            archiveSession(liveHandle);
+          }
+        }, `acp_msg(reused:${sessionId})`);
+        refreshWidget(ctx);
+        if (reused.ok) {
+          return { content: [textContent(reused.value.text || "(no response)")], details: { sessionId, sessionName: liveHandle.sessionName, agent: liveHandle.agentName, queued: false } };
+        }
+        const p = reused.circuitOpen ? "Circuit breaker open — too many failures. Retry later.\n" : "";
+        return { content: [textContent(`${p}ACP error: ${reused.error}`)], details: { sessionId, error: reused.error, circuitOpen: reused.circuitOpen } };
+      }
+
+      // Archived / disposed / fresh — reopen or create, then prompt.
+      const reopened = await safeExecute(async () => {
+        const agentName = params.agent ?? resolved.metadata?.agentName ?? liveHandle?.agentName ?? getAgentName(params.agent);
+        getAgentConfigOrThrow(agentName);
+        const agentCfg = getAgentConfigOrThrow(agentName);
+        const effectiveCwd = params.cwd ?? resolved.metadata?.cwd ?? ctx.cwd;
+        const adapter = createAdapter(agentName, agentCfg, config, effectiveCwd, {
+          onActivity: (sid) => monitor.touch(sid),
+          onSessionUpdate: heartbeatConsumer,
         });
         let handle: AcpSessionHandle | undefined;
         try {
-          await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_spawn(new:${agentName})`);
+          await withTimeoutMs(adapter.spawn(), config.staleTimeoutMs, `acp_msg(spawn:${agentName})`);
           await adapter.initialize();
-          const sessionId = await adapter.newSession(params.cwd ?? ctx.cwd);
-          if (params.model) await adapter.setModel(params.model);
-          if (params.mode) await adapter.setMode(params.mode);
-          if (target.sessionName && !params.dispose) {
-            sessionNameStore.register(target.sessionName, sessionId);
+          let newSessionId: string;
+          if (sessionId && resolved.metadata && !liveHandle) {
+            try {
+              await adapter.loadSession(sessionId);
+              newSessionId = sessionId;
+            } catch {
+              newSessionId = await adapter.newSession(effectiveCwd);
+            }
+          } else {
+            newSessionId = await adapter.newSession(effectiveCwd);
           }
-          handle = makeSessionHandle(sessionId, agentName, params.cwd ?? ctx.cwd, adapter, undefined, params.dispose ? undefined : target.sessionName);
+          handle = makeSessionHandle(newSessionId, agentName, effectiveCwd, adapter, undefined, resolved.sessionName);
+          activeAdapters.set(newSessionId, adapter);
+          if (resolved.sessionName) sessionNameStore.register(resolved.sessionName, newSessionId);
+          busySessions.set(newSessionId, true);
           handle.busy = true;
-          busySessions.set(sessionId, true);
-          handle.lastActivityAt = new Date();
           handle.isPrompting = true;
           handle.promptStartedAt = new Date();
-          monitor.markPromptStart(sessionId);
+          monitor.markPromptStart(newSessionId);
           archiveSession(handle);
           try {
-            const promptResult = (await withTimeoutMs(adapter.prompt(params.message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_prompt(new:${sessionId})`)) as AcpPromptResult;
-            markPromptLifecycle(handle, promptResult);
-            eventLog.append("prompt_new_session", { agentName, sessionId, sessionName: handle.sessionName });
-            return { ...promptResult, sessionId, sessionName: handle.sessionName };
+            const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_msg(prompt:${newSessionId})`)) as AcpPromptResult;
+            markPromptLifecycle(handle, pr);
+            eventLog.append("msg_prompt", { sessionId: newSessionId, sessionName: handle.sessionName });
+            return pr;
           } finally {
-            busySessions.delete(sessionId);
+            busySessions.delete(newSessionId);
             handle.busy = false;
             handle.isPrompting = false;
-            monitor.markPromptEnd(sessionId);
+            monitor.markPromptEnd(newSessionId);
             archiveSession(handle);
-            if (params.dispose) {
-              await closeSession(handle, "completed-ephemeral");
-            }
-            scheduleCompletionClose(handle, params);
           }
         } catch (err) {
-          // If a handle was already registered (spawn/initialize succeeded but
-          // the prompt threw), tear it down via the canonical closeSession path
-          // so the registry entry, monitor registration, and activeAdapters
-          // mapping are all cleaned up — not just the raw adapter. For the
-          // pre-handle failure case (spawn/initialize), no handle exists yet,
-          // so dispose the bare adapter directly.
           if (handle) {
             await closeSession(handle, "error");
           } else {
             adapter.dispose();
           }
-          throw err;
+          throw new Error(err instanceof Error ? err.message : String(err), { cause: err });
         }
-      }, `acp_prompt(${agentName})`);
-
+      }, `acp_msg(${target})`);
       refreshWidget(ctx);
-      if (result.ok) {
-        return {
-          content: [textContent(result.value.text || "(no response)")],
-          details: {
-            sessionId: result.value.sessionId,
-            sessionName: result.value.sessionName,
-            stopReason: result.value.stopReason,
-            agent: agentName,
-          },
-        } as AgentToolResult<{ sessionId: string; stopReason: string; agent: string }>;
+      if (reopened.ok) {
+        return { content: [textContent(reopened.value.text || "(no response)")], details: { agent: params.agent ?? resolved.metadata?.agentName ?? getAgentName(params.agent), queued: false } };
       }
-
-      const prefix = result.circuitOpen ? "Circuit breaker open — too many failures. Retry later.\n" : "";
-      return {
-        content: [textContent(`${prefix}ACP error (${agentName}): ${result.error}`)],
-        details: { sessionId: "", sessionName: params.session_name, stopReason: "error", agent: agentName },
-      };
+      const p = reopened.circuitOpen ? "Circuit breaker open — too many failures. Retry later.\n" : "";
+      return { content: [textContent(`${p}ACP error: ${reopened.error}`)], details: { error: reopened.error, circuitOpen: reopened.circuitOpen } };
     },
   });
 
+  // ── acp_governance ──
+  if (isToolEnabled(toolSettings, "acp_governance")) pi.registerTool({
+    name: "acp_governance",
+    label: "ACP Governance",
+    description: "Plan approval and model-policy governance. action: plan_request | plan_resolve | model_policy_get | model_policy_check.",
+    promptSnippet: "acp_governance — plan approval + model policy",
+    parameters: Type.Object({
+      action: Type.String({ description: "One of: plan_request, plan_resolve, model_policy_get, model_policy_check" }),
+      agent: Type.Optional(Type.String({ description: "Agent name (for plan_request/plan_resolve)" })),
+      status: Type.Optional(Type.String({ description: "Approval status for plan_resolve: 'approved' or 'rejected'" })),
+      feedback: Type.Optional(Type.String({ description: "Optional feedback for plan_resolve" })),
+      model: Type.Optional(Type.String({ description: "Model id for model_policy_check" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const gs = governanceStore();
+      switch (params.action) {
+        case "plan_request": {
+          const agent = requireString(params.agent, "agent");
+          const req = gs.requestPlan(agent);
+          eventLog.append("plan_request", { agent });
+          refreshWidget(ctx);
+          return { content: [textContent(formatJson(req))], details: req };
+        }
+        case "plan_resolve": {
+          const agent = requireString(params.agent, "agent");
+          const status = requireString(params.status, "status");
+          if (status !== "approved" && status !== "rejected") {
+            return { content: [textContent("status must be 'approved' or 'rejected'")], details: { error: "invalid_status" } };
+          }
+          const req = gs.resolvePlan(agent, status as "approved" | "rejected", ...(params.feedback !== undefined ? [params.feedback] : []));
+          eventLog.append("plan_resolve", { agent, status });
+          refreshWidget(ctx);
+          return { content: [textContent(formatJson(req))], details: req };
+        }
+        case "model_policy_get": {
+          const policy = gs.getModelPolicy();
+          refreshWidget(ctx);
+          return { content: [textContent(formatJson(policy))], details: policy };
+        }
+        case "model_policy_check": {
+          const result = gs.checkModel(params.model);
+          refreshWidget(ctx);
+          return { content: [textContent(formatJson(result))], details: result };
+        }
+        default:
+          return { content: [textContent(`Unknown action: ${params.action}. Use plan_request | plan_resolve | model_policy_get | model_policy_check.`)], details: { error: "unknown_action", action: params.action } };
+      }
+    },
+  });
   if (isToolEnabled(toolSettings, "acp_status")) pi.registerTool({
       name: "acp_status",
     label: "ACP Status",
@@ -881,10 +1002,69 @@ ${pr.text}`;
     parameters: Type.Object({
       session_id: Type.Optional(Type.String({ description: "Specific session ID to inspect" })),
       session_name: Type.Optional(Type.String({ description: "Friendly session name to inspect" })),
+      action: Type.Optional(Type.String({ description: "Maintenance action: 'prune' (mark stale workers offline) or 'cleanup' (remove sessions + clear tasks/mailboxes). Omit for status display." })),
+      target: Type.Optional(Type.String({ description: "Cleanup target: 'all', 'sessions', 'tasks', 'mailboxes'. Default: 'all'." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       config = loadConfig();
       governanceStore().setModelPolicy(config.modelPolicy ?? {});
+
+      // ── action: prune — absorb acp_worker_prune ──
+      // Mark all stale (derived) workers offline and unassign their tasks.
+      if (params.action === "prune") {
+        const workers = workerStore().list();
+        const pruned: string[] = [];
+        for (const w of workers) {
+          if (w.status === "offline") continue;
+          const derived = deriveWorkerStatus(w);
+          if (derived.stale || isWorkerStale(w)) {
+            if (w.currentTaskId) {
+              try {
+                taskStore().update(w.currentTaskId, (t) => { t.status = "pending"; });
+              } catch { /* ignore */ }
+              workerStore().unassignTask(w.name);
+            }
+            workerStore().updateStatus(w.name, "offline");
+            pruned.push(w.name);
+          }
+        }
+        eventLog.append("worker_prune", { pruned });
+        refreshWidget(ctx);
+        return {
+          content: [textContent(pruned.length > 0 ? `Pruned ${pruned.length} stale workers: ${pruned.join(", ")}` : "No stale workers found")],
+          details: { pruned, count: pruned.length },
+        };
+      }
+
+      // ── action: cleanup — absorb acp_cleanup ──
+      // Remove sessions and/or clear tasks/mailboxes per target.
+      if (params.action === "cleanup") {
+        const target = params.target ?? "all";
+        const removedSessions: string[] = [];
+        if (target === "all" || target === "sessions") {
+          for (const s of sessionMgr.list()) {
+            await sessionMgr.remove(s.sessionId);
+            const adapter = activeAdapters.get(s.sessionId);
+            if (adapter) { adapter.dispose(); activeAdapters.delete(s.sessionId); }
+            removedSessions.push(s.sessionId);
+          }
+        }
+        if (target === "all" || target === "tasks") {
+          taskStore().clear("all");
+        }
+        if (target === "all" || target === "mailboxes") {
+          for (const name of [...Object.keys(config.agent_servers), "*"]) {
+            mailboxManager().clearFor(name);
+          }
+        }
+        eventLog.append("cleanup", { target, removedSessions });
+        refreshWidget(ctx);
+        return {
+          content: [textContent(`Cleanup (${target}): removed ${removedSessions.length} session(s).`)],
+          details: { target, removedSessions },
+        };
+      }
+
       if (params.session_id || params.session_name) {
         let target;
         try {
@@ -923,51 +1103,17 @@ ${pr.text}`;
     },
   });
 
-  // Session lifecycle tools — moved to pi-acp-advanced extension
+  // Unified dispatch tools
 
-
-  if (isToolEnabled(toolSettings, "acp_cancel")) pi.registerTool({
-      name: "acp_cancel",
-    label: "ACP Cancel",
-    description: "Cancel an ongoing prompt on an ACP agent session.",
-    promptSnippet: "acp_cancel — cancel ongoing ACP prompt",
-    parameters: Type.Object({
-      session_id: Type.Optional(Type.String({ description: "Session ID to cancel" })),
-      session_name: Type.Optional(Type.String({ description: "Friendly session name to cancel" })),
-    }),
-    async execute(_toolCallId, params) {
-      const target = resolveSessionTarget(params);
-      const handle = target.sessionId ? sessionMgr.get(target.sessionId) : undefined;
-      if (!handle || handle.disposed) {
-        return { content: [textContent(`Session \"${target.sessionName ?? target.sessionId ?? params.session_name ?? params.session_id}\" not found or disposed.`)], details: { sessionId: target.sessionId, sessionName: target.sessionName, cancelled: false } };
-      }
-      const result = await safeExecute(async () => {
-        const adapter = activeAdapters.get(handle.sessionId)!;
-        await adapter.cancel();
-        const now = new Date();
-        handle.lastActivityAt = now;
-        handle.completedAt = now;
-        archiveSession(handle);
-        eventLog.append("session_cancel", { sessionId: handle.sessionId, sessionName: handle.sessionName });
-        return true;
-      }, "acp_cancel");
-      if (result.ok) {
-        return { content: [textContent(`Cancelled prompt on session ${handle.sessionId}`)], details: { sessionId: handle.sessionId, sessionName: handle.sessionName, cancelled: true } };
-      }
-      return { content: [textContent(`Failed to cancel: ${result.error}`)], details: { sessionId: handle.sessionId, sessionName: handle.sessionName, cancelled: false } };
-    },
-  });
-
-  // Level 3 tools
-
-  if (isToolEnabled(toolSettings, "acp_broadcast")) pi.registerTool({
-      name: "acp_broadcast",
-    label: "ACP Broadcast",
-    description: "Send the same prompt to multiple ACP agents in parallel. Returns each agent's response. Individual failures don't affect others.",
-    promptSnippet: "acp_broadcast — broadcast to multiple ACP agents",
+  if (isToolEnabled(toolSettings, "acp_fanout")) pi.registerTool({
+    name: "acp_fanout",
+    label: "ACP Fanout",
+    description: "Send a prompt to multiple ACP agents in parallel, or compare their responses. Consolidates delegate_parallel, broadcast, and compare into one tool.",
+    promptSnippet: "acp_fanout — fan out a message to multiple agents (optionally compare)",
     parameters: Type.Object({
       message: Type.String({ description: "Prompt to send to all agents" }),
       agents: Type.Optional(Type.Array(Type.String(), { description: "Agent names. Default: all configured agents" })),
+      compare: Type.Optional(Type.Boolean({ description: "If true, route through the compare path and return a structured comparison. Default: false (broadcast)." })),
       cwd: Type.Optional(Type.String({ description: "Working directory" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -980,19 +1126,33 @@ ${pr.text}`;
         recordSuccessFn: (name) => cb.recordSuccess(name),
         recordFailureFn: (name) => cb.recordFailure(name),
       });
+      if (params.compare) {
+        beginWidgetActivity("compare", ctx);
+        const result = await safeExecute(async () => {
+          const output = await coordinator.compare(agentNames, params.message, params.cwd ?? ctx.cwd);
+          eventLog.append("fanout_compare", { agentNames, cwd: params.cwd ?? ctx.cwd });
+          return output;
+        }, `acp_fanout(compare:${agentNames.join(",")})`, { timeoutMs: config.toolTimeouts?.broadcast ?? config.stallTimeoutMs });
+        if (!result.ok) {
+          endWidgetActivity("compare", ctx, result.error);
+          return { content: [textContent(`Compare failed: ${result.error}`)], details: { error: result.error, circuitOpen: result.circuitOpen } };
+        }
+        endWidgetActivity("compare", ctx);
+        return { content: [textContent(formatJson(result.value))], details: result.value };
+      }
       beginWidgetActivity("broadcast", ctx);
       const result = await safeExecute(async () => {
         const output = await coordinator.broadcast(agentNames, params.message, params.cwd ?? ctx.cwd);
-        eventLog.append("broadcast", { agentNames, cwd: params.cwd ?? ctx.cwd });
+        eventLog.append("fanout_broadcast", { agentNames, cwd: params.cwd ?? ctx.cwd });
         return output;
-      }, `acp_broadcast(${agentNames.join(",")})`, { timeoutMs: config.toolTimeouts?.broadcast ?? config.stallTimeoutMs });
+      }, `acp_fanout(${agentNames.join(",")})`, { timeoutMs: config.toolTimeouts?.broadcast ?? config.stallTimeoutMs });
       if (!result.ok) {
         endWidgetActivity("broadcast", ctx, result.error);
-        return { content: [textContent(`Broadcast failed: ${result.error}`)], details: { results: [], error: result.error, circuitOpen: result.circuitOpen } };
+        return { content: [textContent(`Fanout failed: ${result.error}`)], details: { results: [], error: result.error, circuitOpen: result.circuitOpen } };
       }
       const lines = result.value.map((r) => r.error ? `── ${r.agent} ──\n(ERROR: ${r.error})` : `── ${r.agent} ──\n${r.text}`);
       endWidgetActivity("broadcast", ctx);
-      return { content: [textContent(`Broadcast results:\n\n${lines.join("\n\n")}`)], details: { results: result.value } };
+      return { content: [textContent(`Fanout results:\n\n${lines.join("\n\n")}`)], details: { results: result.value } };
     },
   });
 
@@ -1277,403 +1437,6 @@ ${pr.text}`;
     // All signals frozen beyond stall timeout
     return true;
   }
-
-  // ── Worker tools (persistent-workers) ──
-
-  if (isToolEnabled(toolSettings, "acp_worker_spawn")) pi.registerTool({
-    name: "acp_worker_spawn",
-    label: "ACP Worker Spawn",
-    description: "Spawn a persistent named ACP worker. Creates a long-lived ACP session bound to a worker identity in WorkerStore. The worker persists across task completions and can be controlled via steer, shutdown, and kill tools.",
-    promptSnippet: "acp_worker_spawn — spawn a persistent named ACP worker",
-    parameters: Type.Object({
-      name: Type.String({ description: "Worker name (1-64 chars, alphanumeric + hyphens + underscores). Must be unique." }),
-      agent: Type.String({ description: "Agent name from config to use for the worker" }),
-      cwd: Type.Optional(Type.String({ description: "Working directory for the agent" }),
-      ),
-      model: Type.Optional(Type.String({ description: "Model to set on the session" })),
-      thinking: Type.Optional(Type.String({ description: "Thinking/mode level to set on the session" })),
-      initPrompt: Type.Optional(Type.String({ description: "Optional initial prompt to send after session creation" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const name = requireString(params.name, "name");
-      const agentName = getAgentName(params.agent);
-
-      // Validate name format: 1-64 chars, alphanumeric + hyphens + underscores
-      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name)) {
-        return {
-          content: [textContent("Worker name must be 1-64 characters and contain only alphanumeric characters, hyphens, and underscores.")],
-          details: { error: "invalid_name" },
-        };
-      }
-
-      // Validate agent exists
-      try {
-        getAgentConfigOrThrow(agentName);
-      } catch (error) {
-        return {
-          content: [textContent(String((error as Error).message))],
-          details: { error: "agent_not_found", agent: agentName },
-        };
-      }
-
-      // Check for duplicate name
-      const existing = workerStore().get(name);
-      if (existing) {
-        return {
-          content: [textContent(`Worker '${name}' already exists`)],
-          details: { error: "duplicate_name", name },
-        };
-      }
-
-      const result = await safeExecute(async () => {
-        const agentCfg = getAgentConfigOrThrow(agentName);
-        const effectiveCwd = params.cwd ?? ctx.cwd;
-        const adapter = createAdapter(agentName, agentCfg, config, effectiveCwd, {
-          onActivity: (sid) => monitor.touch(sid),
-          onSessionUpdate: heartbeatConsumer,
-        });
-        try {
-          await withTimeoutMs(adapter.spawn(), config.stallTimeoutMs, `acp_worker_spawn:${name}`);
-          await adapter.initialize();
-          const sessionId = await adapter.newSession(effectiveCwd);
-          if (params.model) await adapter.setModel(params.model);
-          if (params.thinking) await adapter.setMode(params.thinking);
-          const handle = makeSessionHandle(sessionId, agentName, effectiveCwd, adapter);
-          // Register in WorkerStore
-          const worker = workerStore().register({ name, sessionId, agentName });
-          // Register session → worker mapping for heartbeat consumer
-          workerSessionMap.set(sessionId, name);
-          // Store adapter for dispatcher access
-          activeAdapters.set(sessionId, adapter);
-          eventLog.append("worker_spawn", { name, sessionId, agentName });
-          // Send init prompt if provided
-          if (params.initPrompt) {
-            busySessions.set(sessionId, true);
-            handle.busy = true;
-            handle.isPrompting = true;
-            handle.promptStartedAt = new Date();
-            monitor.markPromptStart(sessionId);
-            archiveSession(handle);
-            try {
-              const promptResult = (await withTimeoutMs(adapter.prompt(params.initPrompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_worker_spawn:${name}:init`)) as AcpPromptResult;
-              markPromptLifecycle(handle, promptResult);
-            } finally {
-              busySessions.delete(sessionId);
-              handle.busy = false;
-              handle.isPrompting = false;
-              monitor.markPromptEnd(sessionId);
-              archiveSession(handle);
-            }
-          }
-          return { name, sessionId, status: "online" };
-        } catch (err) {
-          adapter.dispose();
-          throw err;
-        }
-      }, `acp_worker_spawn(${name})`);
-
-      refreshWidget(ctx);
-      if (result.ok) {
-        return {
-          content: [textContent(`Worker '${result.value.name}' spawned with session ${result.value.sessionId} (status: ${result.value.status})`)],
-          details: result.value,
-        };
-      }
-      return {
-        content: [textContent(`Failed to spawn worker '${name}': ${result.error}`)],
-        details: { error: result.error, circuitOpen: result.circuitOpen },
-      };
-    },
-  });
-
-  if (isToolEnabled(toolSettings, "acp_worker_list")) pi.registerTool({
-    name: "acp_worker_list",
-    label: "ACP Worker List",
-    description: "List all persistent ACP workers with their status and liveliness counters (tokenCountTotal, toolCallCount, age since last activity).",
-    promptSnippet: "acp_worker_list — list all persistent ACP workers with status and liveliness",
-    parameters: Type.Object({
-      filter: Type.Optional(Type.String({ description: "Filter by derived status: 'online', 'idle', 'busy', 'stale', 'offline'" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      // Fetch all workers, then filter by derived status if requested
-      const allWorkers = workerStore().list();
-      const rawFilter = params.filter as string | undefined;
-      const workers = rawFilter
-        ? allWorkers.filter((w) => {
-            const derived = deriveWorkerStatus(w);
-            // For 'stale', match the stale(Ns) prefix
-            if (rawFilter === "stale") return derived.status.startsWith("stale");
-            return derived.status === rawFilter;
-          })
-        : allWorkers;
-
-      if (workers.length === 0) {
-        return {
-          content: [textContent("No workers found")],
-          details: { workers: [] },
-        };
-      }
-
-      const now = Date.now();
-      const lines = workers.map((w) => {
-        const ageSec = Math.floor((now - new Date(w.lastActivityAt).getTime()) / 1000);
-        const tok = w.tokenCountTotal ?? 0;
-        const tools = w.toolCallCount ?? 0;
-        const taskInfo = w.currentTaskId ? ` · task=${w.currentTaskId}` : "";
-        const derived = deriveWorkerStatus(w);
-        const staleIndicator = isWorkerStale(w) ? " ⚠ stale" : "";
-        return `${w.name}: ${derived.status} · tok=${tok} · tools=${tools} · ${ageSec}s ago${taskInfo}${staleIndicator}`;
-      });
-
-      refreshWidget(ctx);
-      return {
-        content: [textContent(`Workers (${workers.length}):\n${lines.join("\n")}`)],
-        details: {
-          workers: workers.map((w) => {
-            const derived = deriveWorkerStatus(w);
-            return {
-              name: w.name,
-              status: w.status,
-              derivedStatus: derived.status,
-              agentName: w.agentName,
-              sessionId: w.sessionId,
-              currentTaskId: w.currentTaskId,
-              tokenCountTotal: w.tokenCountTotal ?? 0,
-              toolCallCount: w.toolCallCount ?? 0,
-              ageSeconds: Math.floor((now - new Date(w.lastActivityAt).getTime()) / 1000),
-              spawnedAt: w.spawnedAt,
-              lastActivityAt: w.lastActivityAt,
-              lastHeartbeatAt: w.lastHeartbeatAt,
-            };
-          }),
-          count: workers.length,
-        },
-      };
-    },
-  });
-
-  // ── Worker Steer (4.1-4.5) ──
-
-  if (isToolEnabled(toolSettings, "acp_worker_steer")) pi.registerTool({
-    name: "acp_worker_steer",
-    label: "ACP Worker Steer",
-    description: "Send a steering message to a persistent ACP worker. If the worker is busy (in-flight turn), attempts to interrupt the active session. If idle, queues the steer as a prefix for the next prompt the dispatcher issues.",
-    promptSnippet: "acp_worker_steer — send a steering message to a worker",
-    parameters: Type.Object({
-      name: Type.String({ description: "Worker name" }),
-      message: Type.String({ description: "Steering message to send" }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const name = requireString(params.name, "name");
-      const message = requireString(params.message, "message");
-
-      // 4.5: Return error if worker not found
-      const worker = workerStore().get(name);
-      if (!worker) {
-        return { content: [textContent(`Worker '${name}' not found`)], details: { error: "worker_not_found", name } };
-      }
-
-      // Resolve worker's session
-      const sessionId = worker.sessionId;
-      const adapter = activeAdapters.get(sessionId);
-      const isBusy = !!worker.currentTaskId || !!busySessions.get(sessionId);
-
-      if (isBusy && adapter) {
-        // 4.1/4.3: Attempt interrupt for in-flight workers
-        try {
-          await adapter.cancel();
-          // Cancel succeeded — queue steer for next prompt after worker returns to idle
-          workerStore().updateMetadata(name, { pendingSteer: message });
-          eventLog.append("worker_steer_interrupt", { name, sessionId, message });
-          refreshWidget(ctx);
-          return {
-            content: [textContent(`Interrupt sent to worker '${name}'. Steer queued for next prompt: ${message}`)],
-            details: { name, message, interruptAttempted: true, queued: true },
-          };
-        } catch (err) {
-          // Interrupt failed — queue as next-prompt-prefix with warning
-          workerStore().updateMetadata(name, { pendingSteer: message });
-          eventLog.append("worker_steer_queued", { name, sessionId, message, reason: "interrupt_failed" });
-          refreshWidget(ctx);
-          return {
-            content: [textContent(`Provider does not support live interrupt; steer queued for next prompt. Worker '${name}': ${message}`)],
-            details: { name, message, interruptAttempted: true, queued: true, warning: true },
-          };
-        }
-      }
-
-      // Idle or no adapter — queue as next-prompt-prefix (4.4)
-      workerStore().updateMetadata(name, { pendingSteer: message });
-      eventLog.append("worker_steer_queued", { name, sessionId, message, reason: isBusy ? "no_adapter" : "idle" });
-      refreshWidget(ctx);
-      return { content: [textContent(`Steer message queued for worker '${name}': ${message}`)], details: { name, message, queued: true } };
-    },
-  });
-
-  // ── Worker Shutdown (5.1-5.2) ──
-
-  if (isToolEnabled(toolSettings, "acp_worker_shutdown")) pi.registerTool({
-    name: "acp_worker_shutdown",
-    label: "ACP Worker Shutdown",
-    description: "Gracefully shut down a persistent ACP worker. Waits for in-flight turn to complete (with timeout), then disposes the session and marks the worker offline.",
-    promptSnippet: "acp_worker_shutdown — gracefully shut down a worker",
-    parameters: Type.Object({
-      name: Type.Optional(Type.String({ description: "Worker name to shut down" })),
-      all: Type.Optional(Type.Boolean({ description: "Shut down all workers" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const shutdownTimeoutMs = config.workerShutdownTimeoutMs ?? 30_000;
-
-      // Determine which workers to shut down
-      let targets: string[];
-      if (params.all) {
-        targets = workerStore().list().filter((w) => w.status !== "offline").map((w) => w.name);
-      } else if (params.name) {
-        const worker = workerStore().get(params.name);
-        if (!worker) {
-          return { content: [textContent(`Worker '${params.name}' not found`)], details: { error: "worker_not_found" } };
-        }
-        targets = [params.name];
-      } else {
-        return { content: [textContent("Specify 'name' or 'all'")], details: { error: "missing_params" } };
-      }
-
-      const results: Array<{ name: string; ok: boolean; error?: string }> = [];
-
-      for (const name of targets) {
-        const worker = workerStore().get(name);
-        if (!worker) continue;
-
-        try {
-          // 5.2: Wait for turn completion if busy
-          if (worker.currentTaskId) {
-            const startTime = Date.now();
-            while (worker.currentTaskId && (Date.now() - startTime) < shutdownTimeoutMs) {
-              await new Promise((r) => setTimeout(r, 500));
-              const fresh = workerStore().get(name);
-              if (fresh && !fresh.currentTaskId) break;
-            }
-            // Check if still busy after timeout
-            const afterWait = workerStore().get(name);
-            if (afterWait?.currentTaskId) {
-              results.push({ name, ok: false, error: `Shutdown timed out; worker '${name}' still busy. Use acp_worker_kill to force.` });
-              continue;
-            }
-          }
-
-          // Dispose session
-          const sessionId = worker.sessionId;
-          const adapter = activeAdapters.get(sessionId);
-          if (adapter) {
-            adapter.dispose();
-            activeAdapters.delete(sessionId);
-          }
-          workerSessionMap.delete(sessionId);
-          busySessions.delete(sessionId);
-
-          // Mark worker offline
-          workerStore().updateStatus(name, "offline");
-
-          // 6.2: Emit worker_shutdown event
-          eventLog.append("worker_shutdown", { name, sessionId });
-
-          results.push({ name, ok: true });
-        } catch (err) {
-          results.push({ name, ok: false, error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-
-      refreshWidget(ctx);
-      const failed = results.filter((r) => !r.ok);
-      return {
-        content: [textContent(`Shutdown ${results.length} workers: ${failed.length} failed` + (failed.length > 0 ? ` (${failed.map((f) => f.error).join(", ")})` : ""))],
-        details: { results },
-      };
-    },
-  });
-
-  // ── Worker Kill (5.3) ──
-
-  if (isToolEnabled(toolSettings, "acp_worker_kill")) pi.registerTool({
-    name: "acp_worker_kill",
-    label: "ACP Worker Kill",
-    description: "Force-kill a persistent ACP worker. Immediately disposes the session, unassigns active tasks (set to pending), and marks the worker offline.",
-    promptSnippet: "acp_worker_kill — force-kill a worker",
-    parameters: Type.Object({
-      name: Type.String({ description: "Worker name to kill" }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const name = requireString(params.name, "name");
-      const worker = workerStore().get(name);
-      if (!worker) {
-        return { content: [textContent(`Worker '${name}' not found`)], details: { error: "worker_not_found" } };
-      }
-
-      // Force-dispose session
-      const sessionId = worker.sessionId;
-      const adapter = activeAdapters.get(sessionId);
-      if (adapter) {
-        adapter.dispose();
-        activeAdapters.delete(sessionId);
-      }
-      workerSessionMap.delete(sessionId);
-      busySessions.delete(sessionId);
-
-      // Unassign active tasks (set to pending)
-      if (worker.currentTaskId) {
-        try {
-          taskStore().update(worker.currentTaskId, (t) => { t.status = "pending"; });
-        } catch { /* ignore */ }
-        workerStore().unassignTask(name);
-      }
-
-      // Mark worker offline
-      workerStore().updateStatus(name, "offline");
-
-      // 6.2: Emit worker_shutdown event
-      eventLog.append("worker_shutdown", { name, sessionId, forced: true });
-
-      refreshWidget(ctx);
-      return { content: [textContent(`Worker '${name}' killed`)], details: { name, sessionId } };
-    },
-  });
-
-  // ── Worker Prune (5.4) ──
-
-  if (isToolEnabled(toolSettings, "acp_worker_prune")) pi.registerTool({
-    name: "acp_worker_prune",
-    label: "ACP Worker Prune",
-    description: "Prune stale persistent workers. Finds all workers with derived stale status, unassigns active tasks, marks them offline, and returns the list of pruned workers.",
-    promptSnippet: "acp_worker_prune — prune stale workers",
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const workers = workerStore().list();
-      const pruned: string[] = [];
-
-      for (const w of workers) {
-        if (w.status === "offline") continue;
-        const derived = deriveWorkerStatus(w);
-        if (derived.stale) {
-          // Unassign active tasks
-          if (w.currentTaskId) {
-            try {
-              taskStore().update(w.currentTaskId, (t) => { t.status = "pending"; });
-            } catch { /* ignore */ }
-            workerStore().unassignTask(w.name);
-          }
-          // Mark offline
-          workerStore().updateStatus(w.name, "offline");
-          pruned.push(w.name);
-        }
-      }
-
-      refreshWidget(ctx);
-      return {
-        content: [textContent(pruned.length > 0 ? `Pruned ${pruned.length} stale workers: ${pruned.join(", ")}` : "No stale workers found")],
-        details: { pruned, count: pruned.length },
-      };
-    },
-  });
 
   // ── DAG tools ────────────────────────────────────────────────────────
 
