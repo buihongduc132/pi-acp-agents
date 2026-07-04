@@ -1,0 +1,46 @@
+{
+  "_comment": "Canonical example for the agent-profile-description change. Each entry in agent_servers is an AGENT PROFILE (persona + prompt + goal + description) that references a SERVER (command/args/env/cwd = the transport). Multiple profiles MAY share one server. The optional `description` field is surfaced in /acp agents, acp_status, acp_runtime_info, acp_doctor, and the agent-config TUI. NOTE: systemPrompt paths below use `~/` portable placeholders — replace with absolute paths on your machine.",
+  "agent_servers": {
+    "claude": {
+      "command": "npx",
+      "args": ["-y", "@agentclientprotocol/claude-agent-acp"],
+      "description": "Claude Code via the official ACP adapter — general-purpose coding agent."
+    },
+    "pi": {
+      "command": "pi-acp",
+      "args": [],
+      "description": "Default pi coding agent — the workhorse for repo-local dev tasks."
+    },
+    "verifier": {
+      "command": "pi-acp",
+      "args": [],
+      "systemPrompt": "~/.agents/skills/wear-hats/references/_agent/verifier.md",
+      "description": "Blind reviewer persona — gates work via the verifier-loop (≥2 unanimous approvals)."
+    },
+    "coder": {
+      "command": "pi-acp",
+      "args": [],
+      "systemPrompt": "~/.hermes/profiles/coder/SOUL.md",
+      "description": "Implementation-focused persona — writes GREEN-phase code from RED tests / plans."
+    },
+    "browser-tester": {
+      "command": "pi-acp",
+      "args": [],
+      "systemPrompt": "~/.hermes/profiles/hermes-tester/SOUL.md",
+      "description": "E2E/browser persona — drives the abw skill for UI/UX verification."
+    },
+    "red": {
+      "command": "pi-acp",
+      "args": [],
+      "systemPrompt": "~/.pi/acp-agents/prompts/red.md",
+      "description": "Adversarial/red-team persona — finds edge cases, breaks assumptions, stress-tests designs."
+    },
+    "general": {
+      "command": "pi-acp",
+      "args": [],
+      "systemPrompt": "~/.pi/agent/APPEND_SYSTEM.md",
+      "description": "Unscoped general assistant — inherits the global pi system prompt, no narrowed goal."
+    }
+  },
+  "defaultAgent": "pi"
+}

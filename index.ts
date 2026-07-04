@@ -1185,7 +1185,10 @@ export default function (pi: ExtensionAPI) {
       }
 
       const agentLines = Object.entries(config.agent_servers)
-        .map(([name, cfg]) => `  ${name}: ${cfg.command} ${(cfg.args ?? []).join(" ")}`)
+        .map(([name, cfg]) => {
+          const desc = typeof cfg.description === "string" && cfg.description.length > 0 ? cfg.description : "(no description)";
+          return `  ${name}: ${cfg.command} ${(cfg.args ?? []).join(" ")} — ${desc}`;
+        })
         .join("\n");
       const sessionLines = sessionMgr.list().map((s) => `  ${s.sessionName ? `${s.sessionName} ` : ""}${s.sessionId} (${s.agentName}) — ${s.cwd}`).join("\n");
       refreshWidget(ctx);
@@ -1193,7 +1196,16 @@ export default function (pi: ExtensionAPI) {
         content: [textContent(
           `ACP Agent Servers Status\n─────────────────\nCircuit Breaker: ${cb.state}\nAgent Servers: ${Object.keys(config.agent_servers).length} configured\nAliases: ${config.agent_aliases ? Object.keys(config.agent_aliases).length : 0}\nDefault: ${config.defaultAgent ?? "none"}\n\nAgent Servers:\n${agentLines || "  (none)"}${config.agent_aliases ? `\n\nAliases:\n${Object.entries(config.agent_aliases).map(([name, cfg]) => `  ${name} → [${cfg.agents.join(", ")}] (${cfg.strategy})`).join("\n")}` : ""}\n\nActive Sessions (${sessionMgr.size}):\n${sessionLines || "  (none)"}`,
         )],
-        details: { circuitBreaker: cb.state, agentCount: Object.keys(config.agent_servers).length, sessionCount: sessionMgr.size },
+        details: {
+          circuitBreaker: cb.state,
+          agentCount: Object.keys(config.agent_servers).length,
+          sessionCount: sessionMgr.size,
+          agents: Object.entries(config.agent_servers).map(([name, cfg]) => ({
+            name,
+            command: cfg.command,
+            description: typeof cfg.description === "string" && cfg.description.length > 0 ? cfg.description : undefined,
+          })),
+        },
       };
     },
   });
@@ -1373,7 +1385,10 @@ export default function (pi: ExtensionAPI) {
   function showAcpConfig(ctx: { ui: { notify: Function; setWidget: Function } }): void {
     config = loadConfig();
     const agents = Object.entries(config.agent_servers)
-      .map(([name, cfg]) => `${name}: ${cfg.command} ${(cfg.args ?? []).join(" ")}`)
+      .map(([name, cfg]) => {
+        const desc = typeof cfg.description === "string" && cfg.description.length > 0 ? cfg.description : "(no description)";
+        return `${name}: ${cfg.command} ${(cfg.args ?? []).join(" ")} — ${desc}`;
+      })
       .join("\n");
     refreshWidget(ctx);
     ctx.ui.notify(
@@ -1385,6 +1400,12 @@ export default function (pi: ExtensionAPI) {
   function showAcpDoctor(ctx: { ui: { notify: Function; setWidget: Function } }): void {
     const payload = {
       configuredAgentServers: Object.keys(config.agent_servers),
+      agents: Object.entries(config.agent_servers).map(([name, cfg]) => ({
+        name,
+        command: cfg.command,
+        // D3: machine-readable payload → undefined (not the human placeholder) when missing.
+        description: typeof cfg.description === "string" && cfg.description.length > 0 ? cfg.description : undefined,
+      })),
       defaultAgent: config.defaultAgent,
       sessionCount: sessionMgr.size,
       runtimeDir: runtimePaths.rootDir,

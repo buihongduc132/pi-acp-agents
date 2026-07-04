@@ -48,6 +48,9 @@ function formatAgentDescription(agent: AcpAgentConfig): string {
 	if (agent.default_mode) {
 		parts.push(`mode: ${agent.default_mode}`);
 	}
+	if (typeof agent.description === "string" && agent.description.length > 0) {
+		parts.push(`description: ${agent.description}`);
+	}
 	return parts.join(" | ");
 }
 
@@ -148,7 +151,8 @@ function createActionMenu(
 	let commandInput: Input | undefined;
 	let argsInput: Input | undefined;
 	let modelInput: Input | undefined;
-	let activeField: "command" | "args" | "model" = "command";
+	let descriptionInput: Input | undefined;
+	let activeField: "command" | "args" | "model" | "description" = "command";
 
 	function initEditFields(): void {
 		commandInput = new Input();
@@ -158,6 +162,8 @@ function createActionMenu(
 		argsInput.setValue((agent.args ?? []).join(", "));
 		modelInput = new Input();
 		modelInput.setValue(agent.default_model ?? "");
+		descriptionInput = new Input();
+		descriptionInput.setValue(typeof agent.description === "string" ? agent.description : "");
 		activeField = "command";
 		editMode = true;
 	}
@@ -171,6 +177,7 @@ function createActionMenu(
 				prefix("Command", activeField) + commandInput.render(w).join(""),
 				prefix("Args (comma-sep)", activeField) + argsInput!.render(w).join(""),
 				prefix("Default model", activeField) + modelInput!.render(w).join(""),
+				prefix("Description", activeField) + descriptionInput!.render(w).join(""),
 			];
 		}
 
@@ -189,10 +196,11 @@ function createActionMenu(
 		if (editMode && commandInput) {
 			// Edit mode: Tab/Enter/Esc + field input
 			if (data === "\t") {
-				activeField = activeField === "command" ? "args" : activeField === "args" ? "model" : "command";
+				activeField = activeField === "command" ? "args" : activeField === "args" ? "model" : activeField === "model" ? "description" : "command";
 				commandInput.focused = activeField === "command";
 				argsInput!.focused = activeField === "args";
 				modelInput!.focused = activeField === "model";
+				descriptionInput!.focused = activeField === "description";
 				return;
 			}
 			if (data === "\x1b") {
@@ -207,19 +215,22 @@ function createActionMenu(
 				}
 				const argsStr = argsInput!.getValue().trim();
 				const model = modelInput!.getValue().trim();
+				const description = descriptionInput!.getValue().trim();
 				finish(JSON.stringify({
 					action: "edit",
 					agent: agentName,
 					command: cmd,
 					args: argsStr ? argsStr.split(",").map((s: string) => s.trim()).filter(Boolean) : [],
 					default_model: model || undefined,
+					description: description || undefined,
 				}));
 				return;
 			}
 			// Forward to active input
 			if (activeField === "command") commandInput.handleInput(data);
 			else if (activeField === "args") argsInput!.handleInput(data);
-			else modelInput!.handleInput(data);
+			else if (activeField === "model") modelInput!.handleInput(data);
+			else descriptionInput!.handleInput(data);
 			return;
 		}
 
@@ -333,7 +344,7 @@ function createAddSubmenu(
  * Returns true if config was mutated (caller should rebuildList).
  */
 function handleSubmenuResult(payload: string, configRef: { config: AcpConfig }): boolean {
-	let parsed: { action: string; agent?: string; name?: string; command?: string; args?: string[]; default_model?: string };
+	let parsed: { action: string; agent?: string; name?: string; command?: string; args?: string[]; default_model?: string; description?: string };
 	try {
 		parsed = JSON.parse(payload);
 	} catch {
@@ -349,6 +360,7 @@ function handleSubmenuResult(payload: string, configRef: { config: AcpConfig }):
 				command: parsed.command,
 				args: parsed.args,
 				default_model: parsed.default_model,
+				description: parsed.description,
 			});
 			saveConfig(configRef.config);
 			return true;

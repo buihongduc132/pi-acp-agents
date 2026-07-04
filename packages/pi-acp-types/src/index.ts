@@ -33,6 +33,8 @@ export interface AcpAgentConfig {
 	 * `flow/plans/acp-persona-system-prompt.md`.
 	 */
 	systemPrompt?: string;
+	/** Human-readable summary of this agent profile (persona + prompt + goal); the underlying server = transport: command/args/env/cwd. Multiple profiles may share one server. */
+	description?: string;
 	/** Stall timeout in milliseconds for acpx mode */
 	stallTimeoutMs?: number;
 	/** Agent name for acpx session creation (defaults to adapter name) */
