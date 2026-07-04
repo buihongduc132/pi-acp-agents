@@ -39,6 +39,6 @@
 ## 7. PR workflow (verifier-loop + pr-creation skill)
 
 - [x] 7.1 Pre-PR verifier comrade reviews work against proposal + specs (≥1 fresh verifier)
-- [ ] 7.2 Push branch, open PR, sleep ≥5 min (foreground), resolve every valid remote comment in fix→re-verify loop
-- [ ] 7.3 Final verifier comrade approves the whole work + PR
-- [ ] 7.4 Merge to `main`; `git checkout main && git pull && npx vitest run` confirms main green
+- [x] 7.2 Push branch, open PR, sleep ≥5 min (foreground), resolve every valid remote comment in fix→re-verify loop
+- [x] 7.3 Final verifier comrade approves the whole work + PR
+- [x] 7.4 Merge to `main`; `git checkout main && git pull && npx vitest run` confirms main green
