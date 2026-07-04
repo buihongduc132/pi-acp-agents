@@ -54,7 +54,11 @@ export async function handleAgentsCommand(
 		const agentLines = Object.entries(cfg.agent_servers)
 			.map(([name, a]) => {
 				const isDefault = cfg.defaultAgent === name ? " (default)" : "";
-				return `  ${name}: ${a.command} ${(a.args ?? []).join(" ")}${isDefault}`;
+				const desc =
+					typeof a.description === "string" && a.description.length > 0
+						? a.description
+						: "(no description)";
+				return `  ${name}: ${a.command} ${(a.args ?? []).join(" ")} — ${desc}${isDefault}`;
 			})
 			.join("\n");
 		ctx.ui.notify(

@@ -98,6 +98,16 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 		if (!agent || typeof agent !== "object") {
 			throw new Error(`Invalid agent config for "${name}": must be an object`);
 		}
+		// description (optional): when present MUST be a string. No length cap.
+		if (
+			"description" in agent &&
+			agent.description !== undefined &&
+			typeof agent.description !== "string"
+		) {
+			throw new Error(
+				`description must be a string on agent "${name}"`,
+			);
+		}
 		// Command is required unless mode is 'acpx' (acpx derives command from its own binary)
 		const isAcpxMode = (agent as Record<string, unknown>).mode === "acpx";
 		if (
@@ -285,12 +295,16 @@ export function upsertAgentServer(config: AcpConfig, name: string, agent: Partia
 		throw new Error('Agent "command" is required');
 	}
 	const cloned = structuredClone(config);
+	// description: include only when a non-empty string; omit otherwise so the
+	// key is absent (not null, not "") when cleared — per agent-profile-description §4.
+	const desc = typeof agent.description === "string" && agent.description.length > 0 ? agent.description : undefined;
 	cloned.agent_servers[name] = {
 		command: agent.command,
 		args: agent.args ?? [],
 		env: agent.env ?? {},
 		...(agent.default_model ? { default_model: agent.default_model } : {}),
 		...(agent.default_mode ? { default_mode: agent.default_mode } : {}),
+		...(desc !== undefined ? { description: desc } : {}),
 	};
 	return cloned;
 }

@@ -28,6 +28,7 @@ export interface AcpAgentConfig {
 	/** Persona / system prompt (resolved at spawn time by content shape —
 	 * see src/tui/persona-resolver.ts). Soft-fail: never throws. */
 	systemPrompt?: string;
+	description?: string; /** Human-readable summary of this agent profile (persona + prompt + goal); the underlying server = transport: command/args/env/cwd. Multiple profiles may share one server. */
 	/** Allow passthrough of unknown fields for forward compat */
 	[key: string]: unknown;
 }
