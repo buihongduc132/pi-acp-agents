@@ -46,13 +46,7 @@ in code comments on `AcpAgentConfig` and in the project's AGENTS-level docs.
 
 ### Requirement: Agent listing surfaces description
 
-Every surface that lists configured agent profiles SHALL surface the profile's `description`. This requirement applies to the `/acp agents` command, `acp_status`, `acp_runtime_info`, `acp_doctor`, and the agent-config TUI.
-
-Any surface that lists configured agent profiles (`/acp agents` command,
-`acp_status`, `acp_runtime_info`, `acp_doctor`, agent-config TUI) SHALL
-include the profile's `description` alongside its name and server command.
-When `description` is absent, the surface SHALL display a placeholder
-(e.g. `(no description)`) rather than crashing or omitting the row.
+The system SHALL surface each configured agent profile's `description` on every listing surface (`/acp agents` command, `acp_status`, `acp_runtime_info`, `acp_doctor`, agent-config TUI), alongside the profile's name and server command. Human-readable text surfaces SHALL display the `(no description)` placeholder when `description` is absent. Machine-readable JSON payloads (e.g. `acp_status` details, `acp_doctor`) SHALL omit the key (serialize as absent) when `description` is unset, rather than emitting a sentinel string.
 
 #### Scenario: /acp agents shows descriptions
 - **WHEN** operator runs `/acp agents` with at least one profile having a
@@ -62,8 +56,10 @@ When `description` is absent, the surface SHALL display a placeholder
 
 #### Scenario: acp_status payload carries description
 - **WHEN** `acp_status` is invoked
-- **THEN** each agent entry in the result includes a `description` key
-  (string when set, undefined/empty when not)
+- **THEN** for each configured agent, the per-agent entry in the `details`
+  payload exposes the `description` value: present as a string when the
+  profile sets one, and absent (key omitted) when the profile has no
+  `description`. Human-readable status text uses the `(no description)` placeholder.
 
 ### Requirement: Agent-config TUI edits description
 

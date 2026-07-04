@@ -1,5 +1,5 @@
 {
-  "_comment": "Canonical example for the agent-profile-description change. Each entry in agent_servers is an AGENT PROFILE (persona + prompt + goal + description) that references a SERVER (command/args/env/cwd = the transport). Multiple profiles MAY share one server. The optional `description` field is surfaced in /acp agents, acp_status, acp_runtime_info, acp_doctor, and the agent-config TUI.",
+  "_comment": "Canonical example for the agent-profile-description change. Each entry in agent_servers is an AGENT PROFILE (persona + prompt + goal + description) that references a SERVER (command/args/env/cwd = the transport). Multiple profiles MAY share one server. The optional `description` field is surfaced in /acp agents, acp_status, acp_runtime_info, acp_doctor, and the agent-config TUI. NOTE: systemPrompt paths below use `~/` portable placeholders — replace with absolute paths on your machine.",
   "agent_servers": {
     "claude": {
       "command": "npx",
@@ -14,31 +14,31 @@
     "verifier": {
       "command": "pi-acp",
       "args": [],
-      "systemPrompt": "/home/bhd/.agents/skills/wear-hats/references/_agent/verifier.md",
+      "systemPrompt": "~/.agents/skills/wear-hats/references/_agent/verifier.md",
       "description": "Blind reviewer persona — gates work via the verifier-loop (≥2 unanimous approvals)."
     },
     "coder": {
       "command": "pi-acp",
       "args": [],
-      "systemPrompt": "/home/bhd/.hermes/profiles/coder/SOUL.md",
+      "systemPrompt": "~/.hermes/profiles/coder/SOUL.md",
       "description": "Implementation-focused persona — writes GREEN-phase code from RED tests / plans."
     },
     "browser-tester": {
       "command": "pi-acp",
       "args": [],
-      "systemPrompt": "/home/bhd/.hermes/profiles/hermes-tester/SOUL.md",
+      "systemPrompt": "~/.hermes/profiles/hermes-tester/SOUL.md",
       "description": "E2E/browser persona — drives the abw skill for UI/UX verification."
     },
     "red": {
       "command": "pi-acp",
       "args": [],
-      "systemPrompt": "/home/bhd/.pi/acp-agents/prompts/red.md",
+      "systemPrompt": "~/.pi/acp-agents/prompts/red.md",
       "description": "Adversarial/red-team persona — finds edge cases, breaks assumptions, stress-tests designs."
     },
     "general": {
       "command": "pi-acp",
       "args": [],
-      "systemPrompt": "/home/bhd/.pi/agent/APPEND_SYSTEM.md",
+      "systemPrompt": "~/.pi/agent/APPEND_SYSTEM.md",
       "description": "Unscoped general assistant — inherits the global pi system prompt, no narrowed goal."
     }
   },

@@ -76,9 +76,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const INDEX_SRC = readFileSync(resolve(__dirname, "..", "index.ts"), "utf-8");
 
 function sliceFn(src: string, fnName: string, nextFnName: string): string {
-	const start = src.indexOf(`function ${fnName}`);
-	const end = src.indexOf(`function ${nextFnName}`);
-	if (start === -1) throw new Error(`function ${fnName} not found in index.ts`);
+	// Match both `function foo(` and `async function foo(` declarations.
+	const re = new RegExp(`(?:async )?function ${fnName}\\(`);
+	const startMatch = re.exec(src);
+	if (!startMatch) throw new Error(`function ${fnName} not found in index.ts`);
+	const start = startMatch.index;
+	const nextRe = new RegExp(`(?:async )?function ${nextFnName}\\(`);
+	const nextMatch = nextRe.exec(src.slice(start + 1));
+	const end = nextMatch ? start + 1 + nextMatch.index : -1;
 	// If the "next" function isn't found, take a generous tail window.
 	return src.slice(start, end === -1 ? start + 4000 : end);
 }
