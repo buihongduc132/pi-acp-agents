@@ -1203,7 +1203,7 @@ export default function (pi: ExtensionAPI) {
           agents: Object.entries(config.agent_servers).map(([name, cfg]) => ({
             name,
             command: cfg.command,
-            description: typeof cfg.description === "string" ? cfg.description : undefined,
+            description: typeof cfg.description === "string" && cfg.description.length > 0 ? cfg.description : undefined,
           })),
         },
       };
@@ -1403,7 +1403,8 @@ export default function (pi: ExtensionAPI) {
       agents: Object.entries(config.agent_servers).map(([name, cfg]) => ({
         name,
         command: cfg.command,
-        description: typeof cfg.description === "string" && cfg.description.length > 0 ? cfg.description : "(no description)",
+        // D3: machine-readable payload → undefined (not the human placeholder) when missing.
+        description: typeof cfg.description === "string" && cfg.description.length > 0 ? cfg.description : undefined,
       })),
       defaultAgent: config.defaultAgent,
       sessionCount: sessionMgr.size,

@@ -295,17 +295,30 @@ export function upsertAgentServer(config: AcpConfig, name: string, agent: Partia
 		throw new Error('Agent "command" is required');
 	}
 	const cloned = structuredClone(config);
-	// description: include only when a non-empty string; omit otherwise so the
-	// key is absent (not null, not "") when cleared — per agent-profile-description §4.
+	// Preserve existing unmanaged fields (systemPrompt, mode, cwd, custom props)
+	// by merging with the current entry if it exists — prevents silent data loss
+	// of the agent persona when editing a subset of fields via TUI/CLI.
+	const existing = cloned.agent_servers[name] ?? {};
 	const desc = typeof agent.description === "string" && agent.description.length > 0 ? agent.description : undefined;
-	cloned.agent_servers[name] = {
+	const updated: AcpAgentConfig = {
+		...existing,
 		command: agent.command,
-		args: agent.args ?? [],
-		env: agent.env ?? {},
-		...(agent.default_model ? { default_model: agent.default_model } : {}),
-		...(agent.default_mode ? { default_mode: agent.default_mode } : {}),
-		...(desc !== undefined ? { description: desc } : {}),
+		args: agent.args ?? existing.args ?? [],
+		env: agent.env ?? existing.env ?? {},
 	};
+	if ("default_model" in agent) {
+		if (agent.default_model) updated.default_model = agent.default_model;
+		else delete updated.default_model;
+	}
+	if ("default_mode" in agent) {
+		if (agent.default_mode) updated.default_mode = agent.default_mode;
+		else delete updated.default_mode;
+	}
+	if ("description" in agent) {
+		if (desc !== undefined) updated.description = desc;
+		else delete updated.description;
+	}
+	cloned.agent_servers[name] = updated;
 	return cloned;
 }
 

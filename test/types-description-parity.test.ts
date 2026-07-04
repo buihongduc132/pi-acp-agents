@@ -8,9 +8,9 @@ const __dirname = dirname(__filename);
 const ROOT = join(__dirname, "..");
 
 /**
- * RED-phase parity tests for the OpenSpec change `agent-profile-description`.
+ * Parity tests for the OpenSpec change `agent-profile-description`.
  *
- * This change adds an optional `description?: string` field to `AcpAgentConfig`.
+ * The change adds an optional `description?: string` field to `AcpAgentConfig`.
  * The type is defined in TWO places that MUST stay in parity:
  *
  *   1. src/config/types.ts            (base package)
@@ -19,20 +19,25 @@ const ROOT = join(__dirname, "..");
  * These tests mirror the text-scanning approach used by test/split.test.ts
  * (readFileSync + toContain) — they do NOT import the types at runtime.
  *
- * Until the GREEN phase adds the field + docblock to both files, every
- * assertion below MUST fail.
+ * The docblock for the field sits ABOVE the declaration (idiomatic JSDoc), so
+ * we scan a window around the field (200 chars before, 50 after) rather than
+ * only forward from it.
  */
 
 const SRC_TYPES = join(ROOT, "src", "config", "types.ts");
 const PKG_TYPES = join(ROOT, "packages", "pi-acp-types", "src", "index.ts");
 
-/**
- * The docblock that should accompany the new field. It must mention BOTH
- * "profile" (this describes the agent profile) and "server" (the entry is an
- * agent server definition). We assert each keyword independently so the
- * contract is explicit.
- */
+/** The docblock must mention BOTH keywords to express the profile-vs-server model. */
 const PROFILE_DOC_KEYWORDS = ["profile", "server"] as const;
+
+/** Window around the field declaration that should contain the docblock. */
+function docWindow(content: string, fieldIdx: number, before = 200, after = 50): string {
+	return content.slice(Math.max(0, fieldIdx - before), fieldIdx + after);
+}
+
+function fieldIndex(content: string): number {
+	return content.indexOf("description?: string;");
+}
 
 describe("agent-profile-description — src/config/types.ts", () => {
 	const content = readFileSync(SRC_TYPES, "utf-8");
@@ -41,22 +46,16 @@ describe("agent-profile-description — src/config/types.ts", () => {
 		expect(content).toContain("description?: string;");
 	});
 
-	it("ships a docblock on the field mentioning 'profile' (within 200 chars of the field)", () => {
-		const fieldIdx = content.indexOf("description?: string;");
-		expect(fieldIdx).toBeGreaterThanOrEqual(0);
-		expect(content.slice(fieldIdx, fieldIdx + 200)).toContain("profile");
+	it("ships a docblock near the field mentioning 'profile'", () => {
+		expect(docWindow(content, fieldIndex(content))).toContain("profile");
 	});
 
-	it("ships a docblock on the field mentioning 'server' (within 200 chars of the field)", () => {
-		const fieldIdx = content.indexOf("description?: string;");
-		expect(fieldIdx).toBeGreaterThanOrEqual(0);
-		expect(content.slice(fieldIdx, fieldIdx + 200)).toContain("server");
+	it("ships a docblock near the field mentioning 'server'", () => {
+		expect(docWindow(content, fieldIndex(content))).toContain("server");
 	});
 
-	it("docblock sits next to the description field (profile + server within 200 chars of the field)", () => {
-		const fieldIdx = content.indexOf("description?: string;");
-		expect(fieldIdx).toBeGreaterThanOrEqual(0);
-		const window = content.slice(fieldIdx, fieldIdx + 200);
+	it("docblock near the field mentions both profile + server", () => {
+		const window = docWindow(content, fieldIndex(content));
 		for (const kw of PROFILE_DOC_KEYWORDS) {
 			expect(window).toContain(kw);
 		}
@@ -70,22 +69,16 @@ describe("agent-profile-description — packages/pi-acp-types/src/index.ts", () 
 		expect(content).toContain("description?: string;");
 	});
 
-	it("ships a docblock on the field mentioning 'profile' (within 200 chars of the field)", () => {
-		const fieldIdx = content.indexOf("description?: string;");
-		expect(fieldIdx).toBeGreaterThanOrEqual(0);
-		expect(content.slice(fieldIdx, fieldIdx + 200)).toContain("profile");
+	it("ships a docblock near the field mentioning 'profile'", () => {
+		expect(docWindow(content, fieldIndex(content))).toContain("profile");
 	});
 
-	it("ships a docblock on the field mentioning 'server' (within 200 chars of the field)", () => {
-		const fieldIdx = content.indexOf("description?: string;");
-		expect(fieldIdx).toBeGreaterThanOrEqual(0);
-		expect(content.slice(fieldIdx, fieldIdx + 200)).toContain("server");
+	it("ships a docblock near the field mentioning 'server'", () => {
+		expect(docWindow(content, fieldIndex(content))).toContain("server");
 	});
 
-	it("docblock sits next to the description field (profile + server within 200 chars of the field)", () => {
-		const fieldIdx = content.indexOf("description?: string;");
-		expect(fieldIdx).toBeGreaterThanOrEqual(0);
-		const window = content.slice(fieldIdx, fieldIdx + 200);
+	it("docblock near the field mentions both profile + server", () => {
+		const window = docWindow(content, fieldIndex(content));
 		for (const kw of PROFILE_DOC_KEYWORDS) {
 			expect(window).toContain(kw);
 		}
@@ -101,22 +94,14 @@ describe("agent-profile-description — parity between both copies", () => {
 	});
 
 	it("BOTH files mention 'profile' in a docblock near the field", () => {
-		const src = readFileSync(SRC_TYPES, "utf-8");
-		const pkg = readFileSync(PKG_TYPES, "utf-8");
-		for (const content of [src, pkg]) {
-			const fieldIdx = content.indexOf("description?: string;");
-			expect(fieldIdx).toBeGreaterThanOrEqual(0);
-			expect(content.slice(fieldIdx, fieldIdx + 200)).toContain("profile");
+		for (const content of [readFileSync(SRC_TYPES, "utf-8"), readFileSync(PKG_TYPES, "utf-8")]) {
+			expect(docWindow(content, fieldIndex(content))).toContain("profile");
 		}
 	});
 
 	it("BOTH files mention 'server' in a docblock near the field", () => {
-		const src = readFileSync(SRC_TYPES, "utf-8");
-		const pkg = readFileSync(PKG_TYPES, "utf-8");
-		for (const content of [src, pkg]) {
-			const fieldIdx = content.indexOf("description?: string;");
-			expect(fieldIdx).toBeGreaterThanOrEqual(0);
-			expect(content.slice(fieldIdx, fieldIdx + 200)).toContain("server");
+		for (const content of [readFileSync(SRC_TYPES, "utf-8"), readFileSync(PKG_TYPES, "utf-8")]) {
+			expect(docWindow(content, fieldIndex(content))).toContain("server");
 		}
 	});
 });
