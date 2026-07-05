@@ -4,18 +4,17 @@
 import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { platform } from "node:os";
 import type { CircuitState } from "../config/types.js";
+import { AppError } from "./app-error.js";
 
-export class CircuitOpenError extends Error {
+export class CircuitOpenError extends AppError {
 	constructor(message: string) {
-		super(message);
-		this.name = "CircuitOpenError";
+		super("CIRCUIT_OPEN", message);
 	}
 }
 
-export class CircuitHalfOpenError extends Error {
+export class CircuitHalfOpenError extends AppError {
 	constructor(message: string) {
-		super(message);
-		this.name = "CircuitHalfOpenError";
+		super("CIRCUIT_HALF_OPEN", message);
 	}
 }
 
@@ -138,7 +137,10 @@ export class AcpCircuitBreaker {
 			if (raceResult.error) {
 				this.onFailure();
 				this.probing = false; // Reset probing flag
-				throw raceResult.error;
+				throw new Error(
+					raceResult.error instanceof Error ? raceResult.error.message : String(raceResult.error),
+					{ cause: raceResult.error },
+				);
 			}
 
 			this.onSuccess();
@@ -147,7 +149,10 @@ export class AcpCircuitBreaker {
 		} catch (err) {
 			// Reset probing flag on any error
 			this.probing = false;
-			throw err;
+			throw new Error(
+				err instanceof Error ? err.message : String(err),
+				{ cause: err },
+			);
 		}
 	}
 

@@ -8,8 +8,10 @@
  * explaining what went wrong and how to fix it.
  */
 
+import { AppError } from "./app-error.js";
+
 /** Thrown when an agent's behavior doesn't match ACP protocol */
-export class AcpProtocolError extends Error {
+export class AcpProtocolError extends AppError {
 	readonly agentName: string;
 	readonly command: string;
 	readonly phase: AcpPhase;
@@ -23,13 +25,13 @@ export class AcpProtocolError extends Error {
 		cause: string;
 	}) {
 		super(
+			"ACP_PROTOCOL_MISMATCH",
 			`[ACP Protocol Mismatch] Agent "${opts.agentName}" (${opts.command}) failed at ${opts.phase}:\n` +
 			`  ${opts.message}\n` +
 			`  Cause: ${opts.cause}\n` +
 			`  Fix: verify the command speaks ACP over stdio (nd-JSON). ` +
 			`For Zed/JetBrains-style config, use: { "command": "<agent>", "args": ["acp"] }`,
 		);
-		this.name = "AcpProtocolError";
 		this.agentName = opts.agentName;
 		this.command = opts.command;
 		this.phase = opts.phase;

@@ -162,8 +162,9 @@ function validateAndStrip(settings: AcpToolSettingsInput): AcpToolSettingsInput 
 	if (!settings?.tools) return { tools: {} };
 	const valid: Record<string, { enabled: boolean }> = {};
 	for (const name of ACP_TOOL_NAMES) {
-		if (settings.tools[name] !== undefined) {
-			valid[name] = { enabled: settings.tools[name].enabled };
+		const tool = settings.tools[name];
+		if (tool !== undefined) {
+			valid[name] = { enabled: tool.enabled };
 		}
 	}
 	return { tools: valid };

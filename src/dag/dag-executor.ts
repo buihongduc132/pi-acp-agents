@@ -176,7 +176,9 @@ export class DagExecutor {
 		const maxWave = Math.max(...waveOf.values());
 		const waves: string[][] = Array.from({ length: maxWave + 1 }, () => []);
 		for (const t of tasks) {
-			waves[waveOf.get(t.id)!].push(t.id);
+			const waveIdx = waveOf.get(t.id);
+			const wave = waveIdx !== undefined ? waves[waveIdx] : undefined;
+			if (wave) wave.push(t.id);
 		}
 		return waves;
 	}

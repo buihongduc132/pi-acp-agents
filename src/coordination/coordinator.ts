@@ -87,9 +87,8 @@ export class AgentCoordinator {
       try {
         adapter.dispose();
       } catch { /* best-effort — dispose must not throw */ }
-      const err = new DOMException("Operation cancelled", "AbortError");
       onProgress?.({ agentName, phase: "error" });
-      throw err;
+      throw new DOMException("Operation cancelled", "AbortError");
     }
 
     // Check if it's an alias first
@@ -107,7 +106,10 @@ export class AgentCoordinator {
             return result;
           } catch (err) {
             recordFailure?.(name);
-            throw err;
+            throw new Error(
+              err instanceof Error ? err.message : String(err),
+              { cause: err },
+            );
           }
         },
         (name) => isHealthy(name),

@@ -221,7 +221,16 @@ export class AcpClient {
 				shell: platform() === "win32",
 			});
 		} catch (err: unknown) {
-			throw classifyConnectionError(err, this.agentName, cmd);
+			const _e = classifyConnectionError(err, this.agentName, cmd);
+			if (_e instanceof AcpProtocolError)
+				throw new AcpProtocolError({
+					agentName: _e.agentName,
+					command: _e.command,
+					phase: _e.phase,
+					message: _e.message,
+					cause: _e.cause_detail,
+				});
+			throw new Error(_e.message, { cause: _e });
 		}
 
 		// Attach process-level listeners IMMEDIATELY — before any await and
@@ -258,12 +267,21 @@ export class AcpClient {
 
 		// If the spawn already failed async (race window), reject now.
 		if (this.spawnError || this.processExitError) {
-			throw classifyConnectionError(
+			const _e = classifyConnectionError(
 				(this.spawnError ?? this.processExitError)!,
 				this.agentName,
 				cmd,
 				this.lastStderr,
 			);
+			if (_e instanceof AcpProtocolError)
+				throw new AcpProtocolError({
+					agentName: _e.agentName,
+					command: _e.command,
+					phase: _e.phase,
+					message: _e.message,
+					cause: _e.cause_detail,
+				});
+			throw new Error(_e.message, { cause: _e });
 		}
 
 		if (!this.proc!.stdin || !this.proc!.stdout) {
@@ -404,9 +422,18 @@ export class AcpClient {
 		// GAP-1: surface a deferred spawn error / early exit as a classified
 		// rejection instead of awaiting this.conn.*() against a dead process.
 		if (this.fatalSpawnError) {
-			throw classifyConnectionError(
+			const _e = classifyConnectionError(
 				this.fatalSpawnError, this.agentName, this.config.command!, this.lastStderr,
 			);
+			if (_e instanceof AcpProtocolError)
+				throw new AcpProtocolError({
+					agentName: _e.agentName,
+					command: _e.command,
+					phase: _e.phase,
+					message: _e.message,
+					cause: _e.cause_detail,
+				});
+			throw new Error(_e.message, { cause: _e });
 		}
 		if (!this.conn) throw new Error("Not connected");
 
@@ -418,7 +445,16 @@ export class AcpClient {
 				clientInfo: this.clientInfo,
 			});
 		} catch (err: unknown) {
-			throw classifyConnectionError(err, this.agentName, this.config.command!, this.lastStderr);
+			const _e = classifyConnectionError(err, this.agentName, this.config.command!, this.lastStderr);
+			if (_e instanceof AcpProtocolError)
+				throw new AcpProtocolError({
+					agentName: _e.agentName,
+					command: _e.command,
+					phase: _e.phase,
+					message: _e.message,
+					cause: _e.cause_detail,
+				});
+			throw new Error(_e.message, { cause: _e });
 		}
 
 		// Behavior-based validation: does the response look like ACP?
@@ -443,9 +479,18 @@ export class AcpClient {
 	async newSession(): Promise<string> {
 		// GAP-1: surface deferred spawn error / early exit fast.
 		if (this.fatalSpawnError) {
-			throw classifyConnectionError(
+			const _e = classifyConnectionError(
 				this.fatalSpawnError, this.agentName, this.config.command!, this.lastStderr,
 			);
+			if (_e instanceof AcpProtocolError)
+				throw new AcpProtocolError({
+					agentName: _e.agentName,
+					command: _e.command,
+					phase: _e.phase,
+					message: _e.message,
+					cause: _e.cause_detail,
+				});
+			throw new Error(_e.message, { cause: _e });
 		}
 		if (!this.conn) throw new Error("Not connected");
 
@@ -456,7 +501,16 @@ export class AcpClient {
 				mcpServers: [],
 			});
 		} catch (err: unknown) {
-			throw classifyConnectionError(err, this.agentName, this.config.command!, this.lastStderr);
+			const _e = classifyConnectionError(err, this.agentName, this.config.command!, this.lastStderr);
+			if (_e instanceof AcpProtocolError)
+				throw new AcpProtocolError({
+					agentName: _e.agentName,
+					command: _e.command,
+					phase: _e.phase,
+					message: _e.message,
+					cause: _e.cause_detail,
+				});
+			throw new Error(_e.message, { cause: _e });
 		}
 
 		// Behavior-based validation
@@ -500,9 +554,18 @@ export class AcpClient {
 	async prompt(message: string): Promise<{ text: string; stopReason: string }> {
 		// GAP-1: surface deferred spawn error / early exit fast.
 		if (this.fatalSpawnError) {
-			throw classifyConnectionError(
+			const _e = classifyConnectionError(
 				this.fatalSpawnError, this.agentName, this.config.command!, this.lastStderr,
 			);
+			if (_e instanceof AcpProtocolError)
+				throw new AcpProtocolError({
+					agentName: _e.agentName,
+					command: _e.command,
+					phase: _e.phase,
+					message: _e.message,
+					cause: _e.cause_detail,
+				});
+			throw new Error(_e.message, { cause: _e });
 		}
 		if (!this.conn || !this._sessionId) {
 			throw new Error("No active session");
@@ -519,7 +582,14 @@ export class AcpClient {
 			});
 		} catch (err: unknown) {
 			const classified = classifyConnectionError(err, this.agentName, this.config.command!, this.lastStderr);
-			if (classified instanceof AcpProtocolError) throw classified;
+			if (classified instanceof AcpProtocolError)
+				throw new AcpProtocolError({
+					agentName: classified.agentName,
+					command: classified.command,
+					phase: classified.phase,
+					message: classified.message,
+					cause: classified.cause_detail,
+				});
 			const msg = err instanceof Error ? err.message : String(err);
 			const stderrDelta = this.lastStderr.slice(stderrBefore.length).trim();
 			throw new Error(
