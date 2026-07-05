@@ -74,7 +74,7 @@ export async function configureToolSettings(
 	// Ask which group to configure
 	while (true) {
 		const groupLabels = TOOL_GROUPS.map((g) => {
-			const enabled = g.tools.filter((t) => current.tools[t].enabled).length;
+			const enabled = g.tools.filter((t) => current.tools[t]?.enabled).length;
 			return `${g.label} (${enabled}/${g.tools.length})`;
 		});
 		groupLabels.push("Done");
@@ -91,7 +91,7 @@ export async function configureToolSettings(
 
 		// Toggle individual tools in the group
 		for (const toolName of group.tools) {
-			const isEnabled = base.tools?.[toolName]?.enabled ?? current.tools[toolName].enabled;
+			const isEnabled = base.tools?.[toolName]?.enabled ?? current.tools[toolName]?.enabled ?? false;
 			const toggle = await ctx.ui.select(
 				`${toolName}`,
 				[
@@ -108,7 +108,7 @@ export async function configureToolSettings(
 		// Refresh current view
 		for (const toolName of group.tools) {
 			if (base.tools?.[toolName] !== undefined) {
-				current.tools[toolName] = { enabled: base.tools[toolName].enabled };
+				current.tools[toolName] = { enabled: base.tools[toolName]?.enabled ?? false };
 			}
 		}
 	}

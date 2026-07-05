@@ -5,27 +5,27 @@
  * strategies: failover (sequential) or race (parallel, first wins).
  */
 import type { AcpAliasConfig, AcpPromptResult } from "../config/types.js";
+import { AppError } from "../core/app-error.js";
 
 // ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 
-export class AllAgentsFailedError extends Error {
+export class AllAgentsFailedError extends AppError {
 	constructor(
 		public readonly attempts: Array<{ agent: string; error: Error }>,
 		aliasName: string,
 	) {
 		super(
+			"ALL_AGENTS_FAILED",
 			`All agents failed for alias "${aliasName}": ${attempts.map((a) => a.agent).join(", ")}`,
 		);
-		this.name = "AllAgentsFailedError";
 	}
 }
 
-export class NoHealthyAgentsError extends Error {
+export class NoHealthyAgentsError extends AppError {
 	constructor(aliasName: string) {
-		super(`No healthy agents for alias "${aliasName}"`);
-		this.name = "NoHealthyAgentsError";
+		super("NO_HEALTHY_AGENTS", `No healthy agents for alias "${aliasName}"`);
 	}
 }
 

@@ -3,13 +3,22 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join as pathJoin } from "node:path";
 import { tmpdir } from "node:os";
 
-// Mock node:os to override homedir but keep tmpdir
+// Mock node:os to override homedir but keep tmpdir.
+// Fake home lives under tmpdir so no real home dir is ever touched.
+// vi.hoisted runs BEFORE module imports are resolved, so we cannot call
+// tmpdir() inside it. Use process.env.TMPDIR || "/tmp" directly. Path lives
+// under a temp dir so no real home dir is ever touched.
+const { FAKE_HOME } = vi.hoisted(() => ({
+	// Avoid imports (pathJoin, tmpdir) inside vi.hoisted — they are not
+	// initialized yet. Plain string concat is safe.
+	FAKE_HOME: (process.env.TMPDIR || "/tmp") + "/acp-configure-test-" + process.pid,
+}));
+
 vi.mock("node:os", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:os")>();
-	const fakeHome = pathJoin(actual.tmpdir(), `acp-configure-test-${process.pid}`);
 	return {
 		...actual,
-		homedir: () => fakeHome,
+		homedir: () => FAKE_HOME,
 	};
 });
 
@@ -25,9 +34,7 @@ describe("configureToolSettings", () => {
 	afterEach(() => {
 		rmSync(tmpDir, { recursive: true, force: true });
 		try {
-			const { homedir } = require("node:os");
-			const { join } = require("node:path");
-			rmSync(join(homedir(), ".pi", "acp-agents"), { recursive: true, force: true });
+			rmSync(pathJoin(FAKE_HOME, ".pi", "acp-agents"), { recursive: true, force: true });
 		} catch { /* ok */ }
 	});
 
