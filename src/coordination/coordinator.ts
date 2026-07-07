@@ -267,12 +267,14 @@ export class AgentCoordinator {
       // Serialize: wait for any in-flight prompt on this adapter to finish.
       // ACP sessions handle one prompt at a time; concurrent prompts on a
       // single session cause output cross-contamination.
-      await entry.lock;
-
-      // Acquire the lock: replace it with a new promise that resolves when
-      // this delegate's prompt is done.
+      //
+      // CRITICAL: capture the current lock and replace it with a NEW pending
+      // promise BEFORE awaiting. If we await first, all concurrent callers
+      // see the same resolved promise and all proceed simultaneously.
+      const prevLock = entry.lock;
       let releaseLock!: () => void;
       entry.lock = new Promise<void>((r) => { releaseLock = r; });
+      await prevLock;
 
       emitProgress("prompting");
       try {
