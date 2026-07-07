@@ -14,6 +14,25 @@ const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 
 const errors = [];
 
+// 0. workspace:* protocol check — npm publish doesn't resolve workspace:* (only pnpm does).
+// If workspace:* is still in deps, the published package will be broken for npm consumers.
+// Skip this check during --dry-run (npm pack --dry-run runs prepack but we're just measuring size).
+const isDryRun = process.env.npm_config_dry_run === "true";
+if (!isDryRun) {
+	for (const field of ["dependencies", "peerDependencies", "devDependencies"]) {
+		const deps = pkg[field];
+		if (!deps) continue;
+		for (const [name, version] of Object.entries(deps)) {
+			if (typeof version === "string" && version.startsWith("workspace:")) {
+				errors.push(
+					`${field}.${name} = "${version}" — workspace:* protocol not resolved.\n` +
+					`  Use 'pnpm publish' (not 'npm publish') to resolve workspace:* to actual versions.`,
+				);
+			}
+		}
+	}
+}
+
 // 1. pi field exists
 if (!pkg.pi) errors.push("Missing 'pi' field in package.json");
 if (!pkg.pi?.extensions?.length) errors.push("Missing pi.extensions");

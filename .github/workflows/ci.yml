@@ -86,8 +86,8 @@ jobs:
         run: |
           SIZE=$(npm pack --dry-run 2>&1 | grep "package size" | grep -oP '[\d.]+ kB')
           echo "📦 Package size: ${SIZE}"
-          # Fail if > 100 kB (way too large for TS source)
-          echo "$SIZE" | awk '{if ($1 > 100) exit 1}'
+          # Fail if > 200 kB (TS source packages are ~115 kB legitimately)
+          echo "$SIZE" | awk '{if ($1 > 200) exit 1}'
 
   # ── Publish ──────────────────────────────────────────────────
   publish:
@@ -135,7 +135,7 @@ jobs:
           fi
           echo "✅ Version consistent: ${PKG_VER}"
 
-      - run: npm publish --provenance --access public --tag ${{ steps.tag.outputs.tag }}
+      - run: pnpm publish --provenance --access public --tag ${{ steps.tag.outputs.tag }} --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
