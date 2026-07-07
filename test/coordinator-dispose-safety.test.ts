@@ -95,18 +95,17 @@ describe("coordinator.ts — dispose safety (RED tests)", () => {
 	// -------------------------------------------------------------------------
 	// Test 1: finally block — dispose error does NOT mask successful prompt
 	// -------------------------------------------------------------------------
-	it("delegate() — adapter.dispose() error in finally does not mask prompt result", async () => {
+	it("delegate() — adapter.dispose() error in error-eviction path does not mask prompt error", async () => {
 		const adapter = makeAdapterWithDisposeError();
+		// Make prompt fail so the error-eviction path triggers dispose.
+		adapter.prompt = vi.fn().mockRejectedValue(new Error("prompt boom"));
 		mockCreateAdapter.mockReturnValue(adapter as any);
 
 		const coordinator = new AgentCoordinator(mockConfig, "/tmp");
 
-		// prompt succeeds, but dispose throws in finally.
-		// The prompt result should still be returned (dispose error swallowed).
-		const result = await coordinator.delegate("gemini", "hello");
-
-		expect(result.text).toBe("response text");
-		expect(result.stopReason).toBe("end_turn");
+		// prompt fails, error-eviction calls dispose (which throws).
+		// The original prompt error should still propagate (dispose error swallowed).
+		await expect(coordinator.delegate("gemini", "hello")).rejects.toThrow("prompt boom");
 		expect(adapter.dispose).toHaveBeenCalled();
 	});
 

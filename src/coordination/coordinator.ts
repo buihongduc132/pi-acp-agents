@@ -59,6 +59,7 @@ export class AgentCoordinator {
   private isHealthyFn: (agentName: string) => boolean;
   private recordSuccessFn?: (agentName: string) => void;
   private recordFailureFn?: (agentName: string) => void;
+  private adapterPool = new Map<string, Promise<ReturnType<typeof createAdapter>>>();
 
   constructor(
     private config: AcpConfig,
@@ -130,7 +131,59 @@ export class AgentCoordinator {
     return createAdapter(agentName, agentCfg, this.config, effectiveCwd);
   }
 
-  /** Delegate directly to a concrete agent. Creates a short-lived session. */
+  /** Get or create a pooled adapter for an agent. Reuses warm connections. */
+  private async getOrCreateAdapter(
+    agentName: string,
+    cwd?: string,
+  ): Promise<ReturnType<typeof createAdapter>> {
+    const key = `${agentName}:${cwd ?? this.cwd}`;
+    let adapterPromise = this.adapterPool.get(key);
+
+    if (!adapterPromise) {
+      adapterPromise = this.createAndPrepareAdapter(agentName, cwd);
+      this.adapterPool.set(key, adapterPromise);
+    } else {
+      // Check if adapter is still healthy
+      const adapter = await adapterPromise;
+      if (!adapter.connected) {
+        // Evict and recreate
+        this.adapterPool.delete(key);
+        adapterPromise = this.createAndPrepareAdapter(agentName, cwd);
+        this.adapterPool.set(key, adapterPromise);
+      }
+    }
+
+    try {
+      return await adapterPromise;
+    } catch (err) {
+      // Evict on error
+      this.adapterPool.delete(key);
+      throw err;
+    }
+  }
+
+  /** Create and prepare a new adapter (spawn + initialize + newSession). */
+  private async createAndPrepareAdapter(
+    agentName: string,
+    cwd?: string,
+  ): Promise<ReturnType<typeof createAdapter>> {
+    const agentCfg = this.config.agent_servers[agentName];
+    if (!agentCfg) throw new Error(`Agent "${agentName}" not found`);
+    const effectiveCwd = cwd ?? this.cwd;
+    const adapter = createAdapter(agentName, agentCfg, this.config, effectiveCwd);
+
+    await withTimeoutMs(
+      adapter.spawn(),
+      this.config.stallTimeoutMs,
+      `acp_spawn(delegate:${agentName})`,
+    );
+    await adapter.initialize();
+    await adapter.newSession(effectiveCwd);
+
+    return adapter;
+  }
+
+  /** Delegate directly to a concrete agent. Reuses pooled adapters. */
   private async delegateToAgent(
     agentName: string,
     message: string,
@@ -138,11 +191,6 @@ export class AgentCoordinator {
     onProgress?: (progress: AcpDelegateProgress) => void,
     signal?: AbortSignal,
   ): Promise<AcpPromptResult> {
-    const agentCfg = this.config.agent_servers[agentName];
-    if (!agentCfg) throw new Error(`Agent "${agentName}" not found`);
-
-    const effectiveCwd = cwd ?? this.cwd;
-    const adapter = createAdapter(agentName, agentCfg, this.config, effectiveCwd);
     const startTime = Date.now();
 
     const emitProgress = (phase: AcpDelegateProgress["phase"]) => {
@@ -154,17 +202,27 @@ export class AgentCoordinator {
       });
     };
 
-    // Abort handler: cancel + dispose + reject pending prompt
+    emitProgress("spawning");
+
+    // Pre-aborted check
+    if (signal?.aborted) {
+      emitProgress("error");
+      throw new DOMException("Operation cancelled", "AbortError");
+    }
+
+    // Set up abort handler early — works for both creation and prompt phases.
+    // On abort: cancel the adapter (best-effort) + reject.
     let abortReject: ((err: Error) => void) | null = null;
     const abortPromise = new Promise<never>((_, reject) => {
       abortReject = reject;
     });
-    // Safety: prevent unhandled rejection if abort fires after race settles
     abortPromise.catch(() => {});
 
+    let cachedAdapter: ReturnType<typeof createAdapter> | null = null;
     const onAbort = () => {
-      try { adapter.cancel(); } catch { /* best-effort */ }
-      try { adapter.dispose(); } catch { /* best-effort — dispose must not throw */ }
+      if (cachedAdapter) {
+        try { cachedAdapter.cancel(); } catch { /* best-effort */ }
+      }
       emitProgress("error");
       abortReject?.(new DOMException("Operation cancelled", "AbortError"));
     };
@@ -172,19 +230,29 @@ export class AgentCoordinator {
     signal?.addEventListener("abort", onAbort, { once: true });
 
     try {
-      emitProgress("spawning");
-      await withTimeoutMs(adapter.spawn(), this.config.stallTimeoutMs, `acp_spawn(delegate:${agentName})`);
-      emitProgress("initializing");
-      await adapter.initialize();
-      await adapter.newSession(effectiveCwd);
+      // Race adapter creation against abort — covers abort-during-spawn.
+      const adapter = await Promise.race([
+        this.getOrCreateAdapter(agentName, cwd),
+        abortPromise,
+      ]);
+      cachedAdapter = adapter;
       emitProgress("prompting");
+
       const promptPromise = adapter.prompt(message);
-      // Prevent unhandled rejection if abort wins the race
       promptPromise.catch(() => {});
       return await Promise.race([promptPromise, abortPromise]);
+    } catch (err) {
+      // On any error (abort or prompt failure), evict adapter from pool so
+      // the next delegate creates a fresh one.
+      const key = `${agentName}:${cwd ?? this.cwd}`;
+      const pooled = this.adapterPool.get(key);
+      if (pooled) {
+        this.adapterPool.delete(key);
+        pooled.then((a) => { try { a.dispose(); } catch { /* best-effort */ } }).catch(() => {});
+      }
+      throw err;
     } finally {
       signal?.removeEventListener("abort", onAbort);
-      try { adapter.dispose(); } catch { /* best-effort — dispose must not mask errors */ }
     }
   }
 

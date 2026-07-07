@@ -72,11 +72,13 @@ describe("AgentCoordinator", () => {
       );
     });
 
-    it("disposes adapter after use", async () => {
+    it("reuses adapter (pooled, not disposed)", async () => {
       const adapter = createMockAdapter();
       (createAdapter as any).mockReturnValue(adapter as any);
       await coordinator.delegate("gemini", "test");
-      expect(adapter.dispose).toHaveBeenCalled();
+      // With adapter pooling, adapter is NOT disposed after successful use —
+      // it stays in the pool for reuse by the next delegate call.
+      expect(adapter.dispose).not.toHaveBeenCalled();
     });
 
     it("disposes adapter even on error", async () => {
