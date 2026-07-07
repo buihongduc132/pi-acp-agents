@@ -15,10 +15,11 @@ const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 const errors = [];
 
 // 0. workspace:* protocol check — npm publish doesn't resolve workspace:* (only pnpm does).
-// If workspace:* is still in deps, the published package will be broken for npm consumers.
-// Skip this check during --dry-run (npm pack --dry-run runs prepack but we're just measuring size).
+// If workspace:* is still in deps AND we're NOT running under pnpm, the published package
+// will be broken for npm consumers. Skip if running under pnpm (it resolves workspace:* after prepack).
 const isDryRun = process.env.npm_config_dry_run === "true";
-if (!isDryRun) {
+const isPnpm = (process.env.npm_config_user_agent || "").includes("pnpm");
+if (!isDryRun && !isPnpm) {
 	for (const field of ["dependencies", "peerDependencies", "devDependencies"]) {
 		const deps = pkg[field];
 		if (!deps) continue;
