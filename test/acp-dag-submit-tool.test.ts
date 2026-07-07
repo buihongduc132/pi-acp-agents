@@ -184,6 +184,7 @@ describe("acp_dag_submit tool (task 6.1)", () => {
 				delegate: vi.fn(async () => ({ text: "delegated", stopReason: "end_turn", sessionId: "d1" })),
 				broadcast: vi.fn(async () => []),
 				compare: vi.fn(async () => ({ responses: [], timestamp: new Date().toISOString() })),
+		dispose: vi.fn(),
 			},
 			// DAG mocks
 			dagStore: {

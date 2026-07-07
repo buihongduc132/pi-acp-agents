@@ -55,11 +55,23 @@ export interface AgentCoordinatorDeps {
   recordFailureFn?: (agentName: string) => void;
 }
 
+/** Pooled adapter entry: adapter promise + per-adapter serialization lock. */
+interface PooledAdapterEntry {
+  adapterPromise: Promise<ReturnType<typeof createAdapter>>;
+  /**
+   * Promise chain for serializing prompts on this adapter.
+   * ACP sessions handle one prompt at a time. Concurrent delegates to the
+   * same agent must queue: each awaits the current lock, then replaces it
+   * with a new promise that resolves when its prompt completes.
+   */
+  lock: Promise<void>;
+}
+
 export class AgentCoordinator {
   private isHealthyFn: (agentName: string) => boolean;
   private recordSuccessFn?: (agentName: string) => void;
   private recordFailureFn?: (agentName: string) => void;
-  private adapterPool = new Map<string, Promise<ReturnType<typeof createAdapter>>>();
+  private adapterPool = new Map<string, PooledAdapterEntry>();
 
   constructor(
     private config: AcpConfig,
@@ -135,26 +147,30 @@ export class AgentCoordinator {
   private async getOrCreateAdapter(
     agentName: string,
     cwd?: string,
-  ): Promise<ReturnType<typeof createAdapter>> {
+  ): Promise<PooledAdapterEntry> {
     const key = `${agentName}:${cwd ?? this.cwd}`;
-    let adapterPromise = this.adapterPool.get(key);
+    let entry = this.adapterPool.get(key);
 
-    if (!adapterPromise) {
-      adapterPromise = this.createAndPrepareAdapter(agentName, cwd);
-      this.adapterPool.set(key, adapterPromise);
+    if (!entry) {
+      const adapterPromise = this.createAndPrepareAdapter(agentName, cwd);
+      entry = { adapterPromise, lock: Promise.resolve() };
+      this.adapterPool.set(key, entry);
     } else {
       // Check if adapter is still healthy
-      const adapter = await adapterPromise;
+      const adapter = await entry.adapterPromise;
       if (!adapter.connected) {
         // Evict and recreate
         this.adapterPool.delete(key);
-        adapterPromise = this.createAndPrepareAdapter(agentName, cwd);
-        this.adapterPool.set(key, adapterPromise);
+        try { adapter.dispose(); } catch { /* best-effort */ }
+        const adapterPromise = this.createAndPrepareAdapter(agentName, cwd);
+        entry = { adapterPromise, lock: Promise.resolve() };
+        this.adapterPool.set(key, entry);
       }
     }
 
     try {
-      return await adapterPromise;
+      await entry.adapterPromise;
+      return entry;
     } catch (err) {
       // Evict on error
       this.adapterPool.delete(key);
@@ -181,6 +197,16 @@ export class AgentCoordinator {
     await adapter.newSession(effectiveCwd);
 
     return adapter;
+  }
+
+  /** Drain the adapter pool — dispose every pooled adapter. Call on shutdown. */
+  dispose(): void {
+    for (const entry of this.adapterPool.values()) {
+      entry.adapterPromise
+        .then((adapter) => { try { adapter.dispose(); } catch { /* best-effort */ } })
+        .catch(() => { /* ignore — creation failed, nothing to dispose */ });
+    }
+    this.adapterPool.clear();
   }
 
   /** Delegate directly to a concrete agent. Reuses pooled adapters. */
@@ -231,16 +257,31 @@ export class AgentCoordinator {
 
     try {
       // Race adapter creation against abort — covers abort-during-spawn.
-      const adapter = await Promise.race([
+      const entry = await Promise.race([
         this.getOrCreateAdapter(agentName, cwd),
         abortPromise,
       ]);
+      const adapter = await entry.adapterPromise;
       cachedAdapter = adapter;
-      emitProgress("prompting");
 
-      const promptPromise = adapter.prompt(message);
-      promptPromise.catch(() => {});
-      return await Promise.race([promptPromise, abortPromise]);
+      // Serialize: wait for any in-flight prompt on this adapter to finish.
+      // ACP sessions handle one prompt at a time; concurrent prompts on a
+      // single session cause output cross-contamination.
+      await entry.lock;
+
+      // Acquire the lock: replace it with a new promise that resolves when
+      // this delegate's prompt is done.
+      let releaseLock!: () => void;
+      entry.lock = new Promise<void>((r) => { releaseLock = r; });
+
+      emitProgress("prompting");
+      try {
+        const promptPromise = adapter.prompt(message);
+        promptPromise.catch(() => {});
+        return await Promise.race([promptPromise, abortPromise]);
+      } finally {
+        releaseLock();
+      }
     } catch (err) {
       // On any error (abort or prompt failure), evict adapter from pool so
       // the next delegate creates a fresh one.
@@ -248,7 +289,9 @@ export class AgentCoordinator {
       const pooled = this.adapterPool.get(key);
       if (pooled) {
         this.adapterPool.delete(key);
-        pooled.then((a) => { try { a.dispose(); } catch { /* best-effort */ } }).catch(() => {});
+        pooled.adapterPromise
+          .then((a) => { try { a.dispose(); } catch { /* best-effort */ } })
+          .catch(() => {});
       }
       throw err;
     } finally {

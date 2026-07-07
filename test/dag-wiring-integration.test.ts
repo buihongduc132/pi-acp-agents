@@ -124,7 +124,7 @@ describe("DAG wiring — task 7.1 (existing infra singletons into DagExecutor)",
 			cb: { execute: vi.fn(async (fn: () => any) => fn()), state: "closed", isHealthy: vi.fn(() => true), recordSuccess: vi.fn(), recordFailure: vi.fn() },
 			hm: { start: vi.fn(), stop: vi.fn(), register: vi.fn(), touch: vi.fn(), markPromptStart: vi.fn(), markPromptEnd: vi.fn() },
 			ad: { spawn: vi.fn(), initialize: vi.fn(), newSession: vi.fn(async () => "ses-1"), loadSession: vi.fn(), prompt: vi.fn(async () => ({ text: "response", stopReason: "end_turn", sessionId: "ses-1" })), setModel: vi.fn(), setMode: vi.fn(), cancel: vi.fn(), dispose: vi.fn() },
-			co: { delegate: vi.fn(async () => ({ text: "delegated", stopReason: "end_turn", sessionId: "d1" })), broadcast: vi.fn(async () => []), compare: vi.fn(async () => ({ responses: [], timestamp: new Date().toISOString() })) },
+			co: { delegate: vi.fn(async () => ({ text: "delegated", stopReason: "end_turn", sessionId: "d1" })), broadcast: vi.fn(async () => []), compare: vi.fn(async () => ({ responses: [], timestamp: new Date().toISOString() })), dispose: vi.fn() },
 			asyncExec: { start: vi.fn(() => "run-1"), cancel: vi.fn(), list: vi.fn(() => []) },
 			dagStore: {
 				create: vi.fn((definition: any) => ({
