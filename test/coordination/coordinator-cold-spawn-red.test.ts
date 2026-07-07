@@ -88,16 +88,7 @@ function resetCounters() {
 	disposeCount = 0;
 	adaptersCreated = [];
 	mockCreateAdapter.mockImplementation(() => {
-		// Wrap each adapter so we tally lifecycle counts in one place.
-		const adapter = makeMockAdapter();
-		const wrap = (orig: ReturnType<typeof vi.fn>) =>
-			vi.fn(async (...args: unknown[]) => {
-				// delegating count is tracked on the original fn via toHaveBeenCalledTimes
-				return orig(...args);
-			});
-		// Count via post-call inspection; simplest is to instrument below.
-		void wrap;
-		return adapter;
+		return makeMockAdapter();
 	});
 }
 

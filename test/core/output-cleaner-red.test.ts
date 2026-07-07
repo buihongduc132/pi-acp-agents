@@ -29,8 +29,6 @@
  * appears in GREEN, all four tests should pass with no further edits.
  */
 import { describe, it, expect } from "vitest";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error: module does not exist yet — this is the RED signal.
 import { stripAgentBootBanner } from "../../src/core/output-cleaner.js";
 
 /**
