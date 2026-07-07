@@ -29,7 +29,7 @@ export function stripAgentBootBanner(rawText: string): string {
 	for (const pattern of BANNER_MARKERS) {
 		const match = rawText.match(pattern);
 		if (match && match.index !== undefined) {
-			const markerEnd = match.index + match[0].length;
+			const markerEnd = match.index + (match[0]?.length ?? 0);
 			if (markerEnd > lastMarkerEnd) {
 				lastMarkerEnd = markerEnd;
 			}

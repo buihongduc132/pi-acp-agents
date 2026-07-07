@@ -174,7 +174,7 @@ export class AgentCoordinator {
     } catch (err) {
       // Evict on error
       this.adapterPool.delete(key);
-      throw err;
+      throw new Error(err instanceof Error ? err.message : String(err), { cause: err });
     }
   }
 
@@ -295,7 +295,7 @@ export class AgentCoordinator {
           .then((a) => { try { a.dispose(); } catch { /* best-effort */ } })
           .catch(() => {});
       }
-      throw err;
+      throw new Error(err instanceof Error ? err.message : String(err), { cause: err });
     } finally {
       signal?.removeEventListener("abort", onAbort);
     }
