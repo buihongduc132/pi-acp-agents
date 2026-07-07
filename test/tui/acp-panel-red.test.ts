@@ -196,6 +196,25 @@ describe("ACP interactive TUI panel (RED contract)", () => {
 			expect(lines).toContain("d");
 			expect(lines).toContain("t");
 		});
+
+		// Regression: pi's Theme class has fg/bg/bold/italic but NO `dim` method.
+		// Passing such a theme must NOT throw `TypeError: t.dim is not a function`.
+		it("shims a pi-Theme-shaped input that lacks `dim` (no crash)", () => {
+			const panel = makePanel(makeDeps({
+				getEntities: () => [makeEntity({ name: "gemini-1", currentTool: "read" })],
+			}));
+			const piLikeTheme = {
+				fg: (color: string, text: string) => `<${color}>${text}</>`,
+				bold: (text: string) => `<b>${text}</b>`,
+				italic: (text: string) => `<i>${text}</i>`,
+				// NOTE: no `dim` — mirrors pi's Theme class shape.
+			} as any;
+			const lines = panel.render(piLikeTheme, 100);
+			const header = lines.join("\n");
+			expect(header).toContain("ACP");
+			// dim calls must have been routed to fg("dim", ...) without throwing.
+			expect(header).toContain("<dim>");
+		});
 	});
 
 	describe("key bindings", () => {

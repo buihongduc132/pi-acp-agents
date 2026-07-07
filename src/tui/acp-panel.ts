@@ -280,7 +280,22 @@ export function createAcpPanel(deps: AcpPanelDeps): AcpPanel {
 	// ── Rendering ──────────────────────────────────────────────────
 
 	function render(theme?: AcpPanelTheme, _width?: number): string[] {
-		const t = theme ?? DEFAULT_THEME;
+		const incoming = theme as Partial<AcpPanelTheme> | undefined;
+		// Coerce caller-provided themes that lack `dim` (e.g. pi's Theme class,
+		// which exposes fg/bg/bold/italic but renders dim via `fg("dim", text)`).
+		// Without this shim, `t.dim(...)` throws `TypeError: t.dim is not a function`.
+		const t: AcpPanelTheme = !incoming
+			? DEFAULT_THEME
+			: typeof incoming.dim === "function"
+				? (incoming as AcpPanelTheme)
+				: typeof incoming.fg === "function"
+					? {
+							fg: (c: string, text: string) => incoming.fg!(c, text),
+							bold: (text: string) => (incoming.bold ?? ((x: string) => x))(text),
+							italic: (text: string) => (incoming.italic ?? ((x: string) => x))(text),
+							dim: (text: string) => incoming.fg!("dim", text),
+						}
+					: DEFAULT_THEME;
 		const w = typeof _width === "number" && _width > 0 ? _width : 100;
 
 		switch (mode) {
