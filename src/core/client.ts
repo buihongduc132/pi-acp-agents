@@ -7,6 +7,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { platform } from "node:os";
 import { Readable, Writable } from "node:stream";
+import { stripAgentBootBanner } from "./output-cleaner.js";
 
 /**
  * Creates a filtered ReadableStream that strips non-JSON lines from agent stdout.
@@ -611,7 +612,7 @@ export class AcpClient {
 			);
 		}
 
-		return { text: this.collectedText, stopReason: resp.stopReason };
+		return { text: stripAgentBootBanner(this.collectedText), stopReason: resp.stopReason };
 	}
 
 	/** Full lifecycle: connect → initialize → newSession → prompt */

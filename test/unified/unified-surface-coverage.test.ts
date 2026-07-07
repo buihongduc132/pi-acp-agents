@@ -167,6 +167,7 @@ describe("Unified ACP surface — branch coverage", () => {
 				delegate: vi.fn(),
 				broadcast: vi.fn(async () => [{ agent: "gemini", text: "g" }, { agent: "claude", text: "c" }]),
 				compare: vi.fn(async () => ({ responses: [{ agent: "gemini", text: "go" }], timestamp: new Date().toISOString() })),
+				dispose: vi.fn(),
 			},
 		};
 

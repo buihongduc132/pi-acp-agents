@@ -1233,6 +1233,7 @@ export default function (pi: ExtensionAPI) {
         recordSuccessFn: (name) => cb.recordSuccess(name),
         recordFailureFn: (name) => cb.recordFailure(name),
       });
+      try {
       if (params.compare) {
         beginWidgetActivity("compare", ctx);
         const result = await safeExecute(async () => {
@@ -1260,6 +1261,9 @@ export default function (pi: ExtensionAPI) {
       const lines = result.value.map((r) => r.error ? `── ${r.agent} ──\n(ERROR: ${r.error})` : `── ${r.agent} ──\n${r.text}`);
       endWidgetActivity("broadcast", ctx);
       return { content: [textContent(`Fanout results:\n\n${lines.join("\n\n")}`)], details: { results: result.value } };
+      } finally {
+        coordinator.dispose();
+      }
     },
   });
 
@@ -1723,6 +1727,8 @@ export default function (pi: ExtensionAPI) {
       dagExecutor.execute(record.dagId).catch((err) => {
         logger.error(`acp_dag_submit background execution failed for dagId=${record.dagId}`, { error: err instanceof Error ? err.message : String(err) });
         eventLog.append("dag_execute_failed", { dagId: record.dagId, error: err instanceof Error ? err.message : String(err) });
+      }).finally(() => {
+        coordinator.dispose();
       });
 
       eventLog.append("dag_submitted", { dagId: record.dagId, stepCount: tasks.length });
@@ -1820,6 +1826,8 @@ export default function (pi: ExtensionAPI) {
           content: [textContent(message)],
           details: { dagId, error: "cancel_failed" },
         };
+      } finally {
+        coordinator.dispose();
       }
     },
   });

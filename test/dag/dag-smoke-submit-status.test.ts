@@ -63,6 +63,7 @@ const { makeCoordinator, delegateSpy } = vi.hoisted(() => {
 		delegate: delegateSpy,
 		broadcast: vi.fn(async () => []),
 		compare: vi.fn(async () => ({ responses: [], timestamp: new Date().toISOString() })),
+		dispose: vi.fn(),
 	});
 	return { makeCoordinator, delegateSpy };
 });

@@ -38,6 +38,7 @@ import type {
 } from "../config/types.js";
 import type { TemplateResolver } from "./template-resolver.js";
 import type { AgentCoordinator } from "../coordination/coordinator.js";
+import { stripAgentBootBanner } from "../core/output-cleaner.js";
 import type { AcpCircuitBreaker } from "../core/circuit-breaker.js";
 import type { Logger } from "../logger.js";
 import { createNoopLogger } from "../logger.js";
@@ -233,8 +234,12 @@ export class DagExecutor {
 
 		const waves = this.topologicalSort(record.tasks);
 		this.store.updateDagStatus(dagId, "running");
+		// Persist wave progress so acp_dag_status surfaces real-time counters.
+		this.store.updateDagWave(dagId, { currentWave: 0, totalWaves: waves.length });
 
 		for (let waveIndex = 0; waveIndex < waves.length; waveIndex += 1) {
+			// Update currentWave to 1-indexed before dispatching this wave.
+			this.store.updateDagWave(dagId, { currentWave: waveIndex + 1, totalWaves: waves.length });
 			const waveStepIds = waves[waveIndex];
 			await this.runWave(dagId, record, steps, waveStepIds, options);
 
@@ -586,10 +591,12 @@ export class DagExecutor {
 			const completedAt = new Date().toISOString();
 			const durationMs =
 				Date.parse(completedAt) - Date.parse(startedAt);
+			const cleanOutput = stripAgentBootBanner(result.text);
 			const updated = this.store.updateStep(dagId, step.id, (s) => ({
 				...s,
+				startedAt,
 				status: "completed",
-				output: result.text,
+				output: cleanOutput,
 				error: undefined,
 				completedAt,
 				durationMs,
@@ -598,8 +605,9 @@ export class DagExecutor {
 			return (
 				updated ?? {
 					...step,
+					startedAt,
 					status: "completed",
-					output: result.text,
+					output: cleanOutput,
 					completedAt,
 					durationMs,
 				}
@@ -617,6 +625,7 @@ export class DagExecutor {
 					Date.parse(completedAt) - Date.parse(startedAt);
 				const updated = this.store.updateStep(dagId, step.id, (s) => ({
 					...s,
+					startedAt,
 					status: "cancelled",
 					output: null,
 					error: undefined,
@@ -627,6 +636,7 @@ export class DagExecutor {
 				return (
 					updated ?? {
 						...step,
+						startedAt,
 						status: "cancelled",
 						output: null,
 						completedAt,
@@ -657,6 +667,7 @@ export class DagExecutor {
 				Date.parse(completedAt) - Date.parse(startedAt);
 			const updated = this.store.updateStep(dagId, step.id, (s) => ({
 				...s,
+				startedAt,
 				status: "failed",
 				output: null,
 				error: message,
@@ -667,6 +678,7 @@ export class DagExecutor {
 			return (
 				updated ?? {
 					...step,
+					startedAt,
 					status: "failed",
 					error: message,
 					completedAt,

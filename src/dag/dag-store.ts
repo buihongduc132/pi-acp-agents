@@ -228,6 +228,34 @@ export class DagStore {
 	}
 
 	/**
+	 * Update the DAG's wave progress counters and persist the change.
+	 *
+	 * Called by DagExecutor.execute() at the start of each wave so that
+	 * `acp_dag_status` (and the ACP widget) can surface real-time wave
+	 * progress. Only mutates `currentWave`, `totalWaves`, and `updatedAt`
+	 * — step state is untouched.
+	 */
+	updateDagWave(
+		dagId: string,
+		wave: { currentWave: number; totalWaves: number },
+	): DagRecord | null {
+		const record = this.get(dagId);
+		if (!record) return null;
+
+		record.currentWave = wave.currentWave;
+		record.totalWaves = wave.totalWaves;
+		record.updatedAt = new Date().toISOString();
+
+		writeFileSync(
+			join(this.dagDir, `${dagId}.json`),
+			JSON.stringify(record, null, 2) + "\n",
+			"utf-8",
+		);
+
+		return record;
+	}
+
+	/**
 	 * Reflect a DAG-level status transition in `dag-index.json`.
 	 */
 	private reflectIndexDagStatus(
