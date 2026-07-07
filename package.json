@@ -1,6 +1,6 @@
 {
   "name": "@buihongduc132/pi-acp-agents",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Pi extension: ACP agent client — spawn and control ACP-compatible agents (Gemini CLI, etc.) from within pi",
   "keywords": [
     "pi-package",
