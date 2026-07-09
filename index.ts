@@ -121,6 +121,8 @@ export default function (pi: ExtensionAPI) {
     onSessionIdle(_s: unknown): Promise<void> { return Promise.resolve(); },
     onTaskDispatched(_t: unknown): Promise<void> { return Promise.resolve(); },
     onTaskResult(_t: unknown): Promise<void> { return Promise.resolve(); },
+    onSubagentStart(_s: unknown): Promise<void> { return Promise.resolve(); },
+    onSubagentStop(_s: unknown): Promise<void> { return Promise.resolve(); },
     dispose(): void { /* noop */ },
   };
 
@@ -510,6 +512,8 @@ export default function (pi: ExtensionAPI) {
         const start = Date.now();
         // ACP Hooks: fire task_assigned (fire-and-forget)
         hookTriggers.onTaskDispatched({ id: sessionId, subject: prompt.slice(0, 200), status: "assigned", owner: workerName }).catch(() => {});
+        // ACP Hooks: fire subagent_start (fire-and-forget)
+        hookTriggers.onSubagentStart({ sessionId, agentName: workerName }).catch(() => {});
         try {
           busySessions.set(sessionId, true);
           const result = (await withTimeoutMs(adapter.prompt(prompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `dispatch:${sessionId}`)) as AcpPromptResult;
@@ -523,6 +527,8 @@ export default function (pi: ExtensionAPI) {
           return { ok: false, error: errMsg };
         } finally {
           busySessions.delete(sessionId);
+          // ACP Hooks: fire subagent_stop (fire-and-forget)
+          hookTriggers.onSubagentStop({ sessionId, agentName: workerName }).catch(() => {});
         }
       },
     };
@@ -900,6 +906,8 @@ export default function (pi: ExtensionAPI) {
             handle.promptStartedAt = new Date();
             monitor.markPromptStart(sessionId);
             archiveSession(handle);
+            // ACP Hooks: fire subagent_start (fire-and-forget)
+            hookTriggers.onSubagentStart({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
             try {
               const pr = (await withTimeoutMs(adapter.prompt(effectivePrompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_spawn(prompt:${sessionId})`)) as AcpPromptResult;
               markPromptLifecycle(handle, pr);
@@ -910,6 +918,8 @@ export default function (pi: ExtensionAPI) {
               handle.isPrompting = false;
               monitor.markPromptEnd(sessionId);
               archiveSession(handle);
+              // ACP Hooks: fire subagent_stop (fire-and-forget)
+              hookTriggers.onSubagentStop({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
             }
           }
 
@@ -994,11 +1004,15 @@ export default function (pi: ExtensionAPI) {
         const adapter = activeAdapters.get(sessionId);
         if (adapter) {
           busySessions.set(sessionId, true);
+          // ACP Hooks: fire subagent_start (fire-and-forget)
+          hookTriggers.onSubagentStart({ sessionId, agentName: worker.agentName }).catch(() => {});
           try {
             const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_msg(worker:${sessionId})`)) as AcpPromptResult;
             return { content: [textContent(pr.text || "(no response)")], details: { sessionId, name: target, agent: worker.agentName, queued: false } };
           } finally {
             busySessions.delete(sessionId);
+            // ACP Hooks: fire subagent_stop (fire-and-forget)
+            hookTriggers.onSubagentStop({ sessionId, agentName: worker.agentName }).catch(() => {});
           }
         }
       }
@@ -1046,6 +1060,8 @@ export default function (pi: ExtensionAPI) {
           liveHandle.promptStartedAt = new Date();
           monitor.markPromptStart(sessionId);
           archiveSession(liveHandle);
+          // ACP Hooks: fire subagent_start (fire-and-forget)
+          hookTriggers.onSubagentStart({ sessionId, agentName: liveHandle.agentName, cwd: liveHandle.cwd }).catch(() => {});
           try {
             const adapter = activeAdapters.get(sessionId)!;
             const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_msg(reused:${sessionId})`)) as AcpPromptResult;
@@ -1058,6 +1074,8 @@ export default function (pi: ExtensionAPI) {
             liveHandle.isPrompting = false;
             monitor.markPromptEnd(sessionId);
             archiveSession(liveHandle);
+            // ACP Hooks: fire subagent_stop (fire-and-forget)
+            hookTriggers.onSubagentStop({ sessionId, agentName: liveHandle.agentName, cwd: liveHandle.cwd }).catch(() => {});
           }
         }, `acp_msg(reused:${sessionId})`);
         refreshWidget(ctx);
@@ -1126,6 +1144,8 @@ export default function (pi: ExtensionAPI) {
           handle.promptStartedAt = new Date();
           monitor.markPromptStart(newSessionId);
           archiveSession(handle);
+          // ACP Hooks: fire subagent_start (fire-and-forget)
+          hookTriggers.onSubagentStart({ sessionId: newSessionId, agentName, cwd: effectiveCwd }).catch(() => {});
           try {
             const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_msg(prompt:${newSessionId})`)) as AcpPromptResult;
             if (warningPrefix) pr.text = `${warningPrefix}${pr.text}`;
@@ -1138,6 +1158,8 @@ export default function (pi: ExtensionAPI) {
             handle.isPrompting = false;
             monitor.markPromptEnd(newSessionId);
             archiveSession(handle);
+            // ACP Hooks: fire subagent_stop (fire-and-forget)
+            hookTriggers.onSubagentStop({ sessionId: newSessionId, agentName, cwd: effectiveCwd }).catch(() => {});
           }
         } catch (err) {
           if (handle) {

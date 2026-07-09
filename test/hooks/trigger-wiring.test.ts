@@ -207,6 +207,25 @@ describe("HookTriggerManager", () => {
 	});
 
 	describe("subagent lifecycle", () => {
+		it("per-turn adapter start fires subagent_start event", async () => {
+			const adapterStart = {
+				sessionId: "sess-003",
+			agentName: "gemini",
+			cwd: "/tmp",
+			};
+
+			await manager.onSubagentStart(adapterStart);
+
+			expect(hookDispatcher.fire).toHaveBeenCalledWith(
+				"subagent_start",
+				expect.objectContaining({
+					event: "subagent_start",
+					session: expect.objectContaining({ id: "sess-003" }),
+					agent: expect.objectContaining({ name: "gemini" }),
+				}),
+			);
+		});
+
 		it("per-turn adapter result fires subagent_stop event", async () => {
 			const adapterResult = {
 				sessionId: "sess-004",

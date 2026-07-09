@@ -49,6 +49,13 @@ export interface TaskResultLike {
 	owner?: string;
 }
 
+/** Per-turn adapter start that triggers subagent_start. */
+export interface SubagentStartLike {
+	sessionId: string;
+	agentName: string;
+	cwd?: string;
+}
+
 /** Per-turn adapter result that triggers subagent_stop. */
 export interface SubagentStopLike {
 	sessionId: string;
@@ -235,6 +242,27 @@ export class HookTriggerManager {
 	}
 
 	// ── Subagent lifecycle ──
+
+	/** Per-turn adapter start → dispatch `subagent_start`. */
+	onSubagentStart(result: SubagentStartLike): Promise<void> {
+		if (this.disposed) return Promise.resolve();
+		return safeFire(
+			this.dispatcher,
+			"subagent_start",
+			buildHookContext({
+				event: "subagent_start",
+				session: {
+					id: result.sessionId,
+					agent: result.agentName,
+					cwd: result.cwd ?? this.defaultCwd,
+				},
+				agent: {
+					name: result.agentName,
+					type: this.defaultAgentType,
+				},
+			}),
+		);
+	}
 
 	/** Per-turn adapter result → dispatch `subagent_stop`. */
 	onSubagentStop(result: SubagentStopLike): Promise<void> {
