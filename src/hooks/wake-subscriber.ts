@@ -173,6 +173,14 @@ export class WakeSubscriber extends EventEmitter {
 	 */
 	async reconnect(): Promise<void> {
 		for (const event of this.ring) {
+			// Apply rate limiter during replay too (cubic P1 review).
+			const isNeverDrop = NEVER_DROP_EVENT_TYPES.has(event["event-type"]);
+			const now = Date.now();
+			if (!isNeverDrop && now - this.lastDeliveredAt < this.minIntervalMs) {
+				continue; // Throttled — skip this event in replay
+			}
+			this.lastDeliveredAt = now;
+
 			const message = sanitizeMessage(
 				formatWakeMessage(event),
 				this.maxMessageLength,

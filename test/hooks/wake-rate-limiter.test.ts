@@ -1,5 +1,5 @@
 /**
- * RED tests — Rate Limiter for WakeSubscriber.
+ * Tests — Rate Limiter for WakeSubscriber.
  *
  * Source does NOT implement rate limiting yet. These tests MUST FAIL (RED).
  * Spec: task #12 — throttle sendUserMessage calls so a burst of wake

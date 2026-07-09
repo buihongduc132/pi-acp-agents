@@ -1,5 +1,5 @@
 /**
- * RED tests — Reentrancy Guard for HookDispatcher.dispatch().
+ * Tests — Reentrancy Guard for HookDispatcher.dispatch().
  *
  * Source does NOT implement this guard yet. These tests MUST FAIL (RED).
  * Spec: task #6 — prevent concurrent execution for the same

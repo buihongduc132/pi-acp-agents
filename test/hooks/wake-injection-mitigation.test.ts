@@ -1,5 +1,5 @@
 /**
- * RED tests — Injection Mitigation for WakeSubscriber.
+ * Tests — Injection Mitigation for WakeSubscriber.
  *
  * Source does NOT sanitize message content yet. These tests MUST FAIL (RED).
  * Spec: task #12 — neutralize adversarial content before it reaches
