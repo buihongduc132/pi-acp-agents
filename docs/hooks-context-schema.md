@@ -209,12 +209,14 @@ Child completion → parent wakes → parent spawns more children → cascade. N
   "maxReopensPerTask": 3,
   "socket": {
     "enabled": true,
-    "path": "~/.pi/agent/events.sock",  // MUST be absolute when set; Node fs/net does NOT expand ~. Default uses HOME/USERPROFILE internally.
+    "path": "/home/user/.pi/agent/events.sock",
     "maxMessageSize": 1048576,
     "broadcastTimeoutMs": 1000
   }
 }
 ```
+
+**Note**: The `socket.path` must be an absolute path. Node.js fs/net APIs do not expand `~`. The default (if omitted) uses `HOME`/`USERPROFILE` internally.
 
 - `hooks[event].enabled: false` disables specific events (LD3)
 - Omitted events inherit global `enabled` flag
