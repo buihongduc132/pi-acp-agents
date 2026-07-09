@@ -10,12 +10,23 @@
 import { EventEmitter } from "node:events";
 import { createConnection, type Socket } from "node:net";
 
-import type { SocketEvent } from "./types.js";
+import { NEVER_DROP_EVENT_TYPES, type SocketEvent } from "./types.js";
 
 const ACP_PREFIX = "acp.";
 const DEFAULT_RING_SIZE = 100;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_MS = 1000;
+const DEFAULT_MIN_INTERVAL_MS = 1000;
+const DEFAULT_MAX_MESSAGE_LENGTH = 500;
+
+/** Shell metacharacters that must be neutralized before delivery. */
+const SHELL_METACHARS = /[;|&$`<>]/g;
+/** Prompt-injection patterns (matched case-insensitively). */
+const INJECTION_PATTERNS: readonly RegExp[] = [
+	/ignore previous instructions/gi,
+	/you are now/gi,
+	/system\s*:/gi,
+];
 
 /** Minimal socket-like interface (real Socket or injected mock). */
 export interface SocketLike {
@@ -42,6 +53,12 @@ export interface WakeSubscriberOptions {
 	maxSocketRetries?: number;
 	retryDelayMs?: number;
 	ringBufferSize?: number;
+	/** Minimum interval (ms) between delivered messages. Events arriving
+	 *  faster than this are dropped. Default: 1000ms. Completion events
+	 *  (NEVER_DROP) bypass the limiter. */
+	minIntervalMs?: number;
+	/** Maximum length of the delivered message before truncation. Default: 500. */
+	maxMessageLength?: number;
 	/** Injectable connector for testing. */
 	connector?: () => Promise<SocketLike>;
 }
@@ -73,12 +90,16 @@ export class WakeSubscriber extends EventEmitter {
 	private readonly maxSocketRetries: number;
 	private readonly retryDelayMs: number;
 	private readonly ringBufferSize: number;
+	private readonly minIntervalMs: number;
+	private readonly maxMessageLength: number;
 	private readonly connector: () => Promise<SocketLike>;
 
 	private ring: SocketEvent[] = [];
 	private socket: SocketLike | null = null;
 	private alive = true;
 	private usingIntercom = false;
+	/** Timestamp (ms) of the last non-completion message delivery. */
+	private lastDeliveredAt = 0;
 
 	constructor(opts: WakeSubscriberOptions) {
 		super();
@@ -88,13 +109,16 @@ export class WakeSubscriber extends EventEmitter {
 		this.maxSocketRetries = opts.maxSocketRetries ?? DEFAULT_MAX_RETRIES;
 		this.retryDelayMs = opts.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
 		this.ringBufferSize = opts.ringBufferSize ?? DEFAULT_RING_SIZE;
+		this.minIntervalMs = opts.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS;
+		this.maxMessageLength = opts.maxMessageLength ?? DEFAULT_MAX_MESSAGE_LENGTH;
 		this.connector =
 			opts.connector ?? (() => this.defaultConnect());
 	}
 
 	/**
 	 * Handle a single socket event. Filters non-acp events, buffers acp
-	 * events (LD18), and delivers via sendUserMessage with deliverAs:"followUp".
+	 * events (LD18), applies rate limiting + injection mitigation, and
+	 * delivers via sendUserMessage with deliverAs:"followUp".
 	 * Never throws (error isolation).
 	 */
 	async handleEvent(event: SocketEvent): Promise<void> {
@@ -106,7 +130,21 @@ export class WakeSubscriber extends EventEmitter {
 			// LD18: ring buffer for replay
 			this.pushRing(event);
 
-			const message = formatWakeMessage(event);
+			// Rate limiter: completion events (NEVER_DROP) bypass throttling.
+			const isNeverDrop = NEVER_DROP_EVENT_TYPES.has(event["event-type"]);
+			if (!isNeverDrop) {
+				const now = Date.now();
+				if (now - this.lastDeliveredAt < this.minIntervalMs) {
+					// Throttled — drop this event
+					return;
+				}
+				this.lastDeliveredAt = now;
+			}
+
+			const message = sanitizeMessage(
+				formatWakeMessage(event),
+				this.maxMessageLength,
+			);
 			try {
 				await this.pi.sendUserMessage(message, { deliverAs: "followUp" });
 			} catch (err) {
@@ -275,6 +313,31 @@ export class WakeSubscriber extends EventEmitter {
 			this.pi.log(`[wake-subscriber] ${msg}`);
 		}
 	}
+}
+
+/**
+ * Sanitize a wake message before delivery to pi.sendUserMessage.
+ *
+ * - Collapse newlines (\r, \n) to single spaces (anti multi-line injection).
+ * - Remove shell metacharacters (; | & $ ` < >).
+ * - Neutralize known prompt-injection phrases.
+ * - Truncate to maxLen.
+ */
+function sanitizeMessage(message: string, maxLen: number): string {
+	let out = message;
+	// Collapse all newline forms to a single space.
+	out = out.replace(/[\r\n]+/g, " ");
+	// Remove shell metacharacters entirely.
+	out = out.replace(SHELL_METACHARS, "");
+	// Neutralize prompt-injection patterns.
+	for (const re of INJECTION_PATTERNS) {
+		out = out.replace(re, "");
+	}
+	// Enforce maximum length.
+	if (out.length > maxLen) {
+		out = out.slice(0, maxLen);
+	}
+	return out;
 }
 
 function delay(ms: number): Promise<void> {
