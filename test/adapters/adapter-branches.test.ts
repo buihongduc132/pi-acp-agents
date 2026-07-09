@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { mockDebug } = vi.hoisted(() => ({ mockDebug: vi.fn() }));
 vi.mock("../../src/logger.js", () => ({
-	createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: mockDebug }),
+	createNoopLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: mockDebug }),
 	createFileLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
