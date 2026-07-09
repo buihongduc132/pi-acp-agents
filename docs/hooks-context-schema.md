@@ -50,9 +50,11 @@ interface HookContext {
 
 ## Event Catalog (LD8)
 
-All 9 events implemented (delegate-model only, LD14):
+All 9 events implemented (delegate-model only, LD14).
 
-| Event | Trigger | Hook script |
+**Important**: The hook script column shows the *convention*. The dispatcher discovers and runs **all** scripts in the hooks directory for **every** event — there is no per-event filename matching at the dispatcher level. To get per-event behavior, either (a) keep only the relevant script in the directory, or (b) check `$ACP_HOOK_EVENT` inside your script and exit early for non-matching events.
+
+| Event | Trigger | Hook script convention |
 |-------|---------|-------------|
 | `session_started` | SessionManager.add() | `on_session_started` |
 | `session_completed` | SessionManager.remove() (normal) | `on_session_completed` |
@@ -166,7 +168,7 @@ socket event → wake-subscriber.handleEvent()
 
 ### Ring buffer replay (LD18)
 
-Ring buffer of last 100 events replayed on reconnect after reload/session-switch/resume/compact.
+Ring buffer of last 100 events replayed on reconnect after unexpected socket close (not after reload/session-switch/compact).
 
 ## Threat Model
 
@@ -207,7 +209,7 @@ Child completion → parent wakes → parent spawns more children → cascade. N
   "maxReopensPerTask": 3,
   "socket": {
     "enabled": true,
-    "path": "/home/user/.pi/agent/events.sock",
+    "path": "~/.pi/agent/events.sock",  // MUST be absolute when set; Node fs/net does NOT expand ~. Default uses HOME/USERPROFILE internally.
     "maxMessageSize": 1048576,
     "broadcastTimeoutMs": 1000
   }
@@ -224,4 +226,4 @@ Child completion → parent wakes → parent spawns more children → cascade. N
 |------|--------|
 | `acp_hooks_policy_get` | Read configured + effective policy |
 | `acp_hooks_policy_set` | Update failureAction, maxReopensPerTask, followupOwner |
-| `hooksPolicyReset: true` | Clear team-level overrides |
+| `reset: true` (in acp_hooks_policy_set) | Clear team-level overrides |
