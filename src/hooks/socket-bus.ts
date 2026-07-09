@@ -41,6 +41,30 @@ export interface PublisherOptions {
 }
 
 /**
+ * Default SO_PEERCRED checker using `socket.getPeerCredentials()` (Linux only).
+ * Returns null gracefully on non-Linux platforms where the method is unavailable.
+ */
+function defaultPeerCredentialChecker(): ((socket: Socket) => PeerCreds | null) | undefined {
+	// Only enable on Linux where getPeerCredentials is available
+	if (process.platform !== "linux") {
+		return undefined;
+	}
+	return (socket: Socket): PeerCreds | null => {
+		try {
+			if (typeof (socket as any).getPeerCredentials === "function") {
+				const creds = (socket as any).getPeerCredentials();
+				if (creds && typeof creds.uid === "number") {
+					return { uid: creds.uid, gid: creds.gid, pid: creds.pid };
+				}
+			}
+		} catch {
+			/* non-Linux or unsupported socket type — skip auth */
+		}
+		return null;
+	};
+}
+
+/**
  * Publisher: binds a Unix domain SOCK_STREAM server, accepts a single
  * consumer (SG2), writes JSON Lines, and maintains a ring buffer for
  * backpressure observability (SG3).
@@ -64,7 +88,7 @@ export class SocketPublisher {
 		this.ringBufferSize = opts.ringBufferSize ?? 100;
 		this.broadcastTimeoutMs =
 			opts.broadcastTimeoutMs ?? DEFAULT_HOOK_CONFIG.socket.broadcastTimeoutMs;
-		this.peerCredentialChecker = opts.peerCredentialChecker;
+		this.peerCredentialChecker = opts.peerCredentialChecker ?? defaultPeerCredentialChecker();
 	}
 
 	async start(): Promise<void> {

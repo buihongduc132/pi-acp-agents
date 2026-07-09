@@ -178,6 +178,18 @@ export class WakeSubscriber extends EventEmitter {
 					reject(err);
 				}
 			});
+			// Persistent error handler — prevent unhandled error crash after connection
+			sock.on("error", (err) => {
+				this.log(`socket error: ${String(err)}`);
+			});
+			// Close handler — trigger reconnect on unexpected close
+			sock.on("close", () => {
+				if (!this.alive) return;
+				this.log("socket closed unexpectedly — scheduling reconnect");
+				this.socket = null;
+				// Fire-and-forget reconnect with ring buffer replay
+				void this.reconnectAfterClose();
+			});
 		});
 	}
 
@@ -213,6 +225,22 @@ export class WakeSubscriber extends EventEmitter {
 			} catch (err) {
 				this.log(`intercom publish failed: ${String(err)}`);
 			}
+		}
+	}
+
+	/**
+	 * Reconnect after an unexpected socket close. Retries connection
+	 * using the same logic as start(), then replays the ring buffer (LD18).
+	 */
+	private async reconnectAfterClose(): Promise<void> {
+		try {
+			await this.start();
+			// After successful reconnect, replay buffered events
+			if (this.socket && this.alive) {
+				await this.reconnect();
+			}
+		} catch (err) {
+			this.log(`reconnectAfterClose failed: ${String(err)}`);
 		}
 	}
 

@@ -148,18 +148,19 @@ function runOne(
 
 		const timer = setTimeout(() => {
 			timedOut = true;
-			try {
-				process.kill(-child.pid!, "SIGTERM");
-			} catch {
-				try { child.kill("SIGTERM"); } catch { /* ignore */ }
+			// Process group kill is Unix-only; on Windows fall back to direct kill
+			let killed = false;
+			if (process.platform !== "win32") {
+				try { process.kill(-child.pid!, "SIGTERM"); killed = true; } catch { /* fallback below */ }
 			}
+			if (!killed) { try { child.kill("SIGTERM"); } catch { /* ignore */ } }
 			// Force kill if still alive shortly after
 			setTimeout(() => {
-				try {
-					process.kill(-child.pid!, "SIGKILL");
-				} catch {
-					try { child.kill("SIGKILL"); } catch { /* ignore */ }
+				let forceKilled = false;
+				if (process.platform !== "win32") {
+					try { process.kill(-child.pid!, "SIGKILL"); forceKilled = true; } catch { /* fallback below */ }
 				}
+				if (!forceKilled) { try { child.kill("SIGKILL"); } catch { /* ignore */ } }
 			}, 200);
 		}, opts.timeoutMs);
 

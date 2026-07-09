@@ -37,6 +37,7 @@ import { TemplateResolver } from "./src/dag/template-resolver.js";
 import { loadSettings, isToolEnabled, type AcpToolSettings } from "./src/settings/config.js";
 import { configureToolSettings } from "./src/settings/configure-tui.js";
 import { HookDispatcher } from "./src/hooks/dispatcher.js";
+import { FailurePolicyEngine } from "./src/hooks/policy.js";
 import { HookTriggerManager } from "./src/hooks/trigger-wiring.js";
 import { SocketPublisher } from "./src/hooks/socket-bus.js";
 import { WakeSubscriber } from "./src/hooks/wake-subscriber.js";
@@ -135,6 +136,12 @@ export default function (pi: ExtensionAPI) {
   let hookTriggers: HookTriggerManager | typeof noopHookTriggers;
 
   if (!hooksDisabled) {
+    // Failure policy engine — wired to the dispatcher for phase 3 aggregation
+    const failurePolicyEngine = new FailurePolicyEngine({
+      failureAction: hookConfig.failureAction,
+      maxReopensPerTask: hookConfig.maxReopensPerTask,
+      followupOwner: hookConfig.followupOwner,
+    });
     hookDispatcher = new HookDispatcher({
       config: hookConfig,
       hooksDir,
@@ -144,6 +151,25 @@ export default function (pi: ExtensionAPI) {
           if (!pub) return false;
           return pub.publish(event);
         },
+      },
+      applyFailurePolicy: async (action, context) => {
+        if (!context.task) return { handled: true, action };
+        const policyTask = {
+          id: context.task.id,
+          subject: context.task.subject,
+          status: context.task.status,
+          metadata: {
+            qualityGateFailureCount: 0,
+            reopenedByQualityGateCount: 0,
+          },
+        };
+        const result = await failurePolicyEngine.applyFailurePolicy(
+          action,
+          policyTask,
+          context,
+          { warn: (...args: unknown[]) => logger.warn(String(args[0] ?? "")), info: (...args: unknown[]) => logger.info(String(args[0] ?? "")) },
+        );
+        return { handled: result.handled, action: result.action };
       },
     });
     hookRunner = new NonBlockingRunner({ logger: console });
