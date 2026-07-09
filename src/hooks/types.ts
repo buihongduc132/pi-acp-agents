@@ -20,19 +20,6 @@ export type HookEventName =
 	| "task_completed"
 	| "task_failed";
 
-/** Ordered array of all 9 hook events. */
-const HOOK_EVENTS: HookEventName[] = [
-	"session_started",
-	"session_completed",
-	"session_failed",
-	"session_idle",
-	"subagent_start",
-	"subagent_stop",
-	"task_assigned",
-	"task_completed",
-	"task_failed",
-];
-
 /** Failure actions applied by the policy engine (policy.ts). */
 export type FailureAction =
 	| "warn"

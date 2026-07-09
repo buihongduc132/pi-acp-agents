@@ -91,13 +91,6 @@ const noopLogger: PolicyLogger = {
 	info: () => {},
 };
 
-/** Default base policy used when nothing is configured. */
-const DEFAULT_POLICY_CONFIG: PolicyConfig = {
-	failureAction: "warn",
-	maxReopensPerTask: DEFAULT_MAX_REOPENS,
-	followupOwner: DEFAULT_FOLLOWUP_OWNER,
-};
-
 /**
  * Create a followup task record for a failed source task.
  */
