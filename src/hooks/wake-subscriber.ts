@@ -168,19 +168,13 @@ export class WakeSubscriber extends EventEmitter {
 	}
 
 	/**
-	 * Replay the buffered events (LD18). Re-delivers each via
-	 * sendUserMessage with deliverAs:"followUp".
+	 * Replay ALL buffered events (LD18). Re-delivers each via
+	 * sendUserMessage with deliverAs:"followUp". Rate limiter is NOT
+	 * applied during replay — these events were already missed once
+	 * during disconnection and must be delivered.
 	 */
 	async reconnect(): Promise<void> {
 		for (const event of this.ring) {
-			// Apply rate limiter during replay too (cubic P1 review).
-			const isNeverDrop = NEVER_DROP_EVENT_TYPES.has(event["event-type"]);
-			const now = Date.now();
-			if (!isNeverDrop && now - this.lastDeliveredAt < this.minIntervalMs) {
-				continue; // Throttled — skip this event in replay
-			}
-			this.lastDeliveredAt = now;
-
 			const message = sanitizeMessage(
 				formatWakeMessage(event),
 				this.maxMessageLength,
