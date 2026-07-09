@@ -75,7 +75,7 @@ All 9 events implemented (delegate-model only, LD14):
 └── ...
 ```
 
-Resolution order: bare name → `.sh` → `.ps1` → `.js` → `.mjs` → executable binary. Multiple hooks for same event = all discovered and run in parallel (Phase 2).
+Resolution order per candidate: `.sh` → `.ps1` → `.js` → `.mjs` → executable binary. The dispatcher discovers **all** script files in the hooks directory and runs them in parallel for **every** event — there is no per-event filtering or single-winner resolution in the dispatcher. The resolution order applies only to `runAcpHook()` (single-path, `hooks.ts:resolveHookCommand`), not to the 3-phase dispatchers parallel discovery.
 
 ## Advisory Model (LD11, LD17)
 
@@ -128,7 +128,7 @@ interface SocketEvent {
 
 ### Lifecycle (LD15, SG1)
 
-- `unlink()` stale socket before `bind()` (only if it's a real file, not socket)
+- `unlink()` stale socket before `bind()` — only if the existing path **is** a socket (`stats.isSocket()`), to avoid clobbering regular files or directories
 - `chmod(path, 0o600)` after bind
 - PID file at `<socket-path>.pid`
 - Single consumer for v1 (SG2 — second connection rejected, broker deferred)
@@ -174,7 +174,7 @@ Ring buffer of last 100 events replayed on reconnect after reload/session-switch
 
 `events.sock` is connectable by **any process the user owns** — browser extensions, npm-installed CLIs, anything with EXECUTE on the path.
 
-**Mitigation**: SO_PEERCRED check rejects connections from different UID. But same-UID processes can still connect and read events (prompts, diffs, secrets).
+**Mitigation**: SO_PEERCRED check rejects connections from different UID — **Linux only** (`process.platform === 'linux'`). On macOS and Windows, this check is **not active** (returns `undefined`). Same-UID processes can always connect and read events (prompts, diffs, secrets).
 
 **Recommendation**: Document this threat to users. Do not run on shared-uid hosts without awareness. Future: per-session token authentication.
 
@@ -207,7 +207,7 @@ Child completion → parent wakes → parent spawns more children → cascade. N
   "maxReopensPerTask": 3,
   "socket": {
     "enabled": true,
-    "path": "~/.pi/agent/events.sock",
+    "path": "/home/user/.pi/agent/events.sock",
     "maxMessageSize": 1048576,
     "broadcastTimeoutMs": 1000
   }
