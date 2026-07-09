@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "bankId": "pi-acp-agents",
+  "provider": "local",
+  "repoSlug": "buihongduc132/pi-acp-agents",
+  "baseUrl": "http://100.114.135.99:24300",
+  "bankStrategy": "per-repo",
+  "discoveredAt": "2026-07-08T18:18:13Z",
+  "updatedAt": "2026-07-08T18:18:13Z"
+}

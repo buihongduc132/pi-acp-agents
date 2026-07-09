@@ -105,11 +105,12 @@ function mkSession(id: string, agent = "gemini", sessionName?: string): AcpSessi
 	};
 }
 
-/** The 11-tool target registry (single source of truth for this suite). */
+/** The 13-tool target registry (11 core + 2 hooks policy). */
 const TARGET_TOOLS = [
 	"acp_spawn", "acp_msg", "acp_fanout", "acp_governance", "acp_status",
 	"acp_task_create", "acp_task_update", "acp_message",
 	"acp_dag_submit", "acp_dag_status", "acp_dag_cancel",
+	"acp_hooks_policy_get", "acp_hooks_policy_set",
 ] as const;
 
 /** Old tool names that MUST be absent from the registry after unification. */
@@ -201,7 +202,7 @@ describe("Unified ACP Tool Surface (RED)", () => {
 
 	// ── unify-red-removal: registry shape ──────────────────────────────
 	describe("registry shape (unify-red-removal)", () => {
-		it("registers exactly the 11 target tools", () => {
+		it("registers exactly the 13 target tools (11 core + 2 hooks policy)", () => {
 			expect(Array.from(tools.keys()).sort()).toEqual([...TARGET_TOOLS].sort());
 		});
 

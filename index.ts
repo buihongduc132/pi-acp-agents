@@ -36,6 +36,15 @@ import { DagExecutor, type DagCancelSummary } from "./src/dag/dag-executor.js";
 import { TemplateResolver } from "./src/dag/template-resolver.js";
 import { loadSettings, isToolEnabled, type AcpToolSettings } from "./src/settings/config.js";
 import { configureToolSettings } from "./src/settings/configure-tui.js";
+import { HookDispatcher } from "./src/hooks/dispatcher.js";
+import { FailurePolicyEngine } from "./src/hooks/policy.js";
+import { HookTriggerManager } from "./src/hooks/trigger-wiring.js";
+import { SocketPublisher } from "./src/hooks/socket-bus.js";
+import { WakeSubscriber } from "./src/hooks/wake-subscriber.js";
+import { loadHookConfig } from "./src/hooks/config.js";
+import { registerHooksPolicyTools, type PolicyStore } from "./src/hooks/policy-tools.js";
+import { NonBlockingRunner } from "./src/hooks/non-blocking.js";
+import { defaultHooksDir } from "./src/hooks/types.js";
 
 function textContent(text: string): { type: "text"; text: string } {
   return { type: "text", text };
@@ -72,6 +81,7 @@ function normalizeOptionalSessionName(value: unknown): string | undefined {
 
 export default function (pi: ExtensionAPI) {
   const sessionMgr = new SessionManager();
+
   const activeAdapters = new Map<string, ReturnType<typeof createAdapter>>();
   const busySessions = new Map<string, boolean>();
   const workerSessionMap = new Map<string, string>(); // sessionId → workerName for heartbeat consumer
@@ -90,6 +100,122 @@ export default function (pi: ExtensionAPI) {
 
   const logsDir = config.logsDir ?? join(homedir(), ".pi", "acp-agents", "logs");
   const logger = createFileLogger(logsDir);
+
+  // ── ACP Hooks infrastructure (LD1-LD18) ──
+  // Skip ALL hooks init in test mode to avoid timers/sockets keeping the
+  // event loop alive across 180+ test files (causes 5s timeouts in full suite).
+  // Tests exercise hooks modules directly via test/hooks/*.test.ts.
+  const hookConfig = loadHookConfig();
+  const hooksDir = defaultHooksDir();
+  const hooksDisabled = process.env.VITEST === "true" || !hookConfig.enabled;
+
+  // No-op stubs used when hooks are disabled (tests / disabled via config).
+  const noopHookRunner = {
+    runFireAndForget(_label: string, fn: () => Promise<unknown> | unknown): void {
+      try { void Promise.resolve(fn()).catch(() => {}); } catch { /* isolated */ }
+    },
+    dispose(): void { /* noop */ },
+  };
+  const noopHookTriggers = {
+    onSessionAdded(_h: unknown): Promise<void> { return Promise.resolve(); },
+    onSessionRemoved(_h: unknown, _err?: unknown): Promise<void> { return Promise.resolve(); },
+    onSessionIdle(_s: unknown): Promise<void> { return Promise.resolve(); },
+    onTaskDispatched(_t: unknown): Promise<void> { return Promise.resolve(); },
+    onTaskResult(_t: unknown): Promise<void> { return Promise.resolve(); },
+    onSubagentStart(_s: unknown): Promise<void> { return Promise.resolve(); },
+    onSubagentStop(_s: unknown): Promise<void> { return Promise.resolve(); },
+    dispose(): void { /* noop */ },
+  };
+
+  // Publisher is created async after socket bind; use a ref so the
+  // dispatcher's delegate always reads the live value.
+  const hookPublisherRef: { current: SocketPublisher | null } = { current: null };
+  let hookWake: WakeSubscriber | null = null;
+  let hookDispatcher: HookDispatcher;
+  let hookRunner: NonBlockingRunner | typeof noopHookRunner;
+  let hookTriggers: HookTriggerManager | typeof noopHookTriggers;
+
+  if (!hooksDisabled) {
+    // Failure policy engine — wired to the dispatcher for phase 3 aggregation
+    const failurePolicyEngine = new FailurePolicyEngine({
+      failureAction: hookConfig.failureAction,
+      maxReopensPerTask: hookConfig.maxReopensPerTask,
+      followupOwner: hookConfig.followupOwner,
+    });
+    hookDispatcher = new HookDispatcher({
+      config: hookConfig,
+      hooksDir,
+      publisher: {
+        publish(event) {
+          const pub = hookPublisherRef.current;
+          if (!pub) return false;
+          return pub.publish(event);
+        },
+      },
+      applyFailurePolicy: async (action, context) => {
+        if (!context.task) return { handled: true, action };
+        const policyTask = {
+          id: context.task.id,
+          subject: context.task.subject,
+          status: context.task.status,
+          metadata: {
+            qualityGateFailureCount: 0,
+            reopenedByQualityGateCount: 0,
+          },
+        };
+        const result = await failurePolicyEngine.applyFailurePolicy(
+          action,
+          policyTask,
+          context,
+          { warn: (...args: unknown[]) => logger.warn(String(args[0] ?? "")), info: (...args: unknown[]) => logger.info(String(args[0] ?? "")) },
+        );
+        return { handled: result.handled, action: result.action };
+      },
+    });
+    hookRunner = new NonBlockingRunner({ logger: console });
+    hookTriggers = new HookTriggerManager({
+      hookDispatcher: hookDispatcher,
+      defaultCwd: homedir(),
+    });
+    // Fire-and-forget socket bus init — never block startup
+    void (async () => {
+      try {
+        if (hookConfig.socket.enabled) {
+          const pub = new SocketPublisher({ path: hookConfig.socket.path });
+          await pub.start();
+          hookPublisherRef.current = pub;
+        }
+        hookWake = new WakeSubscriber({
+          path: hookConfig.socket.path,
+          pi: {
+            sendUserMessage: (msg: string, opts?: { deliverAs?: string }) =>
+              pi.sendUserMessage(msg, { deliverAs: opts?.deliverAs as "steer" | "followUp" | undefined }),
+            log: (...args: unknown[]) => logger.info(String(args[0] ?? "")),
+          },
+        });
+        await hookWake.start();
+      } catch (err) {
+        logger.error("[acp-hooks] socket bus init failed", { error: String(err) });
+      }
+    })();
+  } else {
+    // Disabled / test mode — create a real dispatcher (no timers) but no-op runner/triggers
+    hookDispatcher = new HookDispatcher({ config: hookConfig, hooksDir, publisher: { publish: () => false } });
+    hookRunner = noopHookRunner;
+    hookTriggers = noopHookTriggers;
+  }
+  // Policy store — in-memory, seeded from loaded config
+  const hookPolicyStore: PolicyStore = (() => {
+    const store = new Map<string, unknown>();
+    store.set("failureAction", hookConfig.failureAction);
+    store.set("maxReopensPerTask", hookConfig.maxReopensPerTask);
+    store.set("followupOwner", hookConfig.followupOwner);
+    return {
+      get: (key: string) => store.get(key),
+      set: (key: string, value: unknown) => { store.set(key, value); },
+      delete: (key: string) => { store.delete(key); },
+    };
+  })();
   const runtimePaths = ensureRuntimeDir(config.runtimeDir);
   const eventLog = new AcpEventLog(runtimePaths.rootDir);
   const sessionNameStore = new SessionNameStore(runtimePaths.rootDir);
@@ -200,6 +326,12 @@ export default function (pi: ExtensionAPI) {
     handle.autoClosed = autoClosed;
     handle.closeReason = closeReason;
     archiveSession(handle);
+    // ACP Hooks: fire session_completed or session_failed (fire-and-forget)
+    const isErrorClose = closeReason.includes("error") || closeReason.includes("fail") || closeReason.includes("stall");
+    hookTriggers.onSessionRemoved(
+      { id: handle.sessionId, agent: handle.agentName, cwd: handle.cwd ?? "" },
+      { error: isErrorClose, errorMessage: closeReason },
+    ).catch(() => {});
     // Invoke the canonical teardown directly rather than relying on
     // sessionMgr.remove to call handle.dispose(). This keeps teardown robust
     // even when the SessionManager is instrumented/mocked, and double-dispose
@@ -371,6 +503,8 @@ export default function (pi: ExtensionAPI) {
       } else if (closeReason) {
         // Existing idle/disposed handling
         logger.info('session stale, disposing', { sessionId, closeReason });
+        // ACP Hooks: fire session_idle (fire-and-forget)
+        hookTriggers.onSessionIdle({ id: sessionId, agent: handle.agentName, cwd: handle.cwd ?? "" }).catch(() => {});
         await closeSession(handle, closeReason, true);
         eventLog.append('session_stale', { sessionId, closeReason });
       }
@@ -400,14 +534,27 @@ export default function (pi: ExtensionAPI) {
       dispatchTask: async (sessionId: string, prompt: string) => {
         const adapter = activeAdapters.get(sessionId);
         if (!adapter) return { ok: false, error: "No adapter for session" };
+        const workerName = workerSessionMap.get(sessionId) ?? "acp";
+        const start = Date.now();
+        // ACP Hooks: fire task_assigned (fire-and-forget)
+        hookTriggers.onTaskDispatched({ id: sessionId, subject: prompt.slice(0, 200), status: "assigned", owner: workerName }).catch(() => {});
+        // ACP Hooks: fire subagent_start (fire-and-forget)
+        hookTriggers.onSubagentStart({ sessionId, agentName: workerName }).catch(() => {});
         try {
           busySessions.set(sessionId, true);
           const result = (await withTimeoutMs(adapter.prompt(prompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `dispatch:${sessionId}`)) as AcpPromptResult;
+          // ACP Hooks: fire task_completed (fire-and-forget)
+          hookTriggers.onTaskResult({ taskId: sessionId, subject: prompt.slice(0, 200), success: true, durationMs: Date.now() - start, result: result.text, owner: workerName }).catch(() => {});
           return { ok: true, value: result.text };
         } catch (err) {
-          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+          const errMsg = err instanceof Error ? err.message : String(err);
+          // ACP Hooks: fire task_failed (fire-and-forget)
+          hookTriggers.onTaskResult({ taskId: sessionId, subject: prompt.slice(0, 200), success: false, durationMs: Date.now() - start, error: errMsg, owner: workerName }).catch(() => {});
+          return { ok: false, error: errMsg };
         } finally {
           busySessions.delete(sessionId);
+          // ACP Hooks: fire subagent_stop (fire-and-forget)
+          hookTriggers.onSubagentStop({ sessionId, agentName: workerName }).catch(() => {});
         }
       },
     };
@@ -614,6 +761,8 @@ export default function (pi: ExtensionAPI) {
     activeAdapters.set(sessionId, adapter);
     archiveSession(handle);
     eventLog.append("session_created", { sessionId, agentName, cwd });
+    // ACP Hooks: fire session_started (fire-and-forget, never blocks)
+    hookTriggers.onSessionAdded({ id: sessionId, agent: agentName, cwd }).catch(() => {});
     return handle;
   }
 
@@ -783,6 +932,8 @@ export default function (pi: ExtensionAPI) {
             handle.promptStartedAt = new Date();
             monitor.markPromptStart(sessionId);
             archiveSession(handle);
+            // ACP Hooks: fire subagent_start (fire-and-forget)
+            hookTriggers.onSubagentStart({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
             try {
               const pr = (await withTimeoutMs(adapter.prompt(effectivePrompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_spawn(prompt:${sessionId})`)) as AcpPromptResult;
               markPromptLifecycle(handle, pr);
@@ -793,6 +944,8 @@ export default function (pi: ExtensionAPI) {
               handle.isPrompting = false;
               monitor.markPromptEnd(sessionId);
               archiveSession(handle);
+              // ACP Hooks: fire subagent_stop (fire-and-forget)
+              hookTriggers.onSubagentStop({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
             }
           }
 
@@ -877,11 +1030,15 @@ export default function (pi: ExtensionAPI) {
         const adapter = activeAdapters.get(sessionId);
         if (adapter) {
           busySessions.set(sessionId, true);
+          // ACP Hooks: fire subagent_start (fire-and-forget)
+          hookTriggers.onSubagentStart({ sessionId, agentName: worker.agentName }).catch(() => {});
           try {
             const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_msg(worker:${sessionId})`)) as AcpPromptResult;
             return { content: [textContent(pr.text || "(no response)")], details: { sessionId, name: target, agent: worker.agentName, queued: false } };
           } finally {
             busySessions.delete(sessionId);
+            // ACP Hooks: fire subagent_stop (fire-and-forget)
+            hookTriggers.onSubagentStop({ sessionId, agentName: worker.agentName }).catch(() => {});
           }
         }
       }
@@ -929,6 +1086,8 @@ export default function (pi: ExtensionAPI) {
           liveHandle.promptStartedAt = new Date();
           monitor.markPromptStart(sessionId);
           archiveSession(liveHandle);
+          // ACP Hooks: fire subagent_start (fire-and-forget)
+          hookTriggers.onSubagentStart({ sessionId, agentName: liveHandle.agentName, cwd: liveHandle.cwd }).catch(() => {});
           try {
             const adapter = activeAdapters.get(sessionId)!;
             const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_msg(reused:${sessionId})`)) as AcpPromptResult;
@@ -941,6 +1100,8 @@ export default function (pi: ExtensionAPI) {
             liveHandle.isPrompting = false;
             monitor.markPromptEnd(sessionId);
             archiveSession(liveHandle);
+            // ACP Hooks: fire subagent_stop (fire-and-forget)
+            hookTriggers.onSubagentStop({ sessionId, agentName: liveHandle.agentName, cwd: liveHandle.cwd }).catch(() => {});
           }
         }, `acp_msg(reused:${sessionId})`);
         refreshWidget(ctx);
@@ -1009,6 +1170,8 @@ export default function (pi: ExtensionAPI) {
           handle.promptStartedAt = new Date();
           monitor.markPromptStart(newSessionId);
           archiveSession(handle);
+          // ACP Hooks: fire subagent_start (fire-and-forget)
+          hookTriggers.onSubagentStart({ sessionId: newSessionId, agentName, cwd: effectiveCwd }).catch(() => {});
           try {
             const pr = (await withTimeoutMs(adapter.prompt(message), config.toolTimeouts?.prompt ?? config.staleTimeoutMs, `acp_msg(prompt:${newSessionId})`)) as AcpPromptResult;
             if (warningPrefix) pr.text = `${warningPrefix}${pr.text}`;
@@ -1021,6 +1184,8 @@ export default function (pi: ExtensionAPI) {
             handle.isPrompting = false;
             monitor.markPromptEnd(newSessionId);
             archiveSession(handle);
+            // ACP Hooks: fire subagent_stop (fire-and-forget)
+            hookTriggers.onSubagentStop({ sessionId: newSessionId, agentName, cwd: effectiveCwd }).catch(() => {});
           }
         } catch (err) {
           if (handle) {
@@ -1839,9 +2004,22 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // ── ACP Hooks policy tools (acp_hooks_policy_get / acp_hooks_policy_set) ──
+  if (
+    isToolEnabled(toolSettings, "acp_hooks_policy_get") ||
+    isToolEnabled(toolSettings, "acp_hooks_policy_set")
+  ) {
+    registerHooksPolicyTools(pi, { store: hookPolicyStore });
+  }
+
   pi.on("session_shutdown", async () => {
     monitor.stop();
     workerDispatcher?.stop();
+    // ── ACP Hooks cleanup ──
+    hookTriggers.dispose();
+    hookRunner.dispose();
+    try { await hookWake?.stop(); } catch { /* ignore */ }
+    try { await hookPublisherRef.current?.stop(); } catch { /* ignore */ }
     await sessionMgr.disposeAll();
     for (const adapter of activeAdapters.values()) {
       adapter.dispose();

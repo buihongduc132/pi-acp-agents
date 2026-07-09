@@ -15,7 +15,7 @@ describe("Level 3+ — ACP management tool registration", () => {
     registeredTools.length = 0;
   });
 
-  it("registers exactly the unified 11-tool surface", async () => {
+  it("registers exactly the unified 13-tool surface (11 core + 2 hooks policy)", async () => {
     const mod = await import("../index.js");
     mod.default(mockPi as any);
     expect(registeredTools).toEqual(expect.arrayContaining([
@@ -30,9 +30,11 @@ describe("Level 3+ — ACP management tool registration", () => {
       "acp_dag_submit",
       "acp_dag_status",
       "acp_dag_cancel",
+      "acp_hooks_policy_get",
+      "acp_hooks_policy_set",
     ]));
-    // Hard break: exactly 11 tools, no aliases.
-    expect(registeredTools.length).toBe(11);
+    // Hard break: exactly 13 tools (11 core + 2 hooks policy), no aliases.
+    expect(registeredTools.length).toBe(13);
   });
 
   it("does NOT register removed tools", async () => {
