@@ -31,7 +31,7 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 		dagIndexFile: "/mock/runtime/dag/dag-index.json",
 	}),
 }));
-vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }), createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
+vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }), createNoopLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
 vi.mock("../src/core/circuit-breaker.js", () => ({ AcpCircuitBreaker: vi.fn() }));
 vi.mock("../src/adapter-factory.js", () => ({ createAdapter: vi.fn() }));
 vi.mock("../src/coordination/coordinator.js", () => ({ AgentCoordinator: vi.fn() }));

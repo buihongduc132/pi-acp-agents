@@ -9,6 +9,7 @@ import type { Logger } from "../../src/logger.js";
 function noopLogger(): Logger {
   return {
     info: vi.fn(),
+    warn: vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
   };

@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 export interface Logger {
   info(msg: string, data?: unknown): void;
+  warn(msg: string, data?: unknown): void;
   error(msg: string, data?: unknown): void;
   debug(msg: string, data?: unknown): void;
 }
@@ -14,6 +15,7 @@ export interface Logger {
 export function createNoopLogger(): Logger {
   return {
     info() {},
+    warn() {},
     error() {},
     debug() {},
   };
@@ -65,6 +67,14 @@ export function createFileLogger(logsDir: string, sessionId?: string): Logger {
           console.log("[acp-logger] failed to write trace:", err);
         }
       },
+      warn(msg, data) {
+        write("warn", msg, data);
+        try {
+          appendFileSync(tracePath, JSON.stringify({ timestamp: new Date().toISOString(), level: "warn", msg, data }) + "\n", "utf-8");
+        } catch (err) {
+          console.log("[acp-logger] failed to write trace:", err);
+        }
+      },
       error(msg, data) {
         write("error", msg, data);
         try {
@@ -86,6 +96,7 @@ export function createFileLogger(logsDir: string, sessionId?: string): Logger {
 
   return {
     info(msg, data) { write("info", msg, data); },
+    warn(msg, data) { write("warn", msg, data); },
     error(msg, data) { write("error", msg, data); },
     debug(msg, data) { write("debug", msg, data); },
   };
