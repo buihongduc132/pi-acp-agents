@@ -68,7 +68,7 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json", dagDir: "/mock/runtime/dag", dagIndexFile: "/mock/runtime/dag/dag-index.json",
 	}),
 }));
-vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info() {}, error() {}, debug() {} }), createNoopLogger: () => ({ info() {}, error() {}, debug() {} }) }));
+vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info() {}, warn() {}, error() {}, debug() {} }), createNoopLogger: () => ({ info() {}, warn() {}, error() {}, debug() {} }) }));
 vi.mock("../src/core/circuit-breaker.js", () => ({
 	AcpCircuitBreaker: class {
 		state = "closed";
