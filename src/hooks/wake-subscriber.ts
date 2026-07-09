@@ -130,16 +130,15 @@ export class WakeSubscriber extends EventEmitter {
 			// LD18: ring buffer for replay
 			this.pushRing(event);
 
-			// Rate limiter: completion events (NEVER_DROP) bypass throttling.
+			// Rate limiter: completion events (NEVER_DROP) bypass throttling
+			// but still update lastDeliveredAt to prevent burst after completion.
 			const isNeverDrop = NEVER_DROP_EVENT_TYPES.has(event["event-type"]);
-			if (!isNeverDrop) {
-				const now = Date.now();
-				if (now - this.lastDeliveredAt < this.minIntervalMs) {
-					// Throttled — drop this event
-					return;
-				}
-				this.lastDeliveredAt = now;
+			const now = Date.now();
+			if (!isNeverDrop && now - this.lastDeliveredAt < this.minIntervalMs) {
+				// Throttled — drop this event
+				return;
 			}
+			this.lastDeliveredAt = now;
 
 			const message = sanitizeMessage(
 				formatWakeMessage(event),
@@ -174,7 +173,10 @@ export class WakeSubscriber extends EventEmitter {
 	 */
 	async reconnect(): Promise<void> {
 		for (const event of this.ring) {
-			const message = formatWakeMessage(event);
+			const message = sanitizeMessage(
+				formatWakeMessage(event),
+				this.maxMessageLength,
+			);
 			try {
 				await this.pi.sendUserMessage(message, { deliverAs: "followUp" });
 			} catch (err) {
@@ -329,10 +331,15 @@ function sanitizeMessage(message: string, maxLen: number): string {
 	out = out.replace(/[\r\n]+/g, " ");
 	// Remove shell metacharacters entirely.
 	out = out.replace(SHELL_METACHARS, "");
-	// Neutralize prompt-injection patterns.
-	for (const re of INJECTION_PATTERNS) {
-		out = out.replace(re, "");
-	}
+	// Neutralize prompt-injection patterns. Replace with [FILTERED] marker
+	// and repeat until stable to prevent re-assembly attacks.
+	let prev: string;
+	do {
+		prev = out;
+		for (const re of INJECTION_PATTERNS) {
+			out = out.replace(re, "[FILTERED]");
+		}
+	} while (out !== prev);
 	// Enforce maximum length.
 	if (out.length > maxLen) {
 		out = out.slice(0, maxLen);
