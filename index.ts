@@ -145,6 +145,7 @@ export default function (pi: ExtensionAPI) {
     hookDispatcher = new HookDispatcher({
       config: hookConfig,
       hooksDir,
+      enableReentrancyGuard: true,
       publisher: {
         publish(event) {
           const pub = hookPublisherRef.current;

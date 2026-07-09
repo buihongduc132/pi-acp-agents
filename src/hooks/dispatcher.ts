@@ -64,6 +64,9 @@ export interface HookDispatcherOptions {
 	applyFailurePolicy?: ApplyFailurePolicyFn;
 	/** Default per-event timeout when not specified in config.hooks[event]. */
 	defaultTimeoutMs?: number;
+	/** When true, concurrent dispatches for the same event+correlationId are
+	 *  skipped (reentrancy guard). Default: false (legacy behavior). */
+	enableReentrancyGuard?: boolean;
 }
 
 /** Result of a single dispatch. */
@@ -78,6 +81,10 @@ export interface DispatchResult {
 	hasFailures: boolean;
 	/** True if the failure policy was invoked. */
 	policyApplied: boolean;
+	/** True if this dispatch was skipped by the reentrancy guard. */
+	skipped: boolean;
+	/** Reason the dispatch was skipped, if any (e.g. "reentrancy-guard"). */
+	skippedReason?: string;
 }
 
 /** Argument to `dispatch()`. */
@@ -167,12 +174,22 @@ export class HookDispatcher {
 	private readonly preHooks = new Map<HookEventName, HookHandler[]>();
 	private readonly postHooks = new Map<HookEventName, HookHandler[]>();
 
+	/** Reentrancy guard: when enabled, tracks in-flight (event,correlationId) keys. */
+	private readonly enableReentrancyGuard: boolean;
+	private readonly inFlightKeys = new Set<string>();
+
 	constructor(opts: HookDispatcherOptions) {
 		this.config = opts.config;
 		this.hooksDir = opts.hooksDir;
 		this.publisher = opts.publisher;
 		this.applyFailurePolicyFn = opts.applyFailurePolicy;
 		this.defaultTimeoutMs = opts.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+		this.enableReentrancyGuard = opts.enableReentrancyGuard ?? false;
+	}
+
+	/** Currently in-flight reentrancy-guard keys (introspection/testing). */
+	getInFlightKeys(): string[] {
+		return [...this.inFlightKeys];
 	}
 
 	/** Register a pre or post hook for an event. */
@@ -209,6 +226,36 @@ export class HookDispatcher {
 	async dispatch(args: DispatchArgs): Promise<DispatchResult> {
 		const { event, context } = args;
 
+		// ── Reentrancy guard: skip if a dispatch for the same key is in flight ──
+		const guardKey = `${event}:${context.correlationId}`;
+		if (this.enableReentrancyGuard) {
+			if (this.inFlightKeys.has(guardKey)) {
+				return {
+					fileResults: [],
+					blocked: false,
+					hasFailures: false,
+					policyApplied: false,
+					skipped: true,
+					skippedReason: "reentrancy-guard",
+				};
+			}
+			this.inFlightKeys.add(guardKey);
+		}
+
+		try {
+			return await this.runPipeline(event, context);
+		} finally {
+			if (this.enableReentrancyGuard) {
+				this.inFlightKeys.delete(guardKey);
+			}
+		}
+	}
+
+	/** Internal 3-phase pipeline (called under the reentrancy guard). */
+	private async runPipeline(
+		event: HookEventName,
+		context: HookContext,
+	): Promise<DispatchResult> {
 		// ── Phase 1: PRE (registration order; handlers may be async) ──
 		const preResult = await this.runPreHooks(event, context);
 		if (preResult.blocked) {
@@ -218,6 +265,7 @@ export class HookDispatcher {
 				blockReason: preResult.blockReason,
 				hasFailures: false,
 				policyApplied: false,
+				skipped: false,
 			};
 		}
 
@@ -298,12 +346,13 @@ export class HookDispatcher {
 			policyApplied = true;
 		}
 
-		return {
-			fileResults,
-			blocked: false,
-			hasFailures,
-			policyApplied,
-		};
+			return {
+				fileResults,
+				blocked: false,
+				hasFailures,
+				policyApplied,
+				skipped: false,
+			};
 	}
 
 	/** Run pre-hooks in order; merge their PreHookResults. */
