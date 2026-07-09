@@ -17,7 +17,9 @@ import {
 	writeFileSync,
 	chmodSync,
 	statSync,
+	mkdirSync,
 } from "node:fs";
+import { dirname } from "node:path";
 
 import {
 	DEFAULT_HOOK_CONFIG,
@@ -92,13 +94,23 @@ export class SocketPublisher {
 	}
 
 	async start(): Promise<void> {
-		// SG1: unlink stale socket before bind
+		// SG1: unlink stale socket before bind — only if it's actually a
+		// socket file (don't clobber a regular file / directory at this path).
 		try {
-			if (existsSync(this.path)) {
+			const stats = statSync(this.path);
+			if (stats.isSocket()) {
 				unlinkSync(this.path);
 			}
 		} catch {
-			/* ignore */
+			/* file doesn't exist, OK */
+		}
+
+		// Ensure the parent directory exists before binding (Fix 2).
+		const dir = dirname(this.path);
+		try {
+			mkdirSync(dir, { recursive: true });
+		} catch {
+			/* best effort */
 		}
 
 		return new Promise((resolve, reject) => {
@@ -234,7 +246,25 @@ export class SocketPublisher {
 	private writeTo(socket: Socket, event: SocketEvent): void {
 		const line = JSON.stringify(event) + "\n";
 		try {
-			socket.write(line);
+			const drained = socket.write(line);
+			// Backpressure handling (Fix 8): if the kernel buffer is full
+			// (write returned false), we cannot buffer indefinitely. The
+			// event was already stored in the ring buffer / critical list
+			// by bufferEvent(), so on false we rely on the drop-oldest ring
+			// policy rather than growing memory unbounded. We simply skip
+			// the flush for this event; a future 'drain' will not replay it
+			// (acceptable: completion events are held in criticalEvents and
+			// re-sent on the next consumer connection via allBuffered()).
+			if (!drained) {
+				// Force the ring buffer to observe its drop policy even though
+				// we attempted a write — this keeps the buffer bounded.
+				const isCritical = NEVER_DROP_EVENT_TYPES.has(event["event-type"]);
+				if (!isCritical) {
+					while (this.nonCriticalRing.length > this.ringBufferSize) {
+						this.nonCriticalRing.shift();
+					}
+				}
+			}
 		} catch {
 			/* ignore write errors */
 		}

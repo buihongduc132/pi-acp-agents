@@ -8,7 +8,22 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createConnection } from "node:net";
+import { createConnection, createServer } from "node:net";
+import { execFileSync } from "node:child_process";
+
+/**
+ * Create a genuine stale Unix domain socket file at `p` (so
+ * statSync().isSocket() returns true) with no live listener. Achieved by
+ * spawning a child that binds then exits abruptly (the kernel leaves the
+ * socket file on disk). server.close() would unlink the file, so we cannot
+ * use it in-process.
+ */
+function createStaleSocket(p: string): void {
+  execFileSync("node", [
+    "-e",
+    `const net=require("net");net.createServer().listen(${JSON.stringify(p)},()=>{process.exit(0);});`,
+  ]);
+}
 
 // Source module does not exist yet — import will fail (RED)
 import { SocketPublisher, SocketSubscriber } from "../../src/hooks/socket-bus.js";
@@ -30,9 +45,11 @@ describe("socket-bus", () => {
   // ── SG1: Stale socket cleanup ──────────────────────────────────────────
   describe("SG1 — stale socket cleanup", () => {
     it("unlinks existing socket file before bind()", async () => {
-      // Pre-create a stale socket file
-      writeFileSync(sockPath, "stale");
+      // Pre-create a genuine stale socket file (not a regular file — the
+      // publisher now only unlinks paths that are actually sockets).
+      createStaleSocket(sockPath);
       expect(existsSync(sockPath)).toBe(true);
+      expect(statSync(sockPath).isSocket()).toBe(true);
 
       const publisher = new SocketPublisher({ path: sockPath });
       await publisher.start();

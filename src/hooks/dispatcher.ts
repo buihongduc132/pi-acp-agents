@@ -252,6 +252,7 @@ export class HookDispatcher {
 		// Socket publish (fire-and-forget)
 		if (
 			!preResult.suppress.has("socket") &&
+			this.config.enabled &&
 			this.config.socket.enabled &&
 			this.publisher
 		) {
@@ -264,8 +265,12 @@ export class HookDispatcher {
 			);
 		}
 
-		// Post hooks
-		const postHandlers = this.postHooks.get(event) ?? [];
+		// Post hooks (Fix 5: suppress:['ext'] gates post-hooks;
+		//  Fix 6: config.enabled gates them too)
+		const postHandlers =
+			this.config.enabled && !preResult.suppress.has("ext")
+				? (this.postHooks.get(event) ?? [])
+				: [];
 		for (const handler of postHandlers) {
 			parallel.push(
 				Promise.resolve()

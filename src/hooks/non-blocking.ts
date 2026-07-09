@@ -148,6 +148,9 @@ export class NonBlockingRunner {
 	): void {
 		const p = (async () => {
 			try {
+				// Fix 7: guard against dispose racing in between enqueue and
+				// execution — bail out before running the hook.
+				if (this.disposed) return;
 				const result =
 					timeoutMs !== undefined
 						? await this.runWithTimeout(fn, timeoutMs)
@@ -193,6 +196,8 @@ export class NonBlockingRunner {
 				this.timers.delete(timer);
 				reject(new Error(`hook timeout after ${timeoutMs}ms`));
 			}, timeoutMs);
+			// Fix 7: unref so the timeout timer doesn't keep the event loop alive.
+			timer.unref?.();
 			this.timers.add(timer);
 
 			Promise.resolve(resultPromise).then(

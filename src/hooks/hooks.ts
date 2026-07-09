@@ -18,6 +18,9 @@ export interface ResolvedCommand {
 	args: string[];
 }
 
+/** Per-stream output cap: 1MB to prevent unbounded accumulation (Fix 4). */
+const MAX_OUTPUT = 1024 * 1024;
+
 /**
  * Resolve a hook script path to an executable command.
  *
@@ -165,10 +168,14 @@ function runOne(
 		}, opts.timeoutMs);
 
 		child.stdout?.on("data", (chunk: Buffer | string) => {
-			stdout += chunk.toString();
+			if (stdout.length < MAX_OUTPUT) {
+				stdout += chunk.toString().slice(0, MAX_OUTPUT - stdout.length);
+			}
 		});
 		child.stderr?.on("data", (chunk: Buffer | string) => {
-			stderr += chunk.toString();
+			if (stderr.length < MAX_OUTPUT) {
+				stderr += chunk.toString().slice(0, MAX_OUTPUT - stderr.length);
+			}
 		});
 
 		const finish = (exitCode: number) => {
@@ -190,7 +197,11 @@ function runOne(
 			finish(127);
 		});
 		child.on("close", (code) => {
-			finish(code ?? 0);
+			// Fix 3: `code ?? 0` treated a signal-terminated hook (null exit
+			// code) as success. A null exit code means the process was killed
+			// by a signal → that is failure, not exit 0.
+			const exitCode = code ?? 1;
+			finish(exitCode);
 		});
 	});
 }
