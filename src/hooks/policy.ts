@@ -92,7 +92,7 @@ const noopLogger: PolicyLogger = {
 };
 
 /** Default base policy used when nothing is configured. */
-export const DEFAULT_POLICY_CONFIG: PolicyConfig = {
+const DEFAULT_POLICY_CONFIG: PolicyConfig = {
 	failureAction: "warn",
 	maxReopensPerTask: DEFAULT_MAX_REOPENS,
 	followupOwner: DEFAULT_FOLLOWUP_OWNER,

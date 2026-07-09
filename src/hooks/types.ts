@@ -21,7 +21,7 @@ export type HookEventName =
 	| "task_failed";
 
 /** Ordered array of all 9 hook events. */
-export const HOOK_EVENTS: HookEventName[] = [
+const HOOK_EVENTS: HookEventName[] = [
 	"session_started",
 	"session_completed",
 	"session_failed",
