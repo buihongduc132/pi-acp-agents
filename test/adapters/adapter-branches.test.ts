@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const { mockDebug } = vi.hoisted(() => ({ mockDebug: vi.fn() }));
 vi.mock("../../src/logger.js", () => ({
 	createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: mockDebug }),
-	createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+	createFileLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
 vi.mock("node:child_process", () => ({

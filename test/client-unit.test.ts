@@ -34,6 +34,7 @@ vi.mock("../src/core/protocol-validator.js", () => ({
 vi.mock("../src/logger.js", () => ({
 	createFileLogger: vi.fn(() => ({
 		info: vi.fn(),
+    warn: vi.fn(),
 		error: vi.fn(),
 		debug: vi.fn(),
 	})),

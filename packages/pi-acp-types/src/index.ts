@@ -141,6 +141,7 @@ export interface AcpSessionHandle extends AcpArchivedSessionMetadata {
 /** Logger interface */
 export interface Logger {
 	info(msg: string, data?: unknown): void;
+	warn(msg: string, data?: unknown): void;
 	error(msg: string, data?: unknown): void;
 	debug(msg: string, data?: unknown): void;
 }

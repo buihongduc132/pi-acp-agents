@@ -34,8 +34,8 @@ vi.mock("../../src/core/protocol-validator.js", () => ({
 }));
 
 vi.mock("../../src/logger.js", () => ({
-	createNoopLogger: vi.fn(() => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() })),
-	createFileLogger: vi.fn(() => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() })),
+	createNoopLogger: vi.fn(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() })),
+	createFileLogger: vi.fn(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() })),
 }));
 
 /** Concrete subclass for testing */

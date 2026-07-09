@@ -33,6 +33,7 @@ vi.mock("../src/core/protocol-validator.js", () => ({
 vi.mock("../src/logger.js", () => ({
 	createFileLogger: vi.fn(() => ({
 		info: vi.fn(),
+    warn: vi.fn(),
 		error: vi.fn(),
 		debug: vi.fn(),
 	})),
@@ -130,7 +131,7 @@ describe("AcpClient — deep branches", () => {
 		});
 
 		it("continues when auth fails (best-effort)", async () => {
-			const client = createClient({ logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+			const client = createClient({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
 			const conn = await connectAndGetConn(client);
 			conn.initialize.mockResolvedValueOnce({
 				protocolVersion: 1,
@@ -184,7 +185,7 @@ describe("AcpClient — deep branches", () => {
 		it("handles set model failure gracefully", async () => {
 			const client = createClient({
 				config: { command: "c", args: [], default_model: "gpt-4" },
-				logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn() },
+				logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 			});
 			const conn = await connectAndGetConn(client);
 			conn.newSession.mockResolvedValueOnce({ sessionId: "sess-4", models: {}, modes: {} });
@@ -196,7 +197,7 @@ describe("AcpClient — deep branches", () => {
 		it("handles set mode failure gracefully", async () => {
 			const client = createClient({
 				config: { command: "c", args: [], default_mode: "auto" },
-				logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn() },
+				logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 			});
 			const conn = await connectAndGetConn(client);
 			conn.newSession.mockResolvedValueOnce({ sessionId: "sess-5", models: {}, modes: {} });

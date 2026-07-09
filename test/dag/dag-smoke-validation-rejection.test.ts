@@ -45,8 +45,8 @@ vi.mock("../../src/management/session-name-store.js", () => ({
 	SessionNameStore: vi.fn(),
 }));
 vi.mock("../../src/logger.js", () => ({
-	createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
-	createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+	createFileLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+	createNoopLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 vi.mock("../../src/core/health-monitor.js", () => ({ HealthMonitor: vi.fn() }));
 vi.mock("../../src/adapter-factory.js", () => ({ createAdapter: vi.fn() }));

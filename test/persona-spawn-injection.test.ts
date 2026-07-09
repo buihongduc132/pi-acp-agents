@@ -32,7 +32,7 @@ vi.mock("../src/management/runtime-paths.js", () => ({
 		sessionNameRegistryFile: "/mock/runtime/session-name-registry.json", dagDir: "/mock/runtime/dag", dagIndexFile: "/mock/runtime/dag/dag-index.json",
 	}),
 }));
-vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }), createNoopLogger: () => ({ info: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
+vi.mock("../src/logger.js", () => ({ createFileLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }), createNoopLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }) }));
 vi.mock("../src/core/circuit-breaker.js", () => ({ AcpCircuitBreaker: vi.fn() }));
 vi.mock("../src/core/health-monitor.js", () => ({ HealthMonitor: vi.fn() }));
 vi.mock("../src/adapter-factory.js", () => ({ createAdapter: vi.fn() }));

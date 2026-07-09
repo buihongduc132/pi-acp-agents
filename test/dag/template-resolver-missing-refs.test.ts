@@ -15,28 +15,28 @@ import { TemplateResolver } from "../../src/dag/template-resolver.js";
  */
 describe("TemplateResolver — missing reference detection (task 4.7)", () => {
 	it("logs a warning when an unresolved {<step>.output} reference remains", () => {
-		const logger = { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() };
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 		const resolver = new TemplateResolver({ logger: logger as any });
 		resolver.resolve("Use {ghost.output}", {}, {}, {});
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 	});
 
 	it("logs a warning when an unresolved {<step>.status} reference remains", () => {
-		const logger = { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() };
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 		const resolver = new TemplateResolver({ logger: logger as any });
 		resolver.resolve("status: {ghost.status}", {}, {}, {});
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 	});
 
 	it("logs a warning when an unresolved {dag.args.<key>} reference remains", () => {
-		const logger = { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() };
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 		const resolver = new TemplateResolver({ logger: logger as any });
 		resolver.resolve("lang: {dag.args.missing}", {}, {}, {});
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 	});
 
 	it("does NOT log a warning when all references resolve successfully", () => {
-		const logger = { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() };
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 		const resolver = new TemplateResolver({ logger: logger as any });
 		resolver.resolve(
 			"{a.output} {a.status} {dag.args.lang}",
@@ -48,14 +48,14 @@ describe("TemplateResolver — missing reference detection (task 4.7)", () => {
 	});
 
 	it("does NOT log a warning for a prompt with no template variables", () => {
-		const logger = { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() };
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 		const resolver = new TemplateResolver({ logger: logger as any });
 		resolver.resolve("plain prompt with no variables", {}, {}, {});
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("includes the unresolved reference text in the warning message", () => {
-		const logger = { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() };
+		const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 		const resolver = new TemplateResolver({ logger: logger as any });
 		resolver.resolve("Use {ghost.output} now", {}, {}, {});
 		expect(logger.warn).toHaveBeenCalledTimes(1);
