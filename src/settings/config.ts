@@ -65,10 +65,10 @@ export const ACP_TOOL_NAMES = [
 	"acp_spawn",
 	"acp_msg",
 	"acp_governance",
-	"acp_status",
 	"acp_fanout",
 	"acp_task",
 	"acp_dag",
+	// Legacy names kept for OR-gate backward-compat (user config keys):
 	"acp_task_update",
 	"acp_message",
 	// ACP Hooks policy tools

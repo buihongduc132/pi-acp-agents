@@ -1,6 +1,11 @@
-vi.mock("../src/hooks/policy-tools.js", () => ({ registerHooksPolicyTools: vi.fn() }));
 /**
- * Tests for the unified 7-tool ACP surface registered by index.ts.
+ * Tests for the unified ACP tool surface registered by index.ts.
+ *
+ * Surface = 9 tools: 7 ACP core (consolidated from 11) + 2 ACP hooks policy
+ * (acp_hooks_policy_get / acp_hooks_policy_set, registered by default).
+ *
+ * registerHooksPolicyTools is intentionally NOT mocked here so the count
+ * assertion reflects the real registered surface.
  *
  * Old surface (acp_prompt, acp_cancel, acp_broadcast, acp_session_* , acp_worker_*,
  * acp_delegate, acp_compare, governance/doctor/runtime/env/event_log/cleanup/prune)
@@ -138,7 +143,8 @@ describe("ACP Extension Tools", () => {
 		return h;
 	}
 
-it("registers exactly the unified 7 tools (second-wave consolidation)", () => { expect(tools.size).toBe(7); });
+it("registers exactly 9 tools (7 ACP core + 2 hooks policy)", () => { expect(tools.size).toBe(9); });
+	it("registers the 2 hooks policy tools (full surface, no mock)", () => { expect(tools.has("acp_hooks_policy_get")).toBe(true); expect(tools.has("acp_hooks_policy_set")).toBe(true); });
 
 	it("acp_status overall", async () => { m.sm.size = 1; m.sm.list.mockReturnValue([mkSession("s1")]); const r = await exec("acp_status", {}); expect(r.content[0].text).toContain("Agent Servers: 2 configured"); });
 	it("acp_status specific", async () => { m.sm.get.mockReturnValue(mkSession("s1")); const r = await exec("acp_status", { session_id: "s1" }); expect(r.content[0].text).toContain("Session: s1"); });

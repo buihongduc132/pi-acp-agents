@@ -9,45 +9,53 @@
 import type { AcpToolSettings, AcpToolSettingsInput, AcpToolName } from "./config.js";
 import { ACP_TOOL_NAMES, readGlobalSettings, writeGlobalSettings, loadSettings } from "./config.js";
 
+// Unified ACP core tools (the 7 consolidated surface) plus legacy aliases
+// for backward-compat. Legacy aliases map to the unified tool that now
+// provides the capability (OR-gate in index.ts honors legacy config keys).
 const TOOL_GROUPS: { label: string; tools: AcpToolName[] }[] = [
 	{
-		label: "Core",
-		tools: ["acp_prompt", "acp_status"],
+		label: "Spawn & prompt (core)",
+		tools: ["acp_spawn"],
 	},
 	{
-		label: "Session",
+		label: "Messaging",
 		tools: [
-			"acp_session_new", "acp_session_load", "acp_session_set_model",
-			"acp_session_set_mode", "acp_cancel",
+			"acp_msg",
+			"acp_message", // legacy alias → acp_msg (OR-gate)
 		],
-	},
-	{
-		label: "Lifecycle",
-		tools: ["acp_session_list", "acp_session_shutdown", "acp_session_kill", "acp_prune"],
-	},
-	{
-		label: "Coordination",
-		tools: ["acp_delegate", "acp_broadcast", "acp_compare"],
-	},
-	{
-		label: "Task",
-		tools: [
-			"acp_task_create", "acp_task_list", "acp_task_get", "acp_task_assign",
-			"acp_task_set_status", "acp_task_dependency_add", "acp_task_dependency_remove",
-			"acp_task_clear",
-		],
-	},
-	{
-		label: "Message",
-		tools: ["acp_message_send", "acp_message_list"],
 	},
 	{
 		label: "Governance",
-		tools: ["acp_plan_request", "acp_plan_resolve", "acp_model_policy_get", "acp_model_policy_check"],
+		tools: ["acp_governance"],
 	},
 	{
-		label: "Runtime",
-		tools: ["acp_doctor", "acp_runtime_info", "acp_env", "acp_event_log", "acp_cleanup"],
+		label: "Status & lifecycle",
+		tools: ["acp_status"],
+	},
+	{
+		label: "Fan-out (broadcast/compare)",
+		tools: ["acp_fanout"],
+	},
+	{
+		label: "Tasks",
+		tools: [
+			"acp_task",
+			"acp_task_create", // legacy alias → acp_task (OR-gate)
+			"acp_task_update", // legacy alias → acp_task (OR-gate)
+		],
+	},
+	{
+		label: "DAG delegation",
+		tools: [
+			"acp_dag",
+			"acp_dag_submit", // legacy alias → acp_dag (OR-gate)
+			"acp_dag_status", // legacy alias → acp_dag (OR-gate)
+			"acp_dag_cancel", // legacy alias → acp_dag (OR-gate)
+		],
+	},
+	{
+		label: "Hooks policy",
+		tools: ["acp_hooks_policy_get", "acp_hooks_policy_set"],
 	},
 ];
 

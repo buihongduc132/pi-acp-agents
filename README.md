@@ -30,20 +30,20 @@
 
 ## What works vs what does not
 
-Status as of `0.4.0`. Verified by full test suite (`npx vitest run` → 1627 passed / 0 failed / 83 skipped / 1 todo). Counts: **16 tools registered** (verified via `rg -c 'pi.registerTool' index.ts`), **42 entries** in `ACP_TOOL_NAMES` legacy schema.
+Status as of `0.5.0`. Verified by full test suite (`npx vitest run` → 2081 passed / 0 failed / 104 skipped / 1 todo). Consolidated tool surface: **9 tools registered** (7 ACP core + 2 ACP hooks policy), down from the legacy 33-tool surface. See [Tool surface](#tool-surface).
 
 ### ✅ Working
 
 | Capability | Notes |
 |---|---|
-| `acp_prompt` (single agent) | Session create / reuse / archive-reload |
-| `acp_status` (diagnostic) | Agent list, sessions, circuit breaker |
-| `acp_cancel` (in-flight prompt abort) | Calls `adapter.cancel()`, archives handle |
-| `acp_broadcast` (one prompt → N agents) | Scoped to caller session's agents |
-| `acp_task_create` / `acp_task_update` | Multiplexed: status / assignee / deps / bulk `*` filter |
-| `acp_message` (send + list) | DM / steer / broadcast via `kind` param |
-| `acp_dag_submit` / `acp_dag_status` / `acp_dag_cancel` | Wave-based topological DAG execution, persistent resume |
-| `acp_worker_spawn` / `_list` / `_steer` / `_shutdown` / `_kill` / `_prune` | Persistent named workers in `WorkerStore` |
+| `acp_spawn` (single agent) | Spawn a session + optional prompt; absorbs legacy acp_prompt / acp_session_new |
+| `acp_msg` (messaging) | Session prompt/steer/cancel + mailbox send/list; absorbs acp_message |
+| `acp_status` (diagnostic) | Agent list, sessions, circuit breaker; absorbs acp_doctor / acp_runtime_info |
+| `acp_fanout` (broadcast/compare) | Same prompt → N agents; absorbs acp_broadcast / acp_compare |
+| `acp_governance` | Plan request/resolve + model policy |
+| `acp_task` (action: create\|update) | Unified task tool: status / assignee / deps / bulk `*` filter |
+| `acp_dag` (action: submit\|status\|cancel) | Wave-based topological DAG execution, persistent resume |
+| `acp_hooks_policy_get` / `acp_hooks_policy_set` | Runtime hooks failure-policy inspection + mutation |
 | **Alias resolver** (failover + race) | `AliasResolver` class — sequential fallback OR parallel first-wins with cancel of losers |
 | **Circuit breaker** | 3 failures → open, 60s → half-open, auto-recover |
 | **Health monitor** | 30s background polling; distinct no-response vs completed-idle timers |
@@ -61,7 +61,7 @@ Status as of `0.4.0`. Verified by full test suite (`npx vitest run` → 1627 pas
 
 | Gap | Status |
 |---|---|
-| **One-call parallel batch delegate** | No `acp_delegate_parallel` — must `acp_worker_spawn` × N + `acp_prompt` × N |
+| **One-call parallel batch delegate** | No single-call parallel batch — use `acp_fanout` (broadcast/compare) instead of spawning N sessions manually |
 | **Plan approval flow as tool** | `acp_plan_request` / `acp_plan_resolve` are command-only stubs, not tools |
 | **Hooks policy** | No `hooks_policy_*` — retry governance absent |
 | **Model policy as tool** | `acp_model_policy_get` / `_check` are command-only |
@@ -156,7 +156,7 @@ pi install npm:@buihongduc132/pi-acp-agents
 3. Use in pi:
 
    ```
-   Use the acp_prompt tool to ask gemini "What is the capital of France?"
+   Use the acp_spawn tool to spawn a gemini session, then acp_msg to ask "What is the capital of France?"
    ```
 
 For full usage patterns, DAG examples, alias configuration, and worker orchestration see [`docs/USAGE.md`](docs/USAGE.md).
@@ -165,26 +165,19 @@ For full usage patterns, DAG examples, alias configuration, and worker orchestra
 
 ## Tool surface
 
-**16 tools registered** (gated by `/acp settings` per-tool toggles):
+**9 tools registered** (7 ACP core + 2 hooks policy, gated by `/acp settings` per-tool toggles):
 
 | Tool | Purpose |
 |---|---|
-| `acp_prompt` | Send a prompt to an ACP agent, get the text response |
-| `acp_status` | Show configured agents, active sessions, circuit breaker state |
-| `acp_cancel` | Cancel an ongoing prompt by ID or friendly name |
-| `acp_broadcast` | Send same prompt to multiple agents in parallel |
-| `acp_task_create` | Create a persistent task in the runtime task store |
-| `acp_task_update` | Multiplexed mutations: status, assignee, deps, result, bulk `*` |
-| `acp_message` | Send or list messages (dm / steer / broadcast) |
-| `acp_dag_submit` | Submit a DAG of tasks (validates, persists, starts background exec) |
-| `acp_dag_status` | Get DAG state by `dagId`, or list all DAGs when called without it |
-| `acp_dag_cancel` | Cancel a running DAG |
-| `acp_worker_spawn` | Spawn a persistent named worker |
-| `acp_worker_list` | List workers + status |
-| `acp_worker_steer` | In-flight redirect — inject context mid-prompt |
-| `acp_worker_shutdown` | Graceful shutdown |
-| `acp_worker_kill` | Force kill |
-| `acp_worker_prune` | Prune stale workers |
+| `acp_spawn` | Spawn a session + optional prompt (absorbs acp_prompt / acp_session_new) |
+| `acp_msg` | Session prompt/steer/cancel + mailbox send/list (absorbs acp_message / acp_cancel) |
+| `acp_governance` | Plan request/resolve + model policy (absorbs acp_plan_*, acp_model_policy_*) |
+| `acp_status` | Agents, sessions, circuit breaker, cleanup, prune (absorbs acp_doctor / acp_runtime_info / acp_cleanup) |
+| `acp_fanout` | Broadcast to N agents + compare mode (absorbs acp_broadcast / acp_compare) |
+| `acp_task` | Unified task tool: action:'create' or action:'update' (absorbs acp_task_create / acp_task_update) |
+| `acp_dag` | DAG delegation: action:'submit'\|'status'\|'cancel' (absorbs acp_dag_submit / _status / _cancel) |
+| `acp_hooks_policy_get` | Inspect the ACP hooks failure policy |
+| `acp_hooks_policy_set` | Update the ACP hooks failure policy |
 
 **Slash command surface** (`/acp ...`):
 
@@ -259,7 +252,7 @@ For DAG executor internals, persistence model, and resume semantics see [`docs/U
 
 ## Alias resolver + fallback chains
 
-Resolves an alias name to a concrete agent using configurable strategies. Used internally by `acp_prompt` / `acp_delegate` when called with an alias name.
+Resolves an alias name to a concrete agent using configurable strategies. Used internally by `acp_spawn` / `acp_fanout` when called with an alias name.
 
 | Strategy | Behavior |
 |---|---|
@@ -274,16 +267,7 @@ For alias configuration schema and examples see [`docs/USAGE.md`](docs/USAGE.md)
 
 ## Persistent workers
 
-Spawn long-lived named workers via `acp_worker_spawn`. Workers persist across task completions and are managed via:
-
-| Tool | Purpose |
-|---|---|
-| `acp_worker_spawn` | Spawn worker + bind to ACP session + optional init prompt |
-| `acp_worker_list` | List workers + status (online / offline / busy / disposed) |
-| `acp_worker_steer` | In-flight redirect — inject context mid-prompt |
-| `acp_worker_shutdown` | Graceful shutdown |
-| `acp_worker_kill` | Force kill |
-| `acp_worker_prune` | Prune stale workers |
+Spawn long-lived named workers via `acp_spawn`. Workers persist across task completions and are managed via the unified tools:
 
 Workers share the caller's filesystem (no `git worktree` isolation). For parallel worktree-isolated delegation use the `teams` pi-plugin instead.
 
@@ -343,13 +327,13 @@ For aliases, model policy, and runtime store paths see [`docs/USAGE.md`](docs/US
 ┌─────────────────────────────────────────────────────┐
 │                    pi agent                          │
 │                                                      │
-│  acp_prompt ──┐                                      │
+│  acp_spawn ───┐                                      │
 │  acp_status ──┤                                      │
-│  acp_cancel ──┤──► AliasResolver ──► Coordinator ──┐ │
-│  acp_dag_* ───┤                       │            │ │
-│  acp_worker_* ┤                       ▼            │ │
-│  acp_message ─┤              AcpCircuitBreaker     │ │
-│  acp_task_* ──┘                       │            │ │
+│  acp_msg ─────┤──► AliasResolver ──► Coordinator ──┐ │
+│  acp_dag ─────┤                       │            │ │
+│  acp_fanout ──┤                       ▼            │ │
+│  acp_task ────┤              AcpCircuitBreaker     │ │
+│  acp_governance┘                       │            │ │
 │                              ┌────────┴────────┐   │ │
 │                              │ Adapter Factory │   │ │
 │                              └────┬───────┬────┘   │ │
@@ -449,7 +433,7 @@ git push --follow-tags   # triggers CI → auto-publish with provenance
 | Topic | Location |
 |---|---|
 | **Full usage guide** (DAG examples, alias config, worker patterns, slash command reference) | [`docs/USAGE.md`](docs/USAGE.md) |
-| **Tool consolidation plan** (39 → 7 multiplexed tools) | [`../pi-plugins/flow/intentions/pi-acp-agents/tool-consolidation.md`](https://github.com/buihongduc132/pi-plugins/blob/main/flow/intentions/pi-acp-agents/tool-consolidation.md) |
+| **Tool consolidation plan** (33 → 7 ACP core multiplexed tools; 9 total with hooks policy) | [`../pi-plugins/flow/intentions/pi-acp-agents/tool-consolidation.md`](https://github.com/buihongduc132/pi-plugins/blob/main/flow/intentions/pi-acp-agents/tool-consolidation.md) |
 | **ACP vs teams gap analysis** | [`../pi-plugins/flow/findings/acp-vs-teams-analysis.md`](https://github.com/buihongduc132/pi-plugins/blob/main/flow/findings/acp-vs-teams-analysis.md) |
 | **DAG delegation design** | [`openspec/changes/archive/2026-06-20-acp-dag-delegation/`](openspec/changes/archive/2026-06-20-acp-dag-delegation/) |
 | **DAG widget design** | [`openspec/changes/archive/2026-06-22-acp-dag-widget/`](openspec/changes/archive/2026-06-22-acp-dag-widget/) |

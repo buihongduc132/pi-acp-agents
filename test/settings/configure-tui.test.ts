@@ -99,7 +99,7 @@ describe("configureToolSettings", () => {
 				select: vi.fn(async (_prompt: string, items: string[]) => {
 					selectCount++;
 					if (selectCount === 1) {
-						return items.find((i: string) => i.startsWith("Core"));
+						return items.find((i: string) => i.startsWith("Messaging"));
 					}
 					if (selectCount === 2) {
 						return "Disable";
@@ -113,7 +113,7 @@ describe("configureToolSettings", () => {
 		};
 		const result = await configureToolSettings(ctx, tmpDir);
 		expect(result).not.toBeNull();
-		expect(result!.tools.acp_prompt.enabled).toBe(false);
+		expect(result!.tools.acp_msg.enabled).toBe(false);
 		expect(result!.tools.acp_status.enabled).toBe(true);
 		expect(ctx.ui.notify).toHaveBeenCalledWith(
 			expect.stringContaining("saved"),
@@ -125,7 +125,7 @@ describe("configureToolSettings", () => {
 		const { join } = require("node:path");
 		const settingsPath = join(tmpDir, "settings.json");
 		writeFileSync(settingsPath, JSON.stringify({
-			tools: { acp_prompt: { enabled: false } },
+			tools: { acp_msg: { enabled: false } },
 		}));
 
 		let selectCount = 0;
@@ -138,7 +138,7 @@ describe("configureToolSettings", () => {
 				select: vi.fn(async (_prompt: string, items: string[]) => {
 					selectCount++;
 					if (selectCount === 1) {
-						return items.find((i: string) => i.startsWith("Core"));
+						return items.find((i: string) => i.startsWith("Messaging"));
 					}
 					if (selectCount === 2) {
 						return "Enable";
@@ -152,6 +152,6 @@ describe("configureToolSettings", () => {
 		};
 		const result = await configureToolSettings(ctx, tmpDir);
 		expect(result).not.toBeNull();
-		expect(result!.tools.acp_prompt.enabled).toBe(true);
+		expect(result!.tools.acp_msg.enabled).toBe(true);
 	});
 });

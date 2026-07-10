@@ -38,65 +38,51 @@ Aliases: /acp-doctor, /acp-config
 
 ### Communication
 
-#### `acp_prompt`
-Send a prompt to an ACP agent, get the text response.
+#### `acp_spawn`
+Spawn an ACP agent session with an optional prompt. Consolidates the legacy `acp_prompt` (one-shot) and `acp_session_new`.
 
 ```jsonc
 {
-  "message": "What is the capital of France?",
-  "agent": "gemini",              // optional, defaults to defaultAgent or alias
+  "agent": "gemini",            // optional, defaults to defaultAgent or alias
+  "prompt": "What is the capital of France?",  // optional — omit for a long-lived idle session
   "cwd": "/path/to/project",      // optional
-  "dispose": false,               // optional, true = ephemeral session auto-disposed
-  "session_id": "...",            // optional, reuse session
-  "session_name": "my-research"   // optional, reuse or assign friendly name
+  "name": "my-research",         // optional, friendly session name
+  "async": false                  // optional, true = fire-and-forget
 }
 ```
 
-If `session_id` / `session_name` provided: reuses that session. If unknown: archived session is reloaded. Otherwise: new session created. `dispose: true` removes the session from the registry and disposes the adapter after the prompt completes.
-
 #### `acp_status`
-Diagnostic — configured agents, active sessions, circuit breaker state. No params.
+Diagnostic — configured agents, active sessions, circuit breaker state. With `action:'cleanup'`/`'prune'` it absorbs lifecycle ops (session removal, task clearing, stale pruning).
 
-#### `acp_cancel`
-Cancel an in-flight prompt by ID or friendly name.
-
-```jsonc
-{ "session_id": "..." }   // or { "session_name": "my-research" }
-```
-
-Calls `adapter.cancel()` (Ctrl-C equivalent), marks handle completed, archives.
-
-#### `acp_broadcast`
-Same prompt → N agents in parallel. Scoped to caller session's agents.
+#### `acp_fanout`
+Same prompt → N agents in parallel, or `compare:true` to collect + compare responses. Consolidates the legacy `acp_broadcast` + `acp_compare`.
 
 ```jsonc
 {
   "message": "Analyze this code",
   "agents": ["gemini", "claude", "codex"],  // optional, defaults to all
-  "cwd": "/path"
+  "compare": true               // optional, compare mode
 }
 ```
 
 ### Tasks
 
-#### `acp_task_create`
-Create a persistent task in the runtime task store.
+#### `acp_task`
+Unified task tool. `action:'create'` creates a task; `action:'update'` mutates one (status, assignee, deps, result, bulk `*`). Consolidates the legacy `acp_task_create` + `acp_task_update`.
 
 ```jsonc
+// create
 {
+  "action": "create",
   "subject": "Fix auth bug",
   "description": "...",
   "assignee": "claude",       // optional
   "deps": ["task-001"]        // optional task IDs this depends on
 }
-```
 
-#### `acp_task_update`
-Multiplexed mutations: status, assignee, deps, result, bulk `*`.
-
-```jsonc
-// Single task
+// update (single task)
 {
+  "action": "update",
   "task_id": "task-001",
   "status": "in_progress",     // pending | in_progress | completed | deleted
   "assignee": "claude",        // or "" to unassign
@@ -105,8 +91,9 @@ Multiplexed mutations: status, assignee, deps, result, bulk `*`.
   "result": "Fixed in commit abc123"
 }
 
-// Bulk
+// update (bulk)
 {
+  "action": "update",
   "task_id": "*",
   "filter": "completed",       // completed | pending | in_progress
   "status": "deleted"
@@ -115,11 +102,11 @@ Multiplexed mutations: status, assignee, deps, result, bulk `*`.
 
 ### Messaging
 
-#### `acp_message`
-Send or list messages. Consolidates send + list.
+#### `acp_msg`
+Unified messaging tool. `action:'send'` sends a mailbox message; `action:'list'` returns messages. Consolidates session-level prompt/steer/cancel + the legacy `acp_message` (mailbox send/list).
 
 ```jsonc
-// Send
+// send (mailbox)
 {
   "action": "send",
   "to": "claude",              // or "*" for broadcast
@@ -127,12 +114,23 @@ Send or list messages. Consolidates send + list.
   "kind": "dm"                 // dm | steer | broadcast (auto-inferred if to="*")
 }
 
-// List
+// list (mailbox)
 {
   "action": "list",
   "recipient": "claude"        // optional, lists inbox for this agent
   // or omit for list-all
 }
+```
+
+Session-level messaging (prompt / steer / cancel) uses the same `acp_msg` tool with a `to` that targets a session id or name:
+
+```jsonc
+// prompt an existing session by name
+{ "to": "my-research", "message": "Summarize the findings" }
+
+// cancel an in-flight turn
+{ "to": "my-research", "message": "please stop", "cancel": true }
+```
 ```
 
 ### DAG delegation
@@ -241,7 +239,7 @@ Aliases route a single logical agent name to a chain of concrete agents. Configu
 
 ### Using an alias
 
-`acp_prompt` and `acp_delegate` accept an alias name as the `agent` parameter. The resolver picks the concrete agent transparently.
+`acp_spawn` and `acp_fanout` accept an alias name as the `agent` parameter. The resolver picks the concrete agent transparently.
 
 ```jsonc
 { "agent": "smart", "message": "Refactor the auth module" }
@@ -326,9 +324,22 @@ All 4 session-scoped stores require `sessionId` and throw synchronously if empty
 
 ## Migration guide
 
+### From 0.4.x → 0.5.0 (consolidation)
+
+1. **Tool surface consolidated 11 → 7 ACP core tools** (9 total with hooks policy).
+   - `acp_prompt` + `acp_session_new` → `acp_spawn`
+   - `acp_message` + `acp_cancel` → `acp_msg`
+   - `acp_task_create` + `acp_task_update` → `acp_task` (action: create|update)
+   - `acp_dag_submit` + `acp_dag_status` + `acp_dag_cancel` → `acp_dag` (action: submit|status|cancel)
+   - `acp_broadcast` + `acp_compare` → `acp_fanout`
+   - `acp_plan_*` + `acp_model_policy_*` → `acp_governance`
+   - `acp_doctor` + `acp_runtime_info` + `acp_cleanup` → `acp_status` (action: cleanup|prune)
+2. **Legacy config keys preserved** — the OR-gate in `index.ts` still honors legacy names (`acp_task_create`, `acp_message`, `acp_dag_submit`, etc.) so existing user settings continue to work.
+3. **No breaking config changes** — existing `config.json` continues to work.
+
 ### From 0.3.x → 0.4.0
 
-1. **DAG feature shipped** — `acp_dag_submit` / `_status` / `_cancel` tools now registered.
+1. **DAG feature shipped** — `acp_dag` tool (action: submit|status|cancel) now registered.
 2. **Session-scoped stores** — runtime paths partitioned. On first run, `legacy-migration.ts` moves flat stores to `<root>/legacy/` non-destructively (idempotent, concurrency-marker guarded).
 3. **DAG widget** — TUI now shows DAG state via `dagIndexEntryToWidgetDag` helper.
 4. **No breaking config changes** — existing `config.json` continues to work.
@@ -336,9 +347,9 @@ All 4 session-scoped stores require `sessionId` and throw synchronously if empty
 ### From 0.2.x → 0.3.x
 
 1. **`acp_message` consolidated** — was `acp_message_send` + `acp_message_list`, now one tool with `action` param.
-2. **`acp_task_*` consolidated** — was 5 tools, now `acp_task_create` + `acp_task_update`.
+2. **`acp_task_*` consolidated** — was 5 tools, now `acp_task` with action: create|update.
 3. **Circuit breaker isolation** — per-agent, not global.
 
-### Roadmap (multiplex)
+### Roadmap
 
-The `ACP_TOOL_NAMES` array in `src/settings/config.ts` has 39 entries (settings toggle schema); only 13 tools are actually registered. See [tool consolidation plan](https://github.com/buihongduc132/pi-plugins/blob/main/flow/intentions/pi-acp-agents/tool-consolidation.md) for the planned 33 → 7 multiplex refactor.
+The tool consolidation (33 → 7 ACP core tools) is complete. The `ACP_TOOL_NAMES` array retains legacy names for backward-compat OR-gate config keys. See [tool consolidation plan](https://github.com/buihongduc132/pi-plugins/blob/main/flow/intentions/pi-acp-agents/tool-consolidation.md) for the design rationale.

@@ -204,7 +204,7 @@ describe("Unified ACP Tool Surface (RED)", () => {
 
 	// ── unify-red-removal: registry shape ──────────────────────────────
 	describe("registry shape (unify-red-removal)", () => {
-		it("registers exactly the 7 target tools (second-wave consolidation: 11 → 7)", () => {
+		it("registers exactly the 7 ACP core target tools (second-wave consolidation: 11 → 7; hooks policy mocked out)", () => {
 			expect(Array.from(tools.keys()).sort()).toEqual([...TARGET_TOOLS].sort());
 		});
 

@@ -4,6 +4,13 @@
  * Provides multi-agent coordination, task management, async delegation,
  * and mailbox messaging. Requires pi-acp-agents (base) to be loaded first.
  *
+ * Tool surface aligns with the base package's consolidated ACP tool surface:
+ * registers `acp_task` (action: create|update) and `acp_msg` (action: send|list)
+ * — the SAME unified names the base package registers — instead of the legacy
+ * `acp_task_create` / `acp_task_update` / `acp_message` names that were removed
+ * during the 11 → 7 consolidation. This prevents duplicate-name proliferation
+ * when both packages are loaded together.
+ *
  * R-SP1: Fails loudly but never crashes when base is missing.
  * Filesystem-first: reads base's runtime dir, creates own store instances.
  */
@@ -109,91 +116,122 @@ export default function (pi: ExtensionAPI) {
 
   // ── Extension tools ─────────────────────────────────────────────────────
 
+  // Unified acp_task — consolidates acp_task_create + acp_task_update.
+  // Uses the SAME tool name as the base package's acp_task so that when both
+  // packages are loaded there is no duplicate-name proliferation. If the base
+  // package already registers acp_task, this extension's registration is a
+  // no-op override (same name). Delegates to the shared AcpTaskStore.
   pi.registerTool({
-    name: "acp_task_create",
-    label: "ACP Task Create",
-    description: "Create a persistent ACP task in the runtime task store.",
-    promptSnippet: "acp_task_create — create ACP task",
+    name: "acp_task",
+    label: "ACP Task (advanced)",
+    description:
+      "Create or update a persistent ACP task. action:'create' adds a new task; action:'update' modifies an existing one (status, assignee, deps, result).",
+    promptSnippet: "acp_task — create/update ACP tasks (advanced extension)",
     parameters: Type.Object({
-      subject: Type.String({ description: "Short task subject" }),
+      action: Type.Optional(
+        Type.String({
+          description: "create or update (default: create if no task_id, else update)",
+        }),
+      ),
+      subject: Type.Optional(Type.String({ description: "Task subject (required for create)" })),
       description: Type.Optional(Type.String({ description: "Longer task details" })),
-      deps: Type.Optional(Type.Array(Type.String(), { description: "Task IDs this task depends on" })),
+      deps: Type.Optional(
+        Type.Array(Type.String(), { description: "Task IDs this depends on (create)" }),
+      ),
+      task_id: Type.Optional(Type.String({ description: "Task ID (required for update)" })),
+      status: Type.Optional(
+        Type.String({
+          description: "New status: pending, in_progress, completed, deleted",
+        }),
+      ),
       assignee: Type.Optional(Type.String({ description: "Optional agent assignee" })),
-    }),
-    async execute(_toolCallId, params) {
-      try {
-        const task = taskStore.create({
-          subject: params.subject,
-          description: params.description,
-          deps: params.deps ?? [],
-          assignee: params.assignee,
-        });
-        eventLog.append("task_created", { taskId: task.id, subject: task.subject });
-        return { content: [textContent(formatJson(task))], details: task };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { content: [textContent(`Task create failed: ${msg}`)], details: { ok: false } };
-      }
-    },
-  });
-
-  pi.registerTool({
-    name: "acp_task_update",
-    label: "ACP Task Update",
-    description: "Update ACP task properties: assign, status, deps, clear, priority.",
-    promptSnippet: "acp_task_update — update ACP task",
-    parameters: Type.Object({
-      task_id: Type.String({ description: "Task ID" }),
-      status: Type.Optional(Type.String({ description: "New status: pending, in_progress, completed, deleted" })),
-      assignee: Type.Optional(Type.String({ description: "Assignee name; omit to clear" })),
       result: Type.Optional(Type.String({ description: "Optional task result text" })),
-      dep_id: Type.Optional(Type.String({ description: "Dependency task ID to add or remove" })),
-      dep_action: Type.Optional(Type.String({ description: "add or remove dependency" })),
+      dep_id: Type.Optional(
+        Type.String({ description: "Dependency task ID to add or remove" }),
+      ),
+      dep_action: Type.Optional(
+        Type.String({ description: "add or remove dependency" }),
+      ),
     }),
     async execute(_toolCallId, params) {
       try {
-        if (params.dep_id && params.dep_action === "add") {
-          const task = taskStore.addDependency(params.task_id, params.dep_id);
-          eventLog.append("task_dep_add", { taskId: params.task_id, depId: params.dep_id });
+        const action = params.action ?? (params.task_id ? "update" : "create");
+        if (action === "create") {
+          const task = taskStore.create({
+            subject: params.subject ?? "",
+            description: params.description,
+            deps: params.deps ?? [],
+            assignee: params.assignee,
+          });
+          eventLog.append("task_created", { taskId: task.id, subject: task.subject });
           return { content: [textContent(formatJson(task))], details: task };
         }
-        if (params.dep_id && params.dep_action === "remove") {
-          const task = taskStore.removeDependency(params.task_id, params.dep_id);
-          eventLog.append("task_dep_rm", { taskId: params.task_id, depId: params.dep_id });
+        if (action === "update") {
+          if (!params.task_id) {
+            return {
+              content: [textContent("task_id is required for update action.")],
+              details: { ok: false, error: "missing_task_id" },
+            };
+          }
+          if (params.dep_id && params.dep_action === "add") {
+            const task = taskStore.addDependency(params.task_id, params.dep_id);
+            eventLog.append("task_dep_add", { taskId: params.task_id, depId: params.dep_id });
+            return { content: [textContent(formatJson(task))], details: task };
+          }
+          if (params.dep_id && params.dep_action === "remove") {
+            const task = taskStore.removeDependency(params.task_id, params.dep_id);
+            eventLog.append("task_dep_rm", { taskId: params.task_id, depId: params.dep_id });
+            return { content: [textContent(formatJson(task))], details: task };
+          }
+          const task = taskStore.update(params.task_id, {
+            status: params.status,
+            assignee: params.assignee,
+            result: params.result,
+          });
+          eventLog.append("task_updated", { taskId: params.task_id, status: params.status });
           return { content: [textContent(formatJson(task))], details: task };
         }
-        const task = taskStore.update(params.task_id, {
-          status: params.status,
-          assignee: params.assignee,
-          result: params.result,
-        });
-        eventLog.append("task_updated", { taskId: params.task_id, status: params.status });
-        return { content: [textContent(formatJson(task))], details: task };
+        return {
+          content: [textContent(`Unknown action '${action}'. Use 'create' or 'update'.`)],
+          details: { ok: false, error: "unknown_action" },
+        };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        return { content: [textContent(`Task update failed: ${msg}`)], details: { ok: false } };
+        return { content: [textContent(`Task failed: ${msg}`)], details: { ok: false } };
       }
     },
   });
 
+  // Unified acp_msg — consolidates acp_message send+list.
+  // Uses the SAME tool name as the base package's acp_msg so there is no
+  // duplicate-name proliferation when both packages are loaded. Delegates to
+  // the shared MailboxManager.
   pi.registerTool({
-    name: "acp_message",
-    label: "ACP Message",
-    description: "Send/receive mailbox messages between ACP agents.",
-    promptSnippet: "acp_message — send/list ACP messages",
+    name: "acp_msg",
+    label: "ACP Message (advanced)",
+    description:
+      "Send or list mailbox messages between ACP agents. action:'send' sends a message; action:'list' returns the inbox for a recipient.",
+    promptSnippet: "acp_msg — send/list ACP messages (advanced extension)",
     parameters: Type.Object({
+      action: Type.Optional(
+        Type.String({
+          description: "send or list (default: send if message provided, else list)",
+        }),
+      ),
       to: Type.String({ description: "Recipient agent name or * for broadcast" }),
-      message: Type.Optional(Type.String({ description: "Message body" })),
+      message: Type.Optional(Type.String({ description: "Message body (required for send)" })),
       kind: Type.Optional(Type.String({ description: "dm, steer, or broadcast" })),
       from: Type.Optional(Type.String({ description: "Sender identity" })),
-      action: Type.Optional(Type.String({ description: "send or list (default: send if message provided, else list)" })),
     }),
     async execute(_toolCallId, params) {
       try {
         const action = params.action ?? (params.message ? "send" : "list");
         if (action === "send") {
           if (!params.message) {
-            return { content: [textContent("Message body is required for send action.")], details: { ok: false } };
+            return {
+              content: [textContent("Message body is required for send action.")],
+              details: { ok: false },
+            };
           }
           const msg = mailboxManager.send({
             to: params.to,
@@ -204,8 +242,17 @@ export default function (pi: ExtensionAPI) {
           eventLog.append("message_sent", { to: params.to, kind: msg.kind });
           return { content: [textContent(formatJson(msg))], details: msg };
         }
-        const messages = mailboxManager.listFor(params.to);
-        return { content: [textContent(formatJson(messages))], details: { count: messages.length, messages } };
+        if (action === "list") {
+          const messages = mailboxManager.listFor(params.to);
+          return {
+            content: [textContent(formatJson(messages))],
+            details: { count: messages.length, messages },
+          };
+        }
+        return {
+          content: [textContent(`Unknown action '${action}'. Use 'send' or 'list'.`)],
+          details: { ok: false, error: "unknown_action" },
+        };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         return { content: [textContent(`Message failed: ${msg}`)], details: { ok: false } };
@@ -220,7 +267,9 @@ export default function (pi: ExtensionAPI) {
     promptSnippet: "acp_compare — compare ACP agent responses",
     parameters: Type.Object({
       message: Type.String({ description: "Prompt to compare across agents" }),
-      agents: Type.Optional(Type.Array(Type.String(), { description: "Agent names. Default: all configured agents" })),
+      agents: Type.Optional(
+        Type.Array(Type.String(), { description: "Agent names. Default: all configured agents" }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
