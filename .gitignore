@@ -26,3 +26,14 @@ _pi_ralph_*.md
 .worktrees/
 flow/
 node_modules
+.env
+.env.*
+.env.local
+
+# Tooling artifacts (not project code)
+.agent/
+.amazonq/
+.opencode/
+.pi/
+_agent/
+_finding_hooks.md

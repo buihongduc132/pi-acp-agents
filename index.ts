@@ -678,7 +678,11 @@ export default function (pi: ExtensionAPI) {
 		_tui: unknown, theme: unknown,
 	): { render(width: number): string[]; dispose?(): void } => ({
 		render(width: number): string[] {
-			return acpPanel.render(theme as Parameters<typeof acpPanel.render>[0], width);
+			try {
+				return acpPanel.render(theme as Parameters<typeof acpPanel.render>[0], width);
+			} catch (e) {
+				return [`[acp-panel render error: ${(e as Error).message}]`];
+			}
 		},
 	});
 
@@ -1760,7 +1764,11 @@ export default function (pi: ExtensionAPI) {
       await ctx.ui.custom(
         (_tui: unknown, theme: unknown, _kb: unknown, done: (result: unknown) => void) => ({
           render(width: number): string[] {
-            return acpPanel.render(theme as Parameters<typeof acpPanel.render>[0], width);
+            try {
+              return acpPanel.render(theme as Parameters<typeof acpPanel.render>[0], width);
+            } catch (e) {
+              return [`[acp-panel render error: ${(e as Error).message}]`];
+            }
           },
           invalidate(): void {
             // Panel reads live state each render via deps; nothing to invalidate.

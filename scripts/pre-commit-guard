@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# pre-commit-guard 2026-07-10
+#
+# Guardrails for pi-acp-agents commits.
+# Rules:
+#   R-01 hook-present (meta — enforced by this file existing)
+#   R-02 no-env-files (FAIL)
+#   R-03 no-binary-secrets (WARN)
+#   R-05 tsc-typecheck (FAIL) — runs `tsc --noEmit` when TS files staged
+#   R-06 acp-panel-render-guard (FAIL) — render-call try/catch must stay
+#
+# Usage:
+#   .git/hooks/pre-commit          # normal pre-commit mode
+#   .git/hooks/pre-commit --replay <commit>   # audit a past commit
+#
+# Skip (emergency only, keep scoped):  PRECOMMIT_GUARD_SKIP=1 git commit ...
+
+set -euo pipefail
+
+MODE="normal"
+REPLAY_COMMIT=""
+
+if [[ "${1:-}" == "--replay" ]]; then
+  MODE="replay"
+  REPLAY_COMMIT="${2:-}"
+  if [[ -z "${REPLAY_COMMIT}" ]]; then
+    echo "usage: .git/hooks/pre-commit --replay <commit>" >&2
+    exit 2
+  fi
+fi
+
+# Locate repo root (works whether hook invoked from root or subdir)
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}"
+
+get_changed_files() {
+  if [[ "${MODE}" == "replay" ]]; then
+    git diff-tree --name-only -r "${REPLAY_COMMIT}"
+  else
+    git diff --cached --name-only
+  fi
+}
+
+get_numstat() {
+  if [[ "${MODE}" == "replay" ]]; then
+    git diff-tree --numstat -r "${REPLAY_COMMIT}"
+  else
+    git diff --cached --numstat
+  fi
+}
+
+get_file_content() {
+  local path="$1"
+  if [[ "${MODE}" == "replay" ]]; then
+    git show "${REPLAY_COMMIT}:${path}" 2>/dev/null || true
+  else
+    git show ":${path}" 2>/dev/null || true
+  fi
+}
+
+fail=0
+warn=0
+
+announce_replay() {
+  if [[ "${MODE}" == "replay" ]]; then
+    local parent
+    parent="$(git rev-parse "${REPLAY_COMMIT}^" 2>/dev/null || true)"
+    echo "[pre-commit-guard --replay] Replaying rules against commit: ${REPLAY_COMMIT} (parent: ${parent})"
+    echo "────────────────────────────────────────────────────────────"
+  fi
+}
+
+announce_replay
+
+# R-02 no-env-files (FAIL) — zero-tolerance, never logs contents
+env_hits=()
+while IFS= read -r file; do
+  [[ -z "${file}" ]] && continue
+  if [[ "${file}" =~ (^|/)\.env($|[^/]*$) ]]; then
+    env_hits+=("${file}")
+  fi
+done < <(get_changed_files)
+
+if [[ "${#env_hits[@]}" -gt 0 ]]; then
+  echo "R-02 no-env-files: .env file(s) are staged and will not be committed."
+  for f in "${env_hits[@]}"; do
+    echo "  → Unstage:  git reset HEAD -- ${f}"
+  done
+  fail=1
+else
+  [[ "${MODE}" == "replay" ]] && echo "  ✓ R-02 no-env-files: no .env files in ${REPLAY_COMMIT}"
+fi
+
+# R-03 no-binary-secrets (WARN)
+bin_hits=()
+while IFS=$'\t' read -r add del file; do
+  [[ -z "${file}" ]] && continue
+  if [[ "${add}" == "-" && "${del}" == "-" ]]; then
+    bin_hits+=("${file}")
+  fi
+done < <(get_numstat)
+
+if [[ "${#bin_hits[@]}" -gt 0 ]]; then
+  echo "WARN  R-03 no-binary-secrets: binary files staged"
+  for f in "${bin_hits[@]}"; do
+    echo "  → ${f}"
+  done
+  warn=1
+else
+  [[ "${MODE}" == "replay" ]] && echo "  ✓ R-03 no-binary-secrets: no binary files in ${REPLAY_COMMIT}"
+fi
+
+# R-05 tsc-typecheck (FAIL) — only when .ts files staged; skipped in replay
+# (replay can't run tsc against an old tree cheaply).
+has_ts=0
+if [[ "${MODE}" == "normal" ]]; then
+  while IFS= read -r file; do
+    [[ -z "${file}" ]] && continue
+    if [[ "${file}" == *.ts || "${file}" == "tsconfig.json" || "${file}" == *.json ]]; then
+      has_ts=1
+      break
+    fi
+  done < <(get_changed_files)
+
+  if [[ "${has_ts}" == "1" ]]; then
+    if [[ -x "node_modules/.bin/tsc" ]]; then
+      echo "R-05 tsc-typecheck: running tsc --noEmit ..."
+      if ! node_modules/.bin/tsc --noEmit; then
+        echo "R-05 tsc-typecheck: FAILED — type errors above. Commit blocked."
+        echo "  → Fix the errors, or scope-stash non-typed work."
+        fail=1
+      else
+        echo "  ✓ R-05 tsc-typecheck: clean"
+      fi
+    else
+      echo "WARN  R-05 tsc-typecheck: tsc not found in node_modules — skipped."
+      warn=1
+    fi
+  fi
+else
+  echo "  ~ R-05 tsc-typecheck: skipped in replay mode"
+fi
+
+# R-06 acp-panel-render-guard (FAIL)
+# Regression guard: every acpPanel.render(...) call site MUST be wrapped in a
+# try/catch that returns a safe error line. An uncaught render throw kills the
+# whole pi TUI (uncaughtException on the render timer tick). This rule fails
+# if index.ts has a bare `return acpPanel.render(` without a preceding `try`.
+# Checks the staged version (normal) or commit content (replay).
+render_hits=()
+while IFS= read -r file; do
+  [[ -z "${file}" ]] && continue
+  if [[ "${file}" == "index.ts" ]]; then
+    content="$(get_file_content "${file}")"
+    # Find bare `return acpPanel.render(` lines NOT preceded (within 2 lines) by `try`.
+    # awk: emit offending line numbers.
+    bad=$(echo "${content}" | awk '
+      /return acpPanel\.render\(/ {
+        bare=1
+        # look back up to 2 lines for a try
+        for (i=NR-1; i>=NR-2 && i>=1; i--) {
+          if (buf[i] ~ /try[[:space:]]*\{/) { bare=0; break }
+        }
+        if (bare) print NR
+      }
+      { buf[NR]=$0 }
+    ')
+    if [[ -n "${bad}" ]]; then
+      while IFS= read -r ln; do
+        render_hits+=("${file}:${ln}")
+      done <<< "${bad}"
+    fi
+  fi
+done < <(get_changed_files)
+
+if [[ "${#render_hits[@]}" -gt 0 ]]; then
+  echo "R-06 acp-panel-render-guard: bare acpPanel.render() without try/catch (kills TUI on throw):"
+  for f in "${render_hits[@]}"; do
+    echo "  → ${f}"
+  done
+  fail=1
+else
+  [[ "${MODE}" == "replay" ]] && echo "  ✓ R-06 acp-panel-render-guard: all render calls guarded in ${REPLAY_COMMIT}"
+fi
+
+if [[ "${MODE}" == "replay" ]]; then
+  echo "────────────────────────────────────────────────────────────"
+  if [[ "${fail}" -gt 0 || "${warn}" -gt 0 ]]; then
+    echo "[pre-commit-guard --replay] Result: one or more rules failed/warned for ${REPLAY_COMMIT}"
+    exit 1
+  fi
+  echo "[pre-commit-guard --replay] Result: all rules passed for ${REPLAY_COMMIT}"
+  exit 0
+fi
+
+if [[ "${fail}" -gt 0 ]]; then
+  exit 1
+fi
+
+exit 0
