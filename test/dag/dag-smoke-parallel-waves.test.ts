@@ -213,7 +213,7 @@ describe("DAG smoke — parallel wave execution (task 8.5)", () => {
 		});
 
 		// Submit the 3-wave DAG through the real tool surface.
-		const submit = await exec("acp_dag_submit", {
+		const submit = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "a", agent: "gemini", prompt: "Step A" },
 				{ id: "b", agent: "gemini", prompt: "Step B", dependsOn: ["a"] },
@@ -229,7 +229,7 @@ describe("DAG smoke — parallel wave execution (task 8.5)", () => {
 		// Poll acp_dag_status until the DAG reaches a terminal state.
 		let details: any;
 		for (let i = 0; i < 200; i++) {
-			const status = await exec("acp_dag_status", { dagId });
+			const status = await exec("acp_dag", { action: "status", dagId });
 			details = status.details;
 			if (details.status === "completed" || details.status === "failed") break;
 			await new Promise((r) => setTimeout(r, 20));

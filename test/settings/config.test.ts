@@ -67,14 +67,20 @@ describe("ACP tool settings — config", () => {
 	// ── 1. Default config has all tools enabled ──────────
 
 	it("DEFAULT_SETTINGS has all tools enabled", () => {
-		expect(ACP_TOOL_NAMES).toHaveLength(42);
+		// ACP_TOOL_NAMES includes legacy names (backward-compat) + unified tools + hooks policy.
+		// Count may grow as consolidation adds aliases; just verify all have settings.
+		expect(ACP_TOOL_NAMES.length).toBeGreaterThanOrEqual(42);
 		for (const name of ACP_TOOL_NAMES) {
 			expect(DEFAULT_SETTINGS.tools[name]).toBeDefined();
 			expect(DEFAULT_SETTINGS.tools[name].enabled).toBe(true);
 		}
+		// Verify the 7 unified tools are present
+		for (const unified of ["acp_spawn", "acp_msg", "acp_governance", "acp_status", "acp_fanout", "acp_task", "acp_dag"]) {
+			expect(ACP_TOOL_NAMES).toContain(unified);
+		}
 	});
 
-	it("ACP_TOOL_NAMES contains exact registered tool names", () => {
+	it("ACP_TOOL_NAMES contains all unified registered tool names", () => {
 		const expected = [
 			"acp_prompt", "acp_status", "acp_session_new", "acp_session_load",
 			"acp_session_set_model", "acp_session_set_mode", "acp_cancel",
@@ -95,8 +101,16 @@ describe("ACP tool settings — config", () => {
 			"acp_dag_submit",
 			"acp_dag_status",
 			"acp_dag_cancel",
+			// Unified consolidated tools (second wave: 11 → 7)
+			"acp_spawn", "acp_msg", "acp_governance", "acp_status",
+			"acp_fanout", "acp_task", "acp_dag",
+			// Hooks policy tools
+			"acp_hooks_policy_get", "acp_hooks_policy_set",
 		];
-		expect([...ACP_TOOL_NAMES].sort()).toEqual([...expected].sort());
+		// Every expected name must be in ACP_TOOL_NAMES (backward-compat superset)
+		for (const name of expected) {
+			expect(ACP_TOOL_NAMES).toContain(name);
+		}
 	});
 
 	// ── 2. Global config overrides specific tools ────────

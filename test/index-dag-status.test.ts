@@ -112,10 +112,10 @@ describe("acp_dag_status tool", () => {
 
 	const exec = (name: string, params: any) => tools.get(name)!.execute("t", params, undefined, undefined, ctx);
 
-	it("registers the acp_dag_status tool", () => {
-		expect(tools.has("acp_dag_status")).toBe(true);
-		const params = (tools.get("acp_dag_status").parameters as any).properties;
-		expect(params).toHaveProperty("dagId");
+	it("registers the acp_dag tool (action: status)", () => {
+		expect(tools.has("acp_dag")).toBe(true);
+		const params = (tools.get("acp_dag").parameters as any).properties;
+		expect(params).toHaveProperty("dag_id");
 	});
 
 	it("returns the full DAG state when dagId is provided", async () => {
@@ -135,7 +135,7 @@ describe("acp_dag_status tool", () => {
 		};
 		dagStoreMock.get.mockReturnValue(record);
 
-		const r = await exec("acp_dag_status", { dagId: "dag-1" });
+		const r = await exec("acp_dag", { action: "status", dagId: "dag-1" });
 
 		expect(dagStoreMock.get).toHaveBeenCalledWith("dag-1");
 		const payload = JSON.parse(r.content[0].text);
@@ -152,7 +152,7 @@ describe("acp_dag_status tool", () => {
 		];
 		dagStoreMock.listAll.mockReturnValue(entries);
 
-		const r = await exec("acp_dag_status", {});
+		const r = await exec("acp_dag", { action: "status",});
 
 		expect(dagStoreMock.listAll).toHaveBeenCalled();
 		const payload = JSON.parse(r.content[0].text);
@@ -164,7 +164,7 @@ describe("acp_dag_status tool", () => {
 	it("returns an empty list when no DAGs exist", async () => {
 		dagStoreMock.listAll.mockReturnValue([]);
 
-		const r = await exec("acp_dag_status", {});
+		const r = await exec("acp_dag", { action: "status",});
 
 		const payload = JSON.parse(r.content[0].text);
 		expect(payload.dags).toEqual([]);
@@ -173,7 +173,7 @@ describe("acp_dag_status tool", () => {
 	it("returns a not-found error when dagId does not exist", async () => {
 		dagStoreMock.get.mockReturnValue(null);
 
-		const r = await exec("acp_dag_status", { dagId: "missing" });
+		const r = await exec("acp_dag", { action: "status", dagId: "missing" });
 
 		expect(r.content[0].text).toContain('DAG "missing" not found');
 	});

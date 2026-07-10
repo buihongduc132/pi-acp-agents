@@ -271,7 +271,7 @@ describe("Unified ACP surface — branch coverage", () => {
 			expect(r.details.queued).toBe(true);
 		});
 		it("cancel on missing session returns cancelled:false", async () => {
-			const r = await exec("acp_msg", { to: "ghost", message: "x", cancel: true });
+			const r = await exec("acp_msg", { session_id: "ghost", message: "x", cancel: true });
 			expect(r.details.cancelled).toBe(false);
 		});
 		it("alive session prompt returns response", async () => {
@@ -301,7 +301,7 @@ describe("Unified ACP surface — branch coverage", () => {
 			// Target resolves to archived metadata (not in sessionMgr).
 			m.sm.get.mockReturnValue(undefined);
 			m.ad.loadSession.mockResolvedValueOnce(undefined);
-			const r = await exec("acp_msg", { to: "arch-1", message: "hi" });
+			const r = await exec("acp_msg", { session_id: "arch-1", message: "hi" });
 			expect(m.ad.spawn).toHaveBeenCalled();
 			expect(m.ad.prompt).toHaveBeenCalledWith("hi");
 			expect(r.content[0].text).toContain("response");
@@ -309,14 +309,14 @@ describe("Unified ACP surface — branch coverage", () => {
 		it("reopen falls back to newSession when loadSession fails", async () => {
 			m.sm.get.mockReturnValue(undefined);
 			m.ad.loadSession.mockRejectedValueOnce(new Error("unloadable"));
-			const r = await exec("acp_msg", { to: "arch-1", message: "hi" });
+			const r = await exec("acp_msg", { session_id: "arch-1", message: "hi" });
 			expect(m.ad.newSession).toHaveBeenCalled();
 			expect(r.content[0].text).toContain("response");
 		});
 		it("reopen spawn failure returns error", async () => {
 			m.sm.get.mockReturnValue(undefined);
 			m.ad.spawn.mockRejectedValueOnce(new Error("reopen-fail"));
-			const r = await exec("acp_msg", { to: "ghost", message: "hi" });
+			const r = await exec("acp_msg", { session_id: "ghost", message: "hi" });
 			expect(r.details.error).toContain("reopen-fail");
 		});
 	});
@@ -411,95 +411,95 @@ describe("Unified ACP surface — branch coverage", () => {
 	// ── preserved: task_create / task_update / message / dag ──────────
 	describe("preserved tool coverage", () => {
 		it("acp_task_create creates a task", async () => {
-			const r = await exec("acp_task_create", { subject: "Do X", description: "d" });
+			const r = await exec("acp_task", { action: "create", subject: "Do X", description: "d" });
 			expect(JSON.parse(r.content[0].text).subject).toBe("Do X");
 		});
 		it("acp_task_update single updates", async () => {
-			const r = await exec("acp_task_update", { task_id: "1", status: "completed" });
+			const r = await exec("acp_task", { action: "update", task_id: "1", status: "completed" });
 			expect(r.content[0].text).toContain("updated");
 		});
 		it("acp_task_update not found", async () => {
 			m.ts.update.mockReturnValueOnce(undefined);
-			const r = await exec("acp_task_update", { task_id: "x", status: "completed" });
+			const r = await exec("acp_task", { action: "update", task_id: "x", status: "completed" });
 			expect(r.details.error).toBe("not_found");
 		});
 		it("acp_task_update bulk", async () => {
 			m.ts.updateWhere.mockReturnValueOnce([{}]);
-			const r = await exec("acp_task_update", { task_id: "*", status: "completed", filter: "pending" });
+			const r = await exec("acp_task", { action: "update", task_id: "*", status: "completed", filter: "pending" });
 			expect(r.details.updated).toBe(1);
 		});
 		it("acp_task_update deps add/remove", async () => {
-			await exec("acp_task_update", { task_id: "1", deps_add: ["2"], deps_remove: ["3"] });
+			await exec("acp_task", { action: "update", task_id: "1", deps_add: ["2"], deps_remove: ["3"] });
 			expect(m.ts.update).toHaveBeenCalled();
 		});
 		it("acp_message send dm", async () => {
-			const r = await exec("acp_message", { action: "send", to: "g", message: "hi" });
+			const r = await exec("acp_msg", { action: "send", to: "g", message: "hi" });
 			expect(r.details.messageId).toBe("m1");
 		});
 		it("acp_message send broadcast", async () => {
-			const r = await exec("acp_message", { action: "send", to: "*", message: "all" });
+			const r = await exec("acp_msg", { action: "send", to: "*", message: "all" });
 			expect(m.mb.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "broadcast" }));
 		});
 		it("acp_message send steer explicit", async () => {
-			await exec("acp_message", { action: "send", to: "g", message: "s", kind: "steer" });
+			await exec("acp_msg", { action: "send", to: "g", message: "s", kind: "steer" });
 			expect(m.mb.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "steer" }));
 		});
 		it("acp_message list by recipient", async () => {
 			m.mb.listFor.mockReturnValueOnce([{ id: "1" }]);
-			const r = await exec("acp_message", { action: "list", recipient: "g" });
+			const r = await exec("acp_msg", { action: "list", recipient: "g" });
 			expect(r.details.messages).toHaveLength(1);
 		});
 		it("acp_message list all", async () => {
 			m.mb.listAll.mockReturnValueOnce([{ id: "1" }, { id: "2" }]);
-			const r = await exec("acp_message", { action: "list" });
+			const r = await exec("acp_msg", { action: "list" });
 			expect(r.details.messages).toHaveLength(2);
 		});
 		it("acp_message unknown action", async () => {
-			const r = await exec("acp_message", { action: "nope" });
+			const r = await exec("acp_msg", { action: "nope" });
 			expect(r.details.error).toBe("unknown_action");
 		});
 		it("acp_dag_submit empty tasks rejected", async () => {
-			const r = await exec("acp_dag_submit", { tasks: [] });
-			expect(r.details.error).toBe("no tasks");
+			const r = await exec("acp_dag", { action: "submit", tasks: [] });
+			expect(r.details.error).toBe("no_dag");
 		});
 		it("acp_dag_submit validation fail returns violations", async () => {
 			dagState.valid = false;
 			dagState.errors = ["cycle: a->b->a"];
-			const r = await exec("acp_dag_submit", { tasks: [{ id: "a", agent: "gemini", prompt: "p" }] });
+			const r = await exec("acp_dag", { action: "submit", tasks: [{ id: "a", agent: "gemini", prompt: "p" }] });
 			dagState.valid = true; dagState.errors = [];
 			expect(r.details.error).toBe("validation_failed");
 			expect(r.details.violations).toContain("cycle: a->b->a");
 		});
 		it("acp_dag_submit happy path returns dagId", async () => {
-			const r = await exec("acp_dag_submit", { tasks: [{ id: "a", agent: "gemini", prompt: "p" }] });
+			const r = await exec("acp_dag", { action: "submit", tasks: [{ id: "a", agent: "gemini", prompt: "p" }] });
 			expect(r.details.dagId).toBe("dag-1");
 			expect(r.details.stepCount).toBe(1);
 		});
 		it("acp_dag_status list mode returns all dags", async () => {
-			const r = await exec("acp_dag_status", {});
+			const r = await exec("acp_dag", { action: "status",});
 			expect(r.details.count).toBe(2);
 		});
 		it("acp_dag_status detail mode returns record", async () => {
-			const r = await exec("acp_dag_status", { dagId: "dag-1" });
+			const r = await exec("acp_dag", { action: "status", dagId: "dag-1" });
 			expect(r.details.status).toBe("running");
 			expect(r.details.currentWave).toBe(1);
 		});
 		it("acp_dag_status not found", async () => {
-			const r = await exec("acp_dag_status", { dagId: "nope" });
+			const r = await exec("acp_dag", { action: "status", dagId: "nope" });
 			expect(r.details.error).toBe("not_found");
 		});
 		it("acp_dag_cancel happy path returns summary", async () => {
-			const r = await exec("acp_dag_cancel", { dagId: "dag-1" });
+			const r = await exec("acp_dag", { action: "cancel", dagId: "dag-1" });
 			expect(r.details.completed).toBe(1);
 			expect(r.details.cancelled).toBe(2);
 		});
 		it("acp_dag_cancel empty dagId rejected", async () => {
-			const r = await exec("acp_dag_cancel", { dagId: "" });
-			expect(r.details.error).toBe("no_dagId");
+			const r = await exec("acp_dag", { action: "cancel", dagId: "" });
+			expect(r.details.error).toBe("missing_dag_id");
 		});
 		it("acp_dag_cancel failure surfaces error", async () => {
 			dagState.cancelImpl = async () => { throw new Error("cancel-fail"); };
-			const r = await exec("acp_dag_cancel", { dagId: "dag-1" });
+			const r = await exec("acp_dag", { action: "cancel", dagId: "dag-1" });
 			dagState.cancelImpl = async () => ({ completed: 1, aborted: 0, cancelled: 2 });
 			expect(r.details.error).toBe("cancel_failed");
 		});

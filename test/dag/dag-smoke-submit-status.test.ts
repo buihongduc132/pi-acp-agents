@@ -172,7 +172,7 @@ describe("DAG smoke — acp_dag_submit + acp_dag_status (task 8.1)", () => {
 		});
 
 		// 1. Submit the DAG through the real acp_dag_submit tool.
-		const submit = await exec("acp_dag_submit", {
+		const submit = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "research", agent: "gemini", prompt: "Research authentication approaches" },
 				{ id: "code", agent: "gemini", prompt: "Implement auth based on {research.output}", dependsOn: ["research"] },
@@ -186,7 +186,7 @@ describe("DAG smoke — acp_dag_submit + acp_dag_status (task 8.1)", () => {
 		// 2. Poll acp_dag_status until the DAG reaches a terminal state.
 		let details: any;
 		for (let i = 0; i < 100; i++) {
-			const status = await exec("acp_dag_status", { dagId });
+			const status = await exec("acp_dag", { action: "status", dagId });
 			details = status.details;
 			if (details.status === "completed" || details.status === "failed") break;
 			await new Promise((r) => setTimeout(r, 20));

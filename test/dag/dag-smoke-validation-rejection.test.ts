@@ -162,7 +162,7 @@ describe("DAG smoke — validation rejection (task 8.4)", () => {
 
 	it("rejects a cyclic DAG with a validation error and never dispatches", async () => {
 		// a → b → a (mutual cycle).
-		const result = await exec("acp_dag_submit", {
+		const result = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "a", agent: "gemini", prompt: "Step A", dependsOn: ["b"] },
 				{ id: "b", agent: "gemini", prompt: "Step B", dependsOn: ["a"] },

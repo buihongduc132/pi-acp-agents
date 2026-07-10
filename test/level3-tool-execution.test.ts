@@ -148,13 +148,13 @@ async function loadTools() {
   mod.default(mockPi as any);
   const findTool = (name: string) => mockPi.tools.find((t) => t.name === name);
   return {
-    promptTool: findTool("acp_prompt"),
+    promptTool: findTool("acp_msg"),
     statusTool: findTool("acp_status"),
-    broadcastTool: findTool("acp_broadcast"),
-    cancelTool: findTool("acp_cancel"),
-    taskCreateTool: findTool("acp_task_create"),
-    taskUpdateTool: findTool("acp_task_update"),
-    messageTool: findTool("acp_message"),
+    broadcastTool: findTool("acp_fanout"),
+    cancelTool: findTool("acp_msg"),
+    taskCreateTool: findTool("acp_task"),
+    taskUpdateTool: findTool("acp_task"),
+    messageTool: findTool("acp_msg"),
   };
 }
 
@@ -169,28 +169,28 @@ describe("Level 3+ — tool execute behavior (consolidated)", () => {
     // Broadcast delegates to coordinator which is mocked
   });
 
-  it("task tools: create, update via consolidated acp_task_update", async () => {
+  it("task tools: create, update via unified acp_task", async () => {
     const { taskCreateTool, taskUpdateTool } = await loadTools();
     expect(taskCreateTool).toBeDefined();
     expect(taskUpdateTool).toBeDefined();
     
-    const created = await taskCreateTool.execute("tc7", { subject: "Investigate", description: "deep work", assignee: "gemini" }, undefined, undefined, createMockCtx());
+    const created = await taskCreateTool.execute("tc7", { action: "create", subject: "Investigate", description: "deep work", assignee: "gemini" }, undefined, undefined, createMockCtx());
     const taskId = created.details.id;
 
-    // All task mutations now go through acp_task_update
-    const updated = await taskUpdateTool.execute("tc8", { task_id: taskId, status: "in_progress", assignee: "claude", result: "started" }, undefined, undefined, createMockCtx());
+    // All task mutations now go through unified acp_task action:update
+    const updated = await taskUpdateTool.execute("tc8", { action: "update", task_id: taskId, status: "in_progress", assignee: "claude", result: "started" }, undefined, undefined, createMockCtx());
     expect(updated.content[0].text).toContain("updated");
   });
 
-  it("task deps managed via acp_task_update deps_add/deps_remove", async () => {
+  it("task deps managed via unified acp_task deps_add/deps_remove", async () => {
     const { taskCreateTool, taskUpdateTool } = await loadTools();
-    const created = await taskCreateTool.execute("tc9", { subject: "Task with deps", deps: ["1"] }, undefined, undefined, createMockCtx());
+    const created = await taskCreateTool.execute("tc9", { action: "create", subject: "Task with deps", deps: ["1"] }, undefined, undefined, createMockCtx());
     
-    const updated = await taskUpdateTool.execute("tc10", { task_id: created.details.id, deps_add: ["2"], deps_remove: ["1"] }, undefined, undefined, createMockCtx());
+    const updated = await taskUpdateTool.execute("tc10", { action: "update", task_id: created.details.id, deps_add: ["2"], deps_remove: ["1"] }, undefined, undefined, createMockCtx());
     expect(updated.content[0].text).toContain("updated");
   });
 
-  it("mailbox: acp_message consolidates send and list", async () => {
+  it("mailbox: unified acp_msg consolidates send and list", async () => {
     const { messageTool } = await loadTools();
     expect(messageTool).toBeDefined();
     

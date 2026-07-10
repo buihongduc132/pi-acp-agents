@@ -180,7 +180,7 @@ describe("DAG smoke — acp_dag_cancel (task 8.3)", () => {
 		);
 
 		// 1. Submit the 3-step linear DAG through the real tool surface.
-		const submit = await exec("acp_dag_submit", {
+		const submit = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "a", agent: "gemini", prompt: "Step A" },
 				{ id: "b", agent: "gemini", prompt: "Step B based on {a.output}", dependsOn: ["a"] },
@@ -200,7 +200,7 @@ describe("DAG smoke — acp_dag_cancel (task 8.3)", () => {
 		});
 
 		// 3. Cancel the DAG through the real tool surface.
-		const cancel = await exec("acp_dag_cancel", { dagId });
+		const cancel = await exec("acp_dag", { action: "cancel", dagId });
 
 		// 4. Summary reflects: 1 completed (a), 1 aborted (b in-flight),
 		//    1 cancelled (c pending).
@@ -220,7 +220,7 @@ describe("DAG smoke — acp_dag_cancel (task 8.3)", () => {
 		expect(persisted.steps.c.status).toBe("cancelled");
 
 		// 7. The status tool confirms the cancelled state end-to-end.
-		const status = await exec("acp_dag_status", { dagId });
+		const status = await exec("acp_dag", { action: "status", dagId });
 		expect(status.details.status).toBe("cancelled");
 	});
 });

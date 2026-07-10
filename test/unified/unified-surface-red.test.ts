@@ -73,6 +73,7 @@ vi.mock("../../src/dag/dag-store.js", () => ({ DagStore: vi.fn() }));
 vi.mock("../../src/dag/dag-validator.js", () => ({ DagValidator: vi.fn() }));
 vi.mock("../../src/dag/dag-executor.js", () => ({ DagExecutor: vi.fn() }));
 vi.mock("../../src/dag/template-resolver.js", () => ({ TemplateResolver: vi.fn() }));
+vi.mock("../../src/hooks/policy-tools.js", () => ({ registerHooksPolicyTools: vi.fn() }));
 
 import main from "../../index.js";
 import { loadConfig } from "../../src/config/config.js";
@@ -105,12 +106,10 @@ function mkSession(id: string, agent = "gemini", sessionName?: string): AcpSessi
 	};
 }
 
-/** The 13-tool target registry (11 core + 2 hooks policy). */
+/** The 7-tool target registry (second-wave consolidation: 11 → 7). */
 const TARGET_TOOLS = [
 	"acp_spawn", "acp_msg", "acp_fanout", "acp_governance", "acp_status",
-	"acp_task_create", "acp_task_update", "acp_message",
-	"acp_dag_submit", "acp_dag_status", "acp_dag_cancel",
-	"acp_hooks_policy_get", "acp_hooks_policy_set",
+	"acp_task", "acp_dag",
 ] as const;
 
 /** Old tool names that MUST be absent from the registry after unification. */
@@ -121,6 +120,9 @@ const REMOVED_TOOLS = [
 	"acp_session_list", "acp_session_shutdown", "acp_session_kill", "acp_runtime_info",
 	"acp_event_log", "acp_env", "acp_doctor", "acp_cleanup", "acp_prune",
 	"acp_worker_list", "acp_worker_shutdown", "acp_worker_kill", "acp_worker_prune",
+	// Second-wave consolidation (11 → 7): folded into acp_msg/acp_task/acp_dag
+	"acp_task_create", "acp_task_update", "acp_message",
+	"acp_dag_submit", "acp_dag_status", "acp_dag_cancel",
 ] as const;
 
 describe("Unified ACP Tool Surface (RED)", () => {
@@ -202,7 +204,7 @@ describe("Unified ACP Tool Surface (RED)", () => {
 
 	// ── unify-red-removal: registry shape ──────────────────────────────
 	describe("registry shape (unify-red-removal)", () => {
-		it("registers exactly the 13 target tools (11 core + 2 hooks policy)", () => {
+		it("registers exactly the 7 target tools (second-wave consolidation: 11 → 7)", () => {
 			expect(Array.from(tools.keys()).sort()).toEqual([...TARGET_TOOLS].sort());
 		});
 
@@ -408,8 +410,8 @@ describe("Unified ACP Tool Surface (RED)", () => {
 
 	// ── Sanity: the already-consolidated tools are unchanged ───────────
 	describe("preserved tools (already consolidated)", () => {
-		it("keeps acp_task_create, acp_task_update, acp_message, and the 3 DAG tools", () => {
-			for (const name of ["acp_task_create", "acp_task_update", "acp_message", "acp_dag_submit", "acp_dag_status", "acp_dag_cancel"]) {
+		it("keeps acp_task and acp_dag unified tools", () => {
+			for (const name of ["acp_task", "acp_dag"]) {
 				expect(tools.has(name), `expected ${name} to remain registered`).toBe(true);
 			}
 		});

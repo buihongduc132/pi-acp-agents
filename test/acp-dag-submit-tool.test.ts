@@ -121,7 +121,7 @@ function mkSession(id: string, agent = "gemini"): AcpSessionHandle {
 	} as unknown as AcpSessionHandle;
 }
 
-describe("acp_dag_submit tool (task 6.1)", () => {
+describe("acp_dag tool (task 6.1) — unified", () => {
 	let tools: Map<string, any>;
 	let m: any;
 	const ctx = { cwd: "/project", ui: { setWidget: vi.fn(), notify: vi.fn() } };
@@ -268,15 +268,15 @@ describe("acp_dag_submit tool (task 6.1)", () => {
 	const exec = (name: string, params: any) =>
 		tools.get(name)!.execute("t", params, undefined, undefined, ctx);
 
-	it("registers the acp_dag_submit tool", () => {
-		expect(tools.has("acp_dag_submit")).toBe(true);
+	it("registers the acp_dag tool (unified)", () => {
+		expect(tools.has("acp_dag")).toBe(true);
 	});
 
-	it("exposes tasks/args/options parameters", () => {
-		const params = (tools.get("acp_dag_submit")?.parameters as any)?.properties ?? {};
+	it("exposes action/tasks/dag parameters", () => {
+		const params = (tools.get("acp_dag")?.parameters as any)?.properties ?? {};
 		expect(params).toHaveProperty("tasks");
-		expect(params).toHaveProperty("args");
-		expect(params).toHaveProperty("options");
+		expect(params).toHaveProperty("action");
+		expect(params).toHaveProperty("dag");
 	});
 
 	it("validates via DagValidator and rejects invalid DAGs without creating them", async () => {
@@ -284,7 +284,7 @@ describe("acp_dag_submit tool (task 6.1)", () => {
 			valid: false,
 			errors: ['duplicate step ID: "research"'],
 		});
-		const r = await exec("acp_dag_submit", {
+		const r = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "research", agent: "gemini", prompt: "x" },
 				{ id: "research", agent: "gemini", prompt: "x" },
@@ -303,7 +303,7 @@ describe("acp_dag_submit tool (task 6.1)", () => {
 		];
 		const args = { topic: "authentication" };
 		const options = { failFast: false, maxRetries: 1 };
-		const r = await exec("acp_dag_submit", { tasks, args, options });
+		const r = await exec("acp_dag", { action: "submit", tasks, args, options });
 
 		// DagStore.create called with the submitted definition
 		expect(m.dagStore.create).toHaveBeenCalledTimes(1);
