@@ -1,7 +1,7 @@
 /**
- * Tests for the `acp_dag_status` tool registered in index.ts (task 6.2).
+ * Tests for the unified `acp_dag` tool (action: status) in index.ts.
  *
- * The tool accepts an optional `{ dagId }`:
+ * The tool accepts `{ action: 'status', dagId? }`:
  *  - dagId provided    → returns the full DAG state (DagRecord)
  *  - dagId omitted      → returns a listing of all DAGs (DagIndexEntry[])
  *  - dagId not found    → returns an error: DAG "<dagId>" not found
@@ -71,7 +71,7 @@ const CFG = {
 	circuitBreakerResetMs: 60_000, stallTimeoutMs: 300_000, modelPolicy: {},
 };
 
-describe("acp_dag_status tool", () => {
+describe("acp_dag tool (action: status)", () => {
 	let tools: Map<string, any>;
 	let dagStoreMock: { get: ReturnType<typeof vi.fn>; listAll: ReturnType<typeof vi.fn> };
 	const ctx = { cwd: "/project", ui: { setWidget: vi.fn(), notify: vi.fn() } };

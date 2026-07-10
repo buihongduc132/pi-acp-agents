@@ -408,61 +408,61 @@ describe("Unified ACP surface — branch coverage", () => {
 		});
 	});
 
-	// ── preserved: task_create / task_update / message / dag ──────────
-	describe("preserved tool coverage", () => {
-		it("acp_task_create creates a task", async () => {
+	// ── preserved: acp_task / acp_msg / acp_dag ──────────
+	describe("preserved tool coverage (unified tools)", () => {
+		it("acp_task action:create creates a task", async () => {
 			const r = await exec("acp_task", { action: "create", subject: "Do X", description: "d" });
 			expect(JSON.parse(r.content[0].text).subject).toBe("Do X");
 		});
-		it("acp_task_update single updates", async () => {
+		it("acp_task action:update single updates", async () => {
 			const r = await exec("acp_task", { action: "update", task_id: "1", status: "completed" });
 			expect(r.content[0].text).toContain("updated");
 		});
-		it("acp_task_update not found", async () => {
+		it("acp_task action:update not found", async () => {
 			m.ts.update.mockReturnValueOnce(undefined);
 			const r = await exec("acp_task", { action: "update", task_id: "x", status: "completed" });
 			expect(r.details.error).toBe("not_found");
 		});
-		it("acp_task_update bulk", async () => {
+		it("acp_task action:update bulk", async () => {
 			m.ts.updateWhere.mockReturnValueOnce([{}]);
 			const r = await exec("acp_task", { action: "update", task_id: "*", status: "completed", filter: "pending" });
 			expect(r.details.updated).toBe(1);
 		});
-		it("acp_task_update deps add/remove", async () => {
+		it("acp_task action:update deps add/remove", async () => {
 			await exec("acp_task", { action: "update", task_id: "1", deps_add: ["2"], deps_remove: ["3"] });
 			expect(m.ts.update).toHaveBeenCalled();
 		});
-		it("acp_message send dm", async () => {
+		it("acp_msg action:send dm", async () => {
 			const r = await exec("acp_msg", { action: "send", to: "g", message: "hi" });
 			expect(r.details.messageId).toBe("m1");
 		});
-		it("acp_message send broadcast", async () => {
+		it("acp_msg action:send broadcast", async () => {
 			const r = await exec("acp_msg", { action: "send", to: "*", message: "all" });
 			expect(m.mb.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "broadcast" }));
 		});
-		it("acp_message send steer explicit", async () => {
+		it("acp_msg action:send steer explicit", async () => {
 			await exec("acp_msg", { action: "send", to: "g", message: "s", kind: "steer" });
 			expect(m.mb.send).toHaveBeenCalledWith(expect.objectContaining({ kind: "steer" }));
 		});
-		it("acp_message list by recipient", async () => {
+		it("acp_msg action:list by recipient", async () => {
 			m.mb.listFor.mockReturnValueOnce([{ id: "1" }]);
 			const r = await exec("acp_msg", { action: "list", recipient: "g" });
 			expect(r.details.messages).toHaveLength(1);
 		});
-		it("acp_message list all", async () => {
+		it("acp_msg action:list all", async () => {
 			m.mb.listAll.mockReturnValueOnce([{ id: "1" }, { id: "2" }]);
 			const r = await exec("acp_msg", { action: "list" });
 			expect(r.details.messages).toHaveLength(2);
 		});
-		it("acp_message unknown action", async () => {
+		it("acp_msg unknown action", async () => {
 			const r = await exec("acp_msg", { action: "nope" });
 			expect(r.details.error).toBe("unknown_action");
 		});
-		it("acp_dag_submit empty tasks rejected", async () => {
+		it("acp_dag action:submit empty tasks rejected", async () => {
 			const r = await exec("acp_dag", { action: "submit", tasks: [] });
 			expect(r.details.error).toBe("no_dag");
 		});
-		it("acp_dag_submit validation fail returns violations", async () => {
+		it("acp_dag action:submit validation fail returns violations", async () => {
 			dagState.valid = false;
 			dagState.errors = ["cycle: a->b->a"];
 			const r = await exec("acp_dag", { action: "submit", tasks: [{ id: "a", agent: "gemini", prompt: "p" }] });
@@ -470,34 +470,34 @@ describe("Unified ACP surface — branch coverage", () => {
 			expect(r.details.error).toBe("validation_failed");
 			expect(r.details.violations).toContain("cycle: a->b->a");
 		});
-		it("acp_dag_submit happy path returns dagId", async () => {
+		it("acp_dag action:submit happy path returns dagId", async () => {
 			const r = await exec("acp_dag", { action: "submit", tasks: [{ id: "a", agent: "gemini", prompt: "p" }] });
 			expect(r.details.dagId).toBe("dag-1");
 			expect(r.details.stepCount).toBe(1);
 		});
-		it("acp_dag_status list mode returns all dags", async () => {
+		it("acp_dag action:status list mode returns all dags", async () => {
 			const r = await exec("acp_dag", { action: "status",});
 			expect(r.details.count).toBe(2);
 		});
-		it("acp_dag_status detail mode returns record", async () => {
+		it("acp_dag action:status detail mode returns record", async () => {
 			const r = await exec("acp_dag", { action: "status", dagId: "dag-1" });
 			expect(r.details.status).toBe("running");
 			expect(r.details.currentWave).toBe(1);
 		});
-		it("acp_dag_status not found", async () => {
+		it("acp_dag action:status not found", async () => {
 			const r = await exec("acp_dag", { action: "status", dagId: "nope" });
 			expect(r.details.error).toBe("not_found");
 		});
-		it("acp_dag_cancel happy path returns summary", async () => {
+		it("acp_dag action:cancel happy path returns summary", async () => {
 			const r = await exec("acp_dag", { action: "cancel", dagId: "dag-1" });
 			expect(r.details.completed).toBe(1);
 			expect(r.details.cancelled).toBe(2);
 		});
-		it("acp_dag_cancel empty dagId rejected", async () => {
+		it("acp_dag action:cancel empty dagId rejected", async () => {
 			const r = await exec("acp_dag", { action: "cancel", dagId: "" });
 			expect(r.details.error).toBe("missing_dag_id");
 		});
-		it("acp_dag_cancel failure surfaces error", async () => {
+		it("acp_dag action:cancel failure surfaces error", async () => {
 			dagState.cancelImpl = async () => { throw new Error("cancel-fail"); };
 			const r = await exec("acp_dag", { action: "cancel", dagId: "dag-1" });
 			dagState.cancelImpl = async () => ({ completed: 1, aborted: 0, cancelled: 2 });

@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock hooks policy tools so they don't register in this test
-vi.mock("../src/hooks/policy-tools.js", () => ({
-  registerHooksPolicyTools: vi.fn(),
-}));
+// Hooks policy tools are intentionally NOT mocked — the real registerHooksPolicyTools
+// registers 2 tools, making the total surface 9 (7 ACP core + 2 hooks policy).
 
 describe("Level 3+ — ACP management tool registration", () => {
   const registeredTools: string[] = [];
@@ -20,7 +18,7 @@ describe("Level 3+ — ACP management tool registration", () => {
     registeredTools.length = 0;
   });
 
-  it("registers exactly the unified 7-tool surface (7 core + 0 hooks policy when config missing)", async () => {
+  it("registers exactly 9 tools (7 ACP core + 2 hooks policy)", async () => {
     const mod = await import("../index.js");
     mod.default(mockPi as any);
     expect(registeredTools).toEqual(expect.arrayContaining([
@@ -31,9 +29,11 @@ describe("Level 3+ — ACP management tool registration", () => {
       "acp_status",
       "acp_task",
       "acp_dag",
+      "acp_hooks_policy_get",
+      "acp_hooks_policy_set",
     ]));
-    // Hard break: exactly 7 tools (consolidated surface).
-    expect(registeredTools.length).toBe(7);
+    // Total surface: 9 tools (7 ACP core + 2 hooks policy).
+    expect(registeredTools.length).toBe(9);
   });
 
   it("does NOT register removed tools", async () => {

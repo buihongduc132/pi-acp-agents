@@ -112,13 +112,9 @@ vi.mock("../src/coordination/coordinator.js", () => ({ AgentCoordinator: vi.fn()
 vi.mock("../src/acp-widget.js", () => ({
 	createAcpWidget: () => () => ({ render: vi.fn() }),
 }));
-// Mock hooks policy tools so they don't register extra tools in the consolidation test
-vi.mock("./src/hooks/policy-tools.js", () => ({
-	registerHooksPolicyTools: () => {},
-}));
-vi.mock("../src/hooks/policy-tools.js", () => ({
-	registerHooksPolicyTools: () => {},
-}));
+// Hooks policy tools (acp_hooks_policy_get / acp_hooks_policy_set) are intentionally
+// NOT mocked — the real registerHooksPolicyTools registers 2 tools, making the
+// total surface 9 (7 ACP core + 2 hooks policy).
 vi.mock("../src/dag/dag-store.js", () => ({
 	DagStore: class {
 		create(input: any) { return { dagId: "dag-1", ...input, status: "pending", currentWave: 0, totalWaves: 0 }; }
@@ -346,12 +342,13 @@ describe("Second-Wave Consolidation (11 → 7 tools)", () => {
 	const hasTool = (name: string) => tools.has(name);
 
 	// ═══════════════════════════════════════════════════════════════════
-	// 1. REGISTRATION COUNT + SURVIVING 7 NAMES
+	// 1. REGISTRATION COUNT + SURVIVING 7 ACP-CORE NAMES
+	//    Total registered surface = 9 (7 ACP core + 2 hooks policy tools).
 	// ═══════════════════════════════════════════════════════════════════
 
-	describe("1. Registration: exactly 7 tools", () => {
-		it("registers exactly 7 tools (down from 11)", () => {
-			expect(tools.size).toBe(7);
+	describe("1. Registration: 9 total tools (7 ACP core + 2 hooks policy)", () => {
+		it("registers exactly 9 tools (7 ACP core + 2 hooks policy)", () => {
+			expect(tools.size).toBe(9);
 		});
 
 		const EXPECTED_7 = [
@@ -854,7 +851,7 @@ describe("Second-Wave Consolidation (11 → 7 tools)", () => {
 		it("acp_msg registered exactly once (not twice from msg+message)", () => {
 			// The old code registered both acp_msg and acp_message.
 			// After consolidation, only acp_msg should be registered.
-			expect(tools.size).toBe(7);
+			expect(tools.size).toBe(9);
 			expect(hasTool("acp_msg")).toBe(true);
 			expect(hasTool("acp_message")).toBe(false);
 		});

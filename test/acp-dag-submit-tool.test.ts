@@ -1,9 +1,9 @@
 /**
- * RED test for task 6.1 — Register `acp_dag_submit` tool in index.ts.
+ * Tests for the unified `acp_dag` tool (action: submit) in index.ts.
  *
  * Behavior under test: the tool must
- *  1. be registered with name `acp_dag_submit`
- *  2. accept `{tasks, args?, options?}` parameters
+ *  1. be registered with name `acp_dag`
+ *  2. accept `{action:'submit', tasks, args?, options?}` parameters
  *  3. validate via DagValidator; on failure return a `DAG validation failed:`
  *     error string WITHOUT calling DagStore.create or DagExecutor.execute
  *  4. on success call DagStore.create() with the submitted definition

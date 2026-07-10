@@ -1,9 +1,9 @@
 /**
- * RED test for task 6.3 — Register `acp_dag_cancel` tool in index.ts.
+ * Tests for the unified `acp_dag` tool (action: cancel) in index.ts.
  *
  * Behavior under test: the tool must
- *  1. be registered with name `acp_dag_cancel`
- *  2. accept a required `{ dagId }` parameter (Type.String)
+ *  1. be registered with name `acp_dag`
+ *  2. accept `{ action: 'cancel', dagId }` parameters (dagId: Type.String)
  *  3. call `DagExecutor.cancel(dagId)` and return the summary
  *     `{ completed, aborted, cancelled }`
  *  4. surface executor errors (e.g. already completed / not found) as
@@ -118,7 +118,7 @@ function mkSession(id: string, agent = "gemini"): AcpSessionHandle {
 	} as unknown as AcpSessionHandle;
 }
 
-describe("acp_dag_cancel tool (task 6.3)", () => {
+describe("acp_dag tool (action: cancel)", () => {
 	let tools: Map<string, any>;
 	let m: any;
 	const ctx = { cwd: "/project", ui: { setWidget: vi.fn(), notify: vi.fn() } };
