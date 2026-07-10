@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Mock hooks policy tools so they don't register in this test
+vi.mock("../src/hooks/policy-tools.js", () => ({
+  registerHooksPolicyTools: vi.fn(),
+}));
+
 describe("Level 3+ — ACP management tool registration", () => {
   const registeredTools: string[] = [];
 
@@ -15,7 +20,7 @@ describe("Level 3+ — ACP management tool registration", () => {
     registeredTools.length = 0;
   });
 
-  it("registers exactly the unified 13-tool surface (11 core + 2 hooks policy)", async () => {
+  it("registers exactly the unified 7-tool surface (7 core + 0 hooks policy when config missing)", async () => {
     const mod = await import("../index.js");
     mod.default(mockPi as any);
     expect(registeredTools).toEqual(expect.arrayContaining([
@@ -24,17 +29,11 @@ describe("Level 3+ — ACP management tool registration", () => {
       "acp_fanout",
       "acp_governance",
       "acp_status",
-      "acp_task_create",
-      "acp_task_update",
-      "acp_message",
-      "acp_dag_submit",
-      "acp_dag_status",
-      "acp_dag_cancel",
-      "acp_hooks_policy_get",
-      "acp_hooks_policy_set",
+      "acp_task",
+      "acp_dag",
     ]));
-    // Hard break: exactly 13 tools (11 core + 2 hooks policy), no aliases.
-    expect(registeredTools.length).toBe(13);
+    // Hard break: exactly 7 tools (consolidated surface).
+    expect(registeredTools.length).toBe(7);
   });
 
   it("does NOT register removed tools", async () => {
@@ -55,6 +54,9 @@ describe("Level 3+ — ACP management tool registration", () => {
       "acp_worker_shutdown", "acp_worker_kill", "acp_worker_prune",
       "acp_plan_request", "acp_plan_resolve",
       "acp_model_policy_get", "acp_model_policy_check",
+      // second-wave consolidation (11 → 7): folded into acp_msg/acp_task/acp_dag
+      "acp_task_create", "acp_task_update", "acp_message",
+      "acp_dag_submit", "acp_dag_status", "acp_dag_cancel",
     ];
     for (const tool of REMOVED) {
       expect(registeredTools).not.toContain(tool);

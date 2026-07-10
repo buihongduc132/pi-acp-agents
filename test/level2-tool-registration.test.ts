@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
 /**
- * Tests that the unified 11-tool surface is registered in the extension entry point.
+ * Tests that the unified 7-tool surface is registered in the extension entry point.
  *
- * Contract check: the unified tool set (post-consolidation) must be registered in
- * index.ts. Old surface names (acp_prompt, acp_worker_*, etc.) are asserted ABSENT.
+ * Contract check: the unified tool set (post-second-wave-consolidation) must be
+ * registered in index.ts. Old surface names (acp_prompt, acp_worker_*, etc.) are
+ * asserted ABSENT.
  */
 describe("Level 2 — tool registration in index.ts", () => {
   const indexPath = new URL("../index.ts", import.meta.url).pathname;
@@ -17,12 +18,8 @@ describe("Level 2 — tool registration in index.ts", () => {
     "acp_fanout",
     "acp_governance",
     "acp_status",
-    "acp_task_create",
-    "acp_task_update",
-    "acp_message",
-    "acp_dag_submit",
-    "acp_dag_status",
-    "acp_dag_cancel",
+    "acp_task",
+    "acp_dag",
   ];
 
   const REMOVED_TOOLS = [
@@ -41,6 +38,9 @@ describe("Level 2 — tool registration in index.ts", () => {
     // governance tools sunset as standalone (folded into acp_governance)
     "acp_plan_request", "acp_plan_resolve",
     "acp_model_policy_get", "acp_model_policy_check",
+    // second-wave consolidation (11 → 7): folded into acp_msg/acp_task/acp_dag
+    "acp_task_create", "acp_task_update", "acp_message",
+    "acp_dag_submit", "acp_dag_status", "acp_dag_cancel",
   ];
 
   // Tools whose handlers route through safeExecute (circuit-breaker wrapped).
@@ -65,7 +65,7 @@ describe("Level 2 — tool registration in index.ts", () => {
   for (const toolName of TOOLS_WITH_SAFEXECUTE) {
     it(`${toolName} wraps through safeExecute (circuit breaker)`, () => {
       const regex = new RegExp(
-        `name:\\s*["']${toolName}["'][\\s\\S]{0,6000}?safeExecute`,
+        `name:\\s*["']${toolName}["'][\\s\\S]{0,12000}?safeExecute`,
       );
       expect(source).toMatch(regex);
     });
