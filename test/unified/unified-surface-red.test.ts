@@ -246,7 +246,7 @@ describe("Unified ACP Tool Surface (RED)", () => {
 		});
 
 		it("idleTtlMs: 0 with prompt is a one-shot — disposes after responding", async () => {
-			const r = await exec("acp_spawn", { agent: "gemini", prompt: "do it", idleTtlMs: 0 });
+			const r = await exec("acp_spawn", { agent: "gemini", prompt: "do it", idleTtlMs: 0, async: false });
 			expect(m.ad.prompt).toHaveBeenCalledWith("do it");
 			expect(m.ad.dispose).toHaveBeenCalled();
 			// One-shot returns the response text surface.

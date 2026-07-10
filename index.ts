@@ -124,6 +124,7 @@ export default function (pi: ExtensionAPI) {
     onTaskResult(_t: unknown): Promise<void> { return Promise.resolve(); },
     onSubagentStart(_s: unknown): Promise<void> { return Promise.resolve(); },
     onSubagentStop(_s: unknown): Promise<void> { return Promise.resolve(); },
+    onSpawnCompleted(_s: unknown): Promise<void> { return Promise.resolve(); },
     dispose(): void { /* noop */ },
   };
 
@@ -870,6 +871,7 @@ export default function (pi: ExtensionAPI) {
       cwd: Type.Optional(Type.String({ description: "Working directory for the agent" })),
       model: Type.Optional(Type.String({ description: "Model to set on the session" })),
       mode: Type.Optional(Type.String({ description: "Mode/thinking level to set on the session" })),
+      async: Type.Optional(Type.Boolean({ description: "When true (default), spawn-with-prompt returns immediately with status:'prompting' and the prompt runs in the background. Completion fires a callback to the main session via the wake-subscriber. Set false to block and return the response inline (legacy behavior)." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const agentName = getAgentName(params.agent);
@@ -944,6 +946,57 @@ export default function (pi: ExtensionAPI) {
             archiveSession(handle);
             // ACP Hooks: fire subagent_start (fire-and-forget)
             hookTriggers.onSubagentStart({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
+
+            // ── Async spawn default (OT4) ──
+            // When async !== false (default true), fire the prompt in the
+            // background and return immediately with status:'prompting'.
+            // The background work is STILL wrapped by safeExecute's circuit
+            // breaker (cb.execute) via the outer wrapper — async ≠ no safety.
+            // On background completion:
+            //   - one-shot → existing closeSession fires session_completed
+            //     (already in NEVER_DROP) → wake callback fires.
+            //   - long-lived → fire spawn_completed (new event, in NEVER_DROP)
+            //     → wake callback fires. Distinct from subagent_stop (per-turn)
+            //     to avoid flooding the main session.
+            const isAsyncSpawn = params.async !== false;
+
+            if (isAsyncSpawn) {
+              // Fire-and-forget background prompt. Errors surface via
+              // event-log + session_failed hook (never silently swallowed).
+              void (async () => {
+                const promptTimeoutMs = config.toolTimeouts?.prompt ?? config.stallTimeoutMs;
+                try {
+                  const pr = (await withTimeoutMs(adapter.prompt(effectivePrompt), promptTimeoutMs, `acp_spawn(prompt:${sessionId})`)) as AcpPromptResult;
+                  markPromptLifecycle(handle!, pr);
+                  if (oneShot) {
+                    await closeSession(handle!, "completed-oneshot", false);
+                  } else {
+                    // Long-lived async spawn completion → spawn_completed event
+                    hookTriggers.onSpawnCompleted({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
+                  }
+                } catch (bgErr) {
+                  const errMsg = bgErr instanceof Error ? bgErr.message : String(bgErr);
+                  logger.error(`background prompt failed for ${sessionId}: ${errMsg}`);
+                  eventLog.append("operation_error", { label: `acp_spawn(prompt:${sessionId}):error`, error: errMsg });
+                  if (oneShot) {
+                    await closeSession(handle!, "error").catch(() => {});
+                  } else {
+                    hookTriggers.onSessionRemoved({ id: sessionId, agent: agentName, cwd: effectiveCwd }, { error: true, errorMessage: errMsg }).catch(() => {});
+                  }
+                } finally {
+                  busySessions.delete(sessionId);
+                  handle!.busy = false;
+                  handle!.isPrompting = false;
+                  monitor.markPromptEnd(sessionId);
+                  archiveSession(handle!);
+                  hookTriggers.onSubagentStop({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
+                }
+              })();
+
+              return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, async: true, status: "prompting", warnings: personaWarnings.length > 0 ? personaWarnings : undefined };
+            }
+
+            // ── Sync (legacy) path: async:false → block on prompt ──
             try {
               const pr = (await withTimeoutMs(adapter.prompt(effectivePrompt), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_spawn(prompt:${sessionId})`)) as AcpPromptResult;
               markPromptLifecycle(handle, pr);
@@ -978,6 +1031,14 @@ export default function (pi: ExtensionAPI) {
       if (result.ok) {
         const v = result.value;
         const warningLines = v.warnings && v.warnings.length > 0 ? v.warnings.map((w: string) => `⚠ ${w}`).join("\n") : "";
+        // Async spawn: return status:prompting immediately (no inline text).
+        if ((v as any).status === "prompting") {
+          const body = `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""} — prompting in background`;
+          return {
+            content: [textContent(warningLines ? `${body}\n\n${warningLines}` : body)],
+            details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, status: "prompting", warnings: v.warnings },
+          } as AgentToolResult<{ sessionId: string; agent: string; oneShot: boolean; worker: boolean; status: string }>;
+        }
         const body = v.text != null ? v.text : `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""}`;
         return {
           content: [textContent(warningLines ? `${body}\n\n${warningLines}` : body)],

@@ -25,3 +25,4 @@ bunfig.toml
 _pi_ralph_*.md
 .worktrees/
 flow/
+node_modules

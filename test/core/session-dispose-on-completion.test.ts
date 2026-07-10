@@ -136,7 +136,7 @@ describe("acp_spawn one-shot (idleTtlMs:0) dispose-on-completion (T1)", () => {
 	it("tears down a one-shot (idleTtlMs:0) session after successful completion", async () => {
 		const result = await tools.get("acp_spawn").execute(
 			"t",
-			{ agent: "gemini", prompt: "hi", idleTtlMs: 0 },
+			{ agent: "gemini", prompt: "hi", idleTtlMs: 0, async: false },
 			undefined,
 			undefined,
 			ctx,
@@ -172,7 +172,7 @@ describe("acp_spawn one-shot (idleTtlMs:0) dispose-on-completion (T1)", () => {
 		// rejecting.
 		const result = await tools.get("acp_spawn").execute(
 			"t",
-			{ agent: "gemini", prompt: "hi", idleTtlMs: 0 },
+			{ agent: "gemini", prompt: "hi", idleTtlMs: 0, async: false },
 			undefined,
 			undefined,
 			ctx,

@@ -241,7 +241,7 @@ describe("Unified ACP surface — branch coverage", () => {
 		});
 		it("prompt error during one-shot cleans up", async () => {
 			m.ad.prompt.mockRejectedValueOnce(new Error("prompt-fail"));
-			const r = await exec("acp_spawn", { agent: "gemini", prompt: "x", idleTtlMs: 0 });
+			const r = await exec("acp_spawn", { agent: "gemini", prompt: "x", idleTtlMs: 0, async: false });
 			expect(r.details.error).toContain("prompt-fail");
 		});
 	});

@@ -285,6 +285,30 @@ export class HookTriggerManager {
 		);
 	}
 
+	/** Long-lived async spawn completion → dispatch `spawn_completed` (OT4).
+	 *  Fires ONCE per async-spawned long-lived session when its background
+	 *  prompt finishes, triggering the NEVER_DROP wake callback to the main
+	 *  session. Distinct from subagent_stop (per-turn) to avoid flooding. */
+	onSpawnCompleted(result: SubagentStopLike): Promise<void> {
+		if (this.disposed) return Promise.resolve();
+		return safeFire(
+			this.dispatcher,
+			"spawn_completed",
+			buildHookContext({
+				event: "spawn_completed",
+				session: {
+					id: result.sessionId,
+					agent: result.agentName,
+					cwd: result.cwd ?? this.defaultCwd,
+				},
+				agent: {
+					name: result.agentName,
+					type: this.defaultAgentType,
+				},
+			}),
+		);
+	}
+
 	/** Stop firing hooks. After dispose, all callbacks become no-ops. */
 	dispose(): void {
 		this.disposed = true;
