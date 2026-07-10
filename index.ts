@@ -85,6 +85,12 @@ export default function (pi: ExtensionAPI) {
   const activeAdapters = new Map<string, ReturnType<typeof createAdapter>>();
   const busySessions = new Map<string, boolean>();
   const workerSessionMap = new Map<string, string>(); // sessionId → workerName for heartbeat consumer
+  // CA-6: track in-flight async-spawn background prompts so the shutdown
+  // handler can persist their terminal state (event-log + session-archive)
+  // instead of losing it silently when the main session exits before the
+  // background prompt resolves. Keys: sessionId. Values: minimal record
+  // (the handle is already tracked via activeAdapters / sessionArchiveStore).
+  const pendingAsyncSpawns = new Map<string, { sessionId: string; agentName: string; handle: AcpSessionHandle; promise: Promise<void> }>();
   const DELEGATION_HISTORY_CAP = 20;
   const widgetActivity = {
     activeDelegations: 0,
@@ -871,7 +877,7 @@ export default function (pi: ExtensionAPI) {
       cwd: Type.Optional(Type.String({ description: "Working directory for the agent" })),
       model: Type.Optional(Type.String({ description: "Model to set on the session" })),
       mode: Type.Optional(Type.String({ description: "Mode/thinking level to set on the session" })),
-      async: Type.Optional(Type.Boolean({ description: "When true (default), spawn-with-prompt returns immediately with status:'prompting' and the prompt runs in the background. Completion fires a callback to the main session via the wake-subscriber. Set false to block and return the response inline (legacy behavior)." })),
+      async: Type.Optional(Type.Boolean({ description: "Overrides the global async default (config.spawns.asyncDefault, default true). When true, spawn-with-prompt returns immediately with status:'prompting' and the prompt runs in the background. When false, blocks and returns the response inline (legacy behavior). If omitted, uses the config default." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const agentName = getAgentName(params.agent);
@@ -948,28 +954,44 @@ export default function (pi: ExtensionAPI) {
             hookTriggers.onSubagentStart({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
 
             // ── Async spawn default (OT4) ──
-            // When async !== false (default true), fire the prompt in the
-            // background and return immediately with status:'prompting'.
-            // The background work is STILL wrapped by safeExecute's circuit
-            // breaker (cb.execute) via the outer wrapper — async ≠ no safety.
+            // Async-by-default is now config-driven (CA-3): config.spawns.asyncDefault
+            // (default true) is the GLOBAL default. The per-call `async` param, when
+            // explicitly provided, always overrides it.
+            //   - async:true (explicit)  → async (forces async even if global default is false)
+            //   - async:false (explicit) → sync  (legacy blocking, forces inline even if default is true)
+            //   - omitted                → config.spawns.asyncDefault (default true)
             // On background completion:
             //   - one-shot → existing closeSession fires session_completed
             //     (already in NEVER_DROP) → wake callback fires.
             //   - long-lived → fire spawn_completed (new event, in NEVER_DROP)
             //     → wake callback fires. Distinct from subagent_stop (per-turn)
             //     to avoid flooding the main session.
-            const isAsyncSpawn = params.async !== false;
+            const globalAsyncDefault = config.spawns?.asyncDefault ?? true;
+            const isAsyncSpawn = params.async ?? globalAsyncDefault;
 
             if (isAsyncSpawn) {
+              // CA-7: capture the (now-assigned) handle into a const so the
+              // background closure never relies on the `handle!` non-null
+              // assertions that were brittle under refactor. `handle` is set
+              // synchronously above (makeSessionHandle) before this block, so
+              // narrowing holds. The defensive throw is a fail-loud guard.
+              if (!handle) {
+                throw new Error(`internal: async spawn handle missing for ${sessionId}`);
+              }
+              const bgHandle = handle;
+              // CA-6: track this in-flight async spawn so the shutdown handler
+              // can persist its terminal state (event-log + session-archive)
+              // instead of losing it silently when the main session exits
+              // before the background prompt resolves.
               // Fire-and-forget background prompt. Errors surface via
               // event-log + session_failed hook (never silently swallowed).
-              void (async () => {
+              const bgPromise = (async () => {
                 const promptTimeoutMs = config.toolTimeouts?.prompt ?? config.stallTimeoutMs;
                 try {
                   const pr = (await withTimeoutMs(adapter.prompt(effectivePrompt), promptTimeoutMs, `acp_spawn(prompt:${sessionId})`)) as AcpPromptResult;
-                  markPromptLifecycle(handle!, pr);
+                  markPromptLifecycle(bgHandle, pr);
                   if (oneShot) {
-                    await closeSession(handle!, "completed-oneshot", false);
+                    await closeSession(bgHandle, "completed-oneshot", false);
                   } else {
                     // Long-lived async spawn completion → spawn_completed event
                     hookTriggers.onSpawnCompleted({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
@@ -979,19 +1001,21 @@ export default function (pi: ExtensionAPI) {
                   logger.error(`background prompt failed for ${sessionId}: ${errMsg}`);
                   eventLog.append("operation_error", { label: `acp_spawn(prompt:${sessionId}):error`, error: errMsg });
                   if (oneShot) {
-                    await closeSession(handle!, "error").catch(() => {});
+                    await closeSession(bgHandle, "error").catch(() => {});
                   } else {
                     hookTriggers.onSessionRemoved({ id: sessionId, agent: agentName, cwd: effectiveCwd }, { error: true, errorMessage: errMsg }).catch(() => {});
                   }
                 } finally {
                   busySessions.delete(sessionId);
-                  handle!.busy = false;
-                  handle!.isPrompting = false;
+                  bgHandle.busy = false;
+                  bgHandle.isPrompting = false;
                   monitor.markPromptEnd(sessionId);
-                  archiveSession(handle!);
+                  archiveSession(bgHandle);
+                  pendingAsyncSpawns.delete(sessionId);
                   hookTriggers.onSubagentStop({ sessionId, agentName, cwd: effectiveCwd }).catch(() => {});
                 }
               })();
+              pendingAsyncSpawns.set(sessionId, { sessionId, agentName, handle: bgHandle, promise: bgPromise });
 
               return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, async: true, status: "prompting", warnings: personaWarnings.length > 0 ? personaWarnings : undefined };
             }
@@ -2126,9 +2150,62 @@ export default function (pi: ExtensionAPI) {
     registerHooksPolicyTools(pi, { store: hookPolicyStore });
   }
 
+  // ── CA-6: drain pending async spawns on shutdown ──
+  // When the main session shuts down while background prompts are still
+  // in-flight, we must NOT silently lose their outcomes. This function:
+  //   1. Awaits pending background prompts with a bounded timeout (so
+  //      shutdown doesn't hang).
+  //   2. For any still-pending spawns after the timeout, persists an
+  //      "abandoned" marker to event-log + session-archive so the outcome
+  //      is recoverable/observable on resume rather than silently lost.
+  async function drainPendingAsyncSpawns(): Promise<void> {
+    if (pendingAsyncSpawns.size === 0) return;
+    const drainTimeoutMs = config.spawns?.asyncShutdownDrainMs ?? 10_000;
+    const entries = Array.from(pendingAsyncSpawns.values());
+    eventLog.append("async_spawn_drain_start", {
+      count: entries.length,
+      drainTimeoutMs,
+      sessions: entries.map((e) => e.sessionId),
+    });
+    // Race: wait for all pending promises to settle, OR hit the timeout.
+    const allSettled = Promise.allSettled(entries.map((e) => e.promise));
+    const timeout = new Promise<"timeout">((resolve) =>
+      setTimeout(() => resolve("timeout"), drainTimeoutMs),
+    );
+    const result = await Promise.race([allSettled, timeout]);
+    // For any spawns still pending after the drain, persist an abandoned
+    // marker so they are NOT silently lost.
+    for (const entry of entries) {
+      if (pendingAsyncSpawns.has(entry.sessionId)) {
+        // The closure's finally hasn't run yet — persist the abandoned state.
+        entry.handle.closeReason = "abandoned-shutdown";
+        archiveSession(entry.handle);
+        eventLog.append("async_spawn_abandoned", {
+          sessionId: entry.sessionId,
+          agentName: entry.agentName,
+          reason: "shutdown_timeout",
+          drainTimeoutMs,
+        });
+        pendingAsyncSpawns.delete(entry.sessionId);
+      }
+    }
+    eventLog.append("async_spawn_drain_complete", {
+      result: result === "timeout" ? "timeout" : "all_settled",
+      abandoned: entries.length - pendingAsyncSpawns.size,
+    });
+  }
+
   pi.on("session_shutdown", async () => {
     monitor.stop();
     workerDispatcher?.stop();
+    // CA-6: drain pending async spawns BEFORE disposing hooks, so their
+    // terminal state is persisted (event-log + session-archive) and
+    // recoverable on resume — no silent data loss on shutdown race.
+    try {
+      await drainPendingAsyncSpawns();
+    } catch (err) {
+      logger.error("async spawn drain failed on shutdown", { error: String(err) });
+    }
     // ── ACP Hooks cleanup ──
     hookTriggers.dispose();
     hookRunner.dispose();
