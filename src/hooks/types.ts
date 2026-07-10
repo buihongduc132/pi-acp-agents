@@ -3,12 +3,16 @@
  *
  * Source of truth: flow/plans/acp-hooks-impl-spec.md
  *
- * All 9 events (LD8): session_started, session_completed, session_failed,
- * session_idle, subagent_start, subagent_stop, task_assigned,
- * task_completed, task_failed.
+ * All 10 events (LD8 + spawn_completed): session_started, session_completed,
+ * session_failed, session_idle, subagent_start, subagent_stop,
+ * task_assigned, task_completed, task_failed, spawn_completed.
+ *
+ * spawn_completed (OT4): fires ONCE when a long-lived async-spawned session
+ * finishes its background prompt. Distinct from subagent_stop (which fires
+ * EVERY turn) to avoid flooding the main session under per-turn completion.
  */
 
-/** The 9 hook events ACP implements (LD8). */
+/** The 10 hook events ACP implements (LD8 + spawn_completed for async). */
 export type HookEventName =
 	| "session_started"
 	| "session_completed"
@@ -18,7 +22,8 @@ export type HookEventName =
 	| "subagent_stop"
 	| "task_assigned"
 	| "task_completed"
-	| "task_failed";
+	| "task_failed"
+	| "spawn_completed";
 
 /** Failure actions applied by the policy engine (policy.ts). */
 export type FailureAction =
@@ -111,12 +116,14 @@ export const DEFAULT_HOOK_CONFIG: HookConfig = {
 	},
 };
 
-/** Event types that must NEVER be dropped on backpressure (SG3). */
+/** Event types that must NEVER be dropped on backpressure (SG3).
+ *  spawn_completed added for async spawn callback delivery (OT4). */
 export const NEVER_DROP_EVENT_TYPES: ReadonlySet<string> = new Set([
 	"acp.task_completed",
 	"acp.session_completed",
 	"acp.session_failed",
 	"acp.task_failed",
+	"acp.spawn_completed",
 ]);
 
 /** Helper: default socket path under the ACP hooks dir. */
