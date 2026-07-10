@@ -174,7 +174,7 @@ describe("DAG smoke — failFast skips dependents, independent branch completes 
 
 		// Submit the DAG through the real tool surface. failFast defaults to
 		// true — no explicit options needed.
-		const submit = await exec("acp_dag_submit", {
+		const submit = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "a", agent: "gemini", prompt: "Step A" },
 				{ id: "b", agent: "gemini", prompt: "Step B", dependsOn: ["a"] },
@@ -193,7 +193,7 @@ describe("DAG smoke — failFast skips dependents, independent branch completes 
 		let statusSummary: any;
 		let record: any;
 		for (let i = 0; i < 200; i++) {
-			const status = await exec("acp_dag_status", { dagId });
+			const status = await exec("acp_dag", { action: "status", dagId });
 			statusSummary = status.details;
 			record = JSON.parse(status.content.map((c: any) => c.text).join(""));
 			if (["completed", "failed", "cancelled"].includes(statusSummary.status)) break;

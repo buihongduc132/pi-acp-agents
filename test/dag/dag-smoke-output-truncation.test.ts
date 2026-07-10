@@ -134,7 +134,7 @@ async function waitForTerminal(
 	dagId: string,
 ) {
 	for (let i = 0; i < 100; i++) {
-		const status = await exec("acp_dag_status", { dagId });
+		const status = await exec("acp_dag", { action: "status", dagId });
 		if (["completed", "failed", "cancelled"].includes(status.details.status)) {
 			return status.details;
 		}
@@ -203,7 +203,7 @@ describe("DAG smoke — output truncation (task 8.9)", () => {
 		// Submit a 2-step linear DAG whose step-2 prompt carries the literal
 		// {step1.output} placeholder. The default dagOutputTruncateChars
 		// (8000) is wired into the resolver at extension load.
-		const submit = await exec("acp_dag_submit", {
+		const submit = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "step1", agent: "gemini", prompt: "Generate a long report" },
 				{

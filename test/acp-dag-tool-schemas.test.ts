@@ -112,7 +112,7 @@ function mkSM() {
 	};
 }
 
-describe("DAG tool parameter schemas (task 6.4)", () => {
+describe("DAG tool parameter schemas (task 6.4) — unified acp_dag", () => {
 	let tools: Map<string, any>;
 
 	beforeEach(() => {
@@ -156,19 +156,20 @@ describe("DAG tool parameter schemas (task 6.4)", () => {
 
 	const paramsOf = (name: string): any => tools.get(name)!.parameters;
 
-	describe("acp_dag_submit schema", () => {
-		it("declares `tasks` as a REQUIRED top-level field, and `args`/`options` as OPTIONAL", () => {
-			const schema = paramsOf("acp_dag_submit");
+	// NOTE: acp_dag_submit/_status/_cancel are unified into `acp_dag` (second-wave
+	// consolidation 11→7). The unified tool preserves backward-compat: a top-level
+	// `tasks` array + `dagId`/`dag_id` aliases still work for action:submit/status/cancel.
+	describe("acp_dag unified schema (submit surface)", () => {
+		it("declares `action` as a REQUIRED top-level field", () => {
+			const schema = paramsOf("acp_dag");
 			expect(Array.isArray(schema.required)).toBe(true);
-			expect(schema.required).toContain("tasks");
-			expect(schema.required).not.toContain("args");
-			expect(schema.required).not.toContain("options");
+			expect(schema.required).toContain("action");
 		});
 
-		it("declares tasks as an array of objects with the required id/agent/prompt fields", () => {
-			const tasks = paramsOf("acp_dag_submit").properties.tasks;
-			expect(tasks.type).toBe("array");
-			const item = tasks.items;
+		it("declares nodes as an array of objects with required id/agent/prompt fields (dag.nodes)", () => {
+			const nodes = paramsOf("acp_dag").properties.dag.properties.nodes;
+			expect(nodes.type).toBe("array");
+			const item = nodes.items;
 			expect(item.type).toBe("object");
 			expect(item.properties).toHaveProperty("id");
 			expect(item.properties).toHaveProperty("agent");
@@ -176,19 +177,19 @@ describe("DAG tool parameter schemas (task 6.4)", () => {
 			expect(item.properties.id.type).toBe("string");
 			expect(item.properties.agent.type).toBe("string");
 			expect(item.properties.prompt.type).toBe("string");
-			// id/agent/prompt are required on each task item
+			// id/agent/prompt are required on each node item
 			expect(item.required).toEqual(expect.arrayContaining(["id", "agent", "prompt"]));
 		});
 
 		it("declares dependsOn as an OPTIONAL Array<string>", () => {
-			const item = paramsOf("acp_dag_submit").properties.tasks.items;
+			const item = paramsOf("acp_dag").properties.dag.properties.nodes.items;
 			expect(item.properties.dependsOn.type).toBe("array");
 			expect(item.properties.dependsOn.items.type).toBe("string");
 			expect(item.required ?? []).not.toContain("dependsOn");
 		});
 
 		it("declares gate as an OPTIONAL union of literals 'needs' | 'after'", () => {
-			const item = paramsOf("acp_dag_submit").properties.tasks.items;
+			const item = paramsOf("acp_dag").properties.dag.properties.nodes.items;
 			const gate = item.properties.gate;
 			expect(gate.anyOf).toBeInstanceOf(Array);
 			const consts = gate.anyOf.map((m: any) => m.const).sort();
@@ -197,7 +198,7 @@ describe("DAG tool parameter schemas (task 6.4)", () => {
 		});
 
 		it("declares args as a Record<string, string> (patternProperties → string)", () => {
-			const args = paramsOf("acp_dag_submit").properties.args;
+			const args = paramsOf("acp_dag").properties.dag?.properties?.args;
 			expect(args.type).toBe("object");
 			expect(args.patternProperties).toBeDefined();
 			const pat = args.patternProperties[Object.keys(args.patternProperties)[0]];
@@ -205,7 +206,7 @@ describe("DAG tool parameter schemas (task 6.4)", () => {
 		});
 
 		it("declares options as an Object<failFast?: boolean, maxRetries?: number> (both optional)", () => {
-			const options = paramsOf("acp_dag_submit").properties.options;
+			const options = paramsOf("acp_dag").properties.dag?.properties?.options;
 			expect(options.type).toBe("object");
 			expect(options.properties.failFast.type).toBe("boolean");
 			expect(options.properties.maxRetries.type).toBe("number");
@@ -214,20 +215,17 @@ describe("DAG tool parameter schemas (task 6.4)", () => {
 		});
 	});
 
-	describe("acp_dag_status schema", () => {
-		it("declares dagId as an OPTIONAL string", () => {
-			const schema = paramsOf("acp_dag_status");
+	describe("acp_dag unified schema (status/cancel surface)", () => {
+		it("declares dag_id as an OPTIONAL string (for status and cancel actions)", () => {
+			const schema = paramsOf("acp_dag");
+			expect(schema.properties.dag_id.type).toBe("string");
+			expect(schema.required ?? []).not.toContain("dag_id");
+		});
+
+		it("declares dagId as an OPTIONAL string (legacy alias)", () => {
+			const schema = paramsOf("acp_dag");
 			expect(schema.properties.dagId.type).toBe("string");
 			expect(schema.required ?? []).not.toContain("dagId");
-		});
-	});
-
-	describe("acp_dag_cancel schema", () => {
-		it("declares dagId as a REQUIRED string", () => {
-			const schema = paramsOf("acp_dag_cancel");
-			expect(schema.properties.dagId.type).toBe("string");
-			expect(Array.isArray(schema.required)).toBe(true);
-			expect(schema.required).toContain("dagId");
 		});
 	});
 });

@@ -253,18 +253,18 @@ describe("acp_dag_cancel tool (task 6.3)", () => {
 	const exec = (name: string, params: any) =>
 		tools.get(name)!.execute("t", params, undefined, undefined, ctx);
 
-	it("registers the acp_dag_cancel tool", () => {
-		expect(tools.has("acp_dag_cancel")).toBe(true);
+	it("registers the acp_dag tool (action: cancel)", () => {
+		expect(tools.has("acp_dag")).toBe(true);
 	});
 
 	it("exposes a required dagId parameter (Type.String)", () => {
-		const params = (tools.get("acp_dag_cancel")?.parameters as any)?.properties ?? {};
+		const params = (tools.get("acp_dag")?.parameters as any)?.properties ?? {};
 		expect(params).toHaveProperty("dagId");
 	});
 
 	it("calls DagExecutor.cancel(dagId) and returns the cancellation summary", async () => {
 		m.dagExecutor.cancel.mockResolvedValueOnce({ completed: 2, aborted: 1, cancelled: 2 });
-		const r = await exec("acp_dag_cancel", { dagId: "dag-1" });
+		const r = await exec("acp_dag", { action: "cancel", dagId: "dag-1" });
 
 		expect(m.dagExecutor.cancel).toHaveBeenCalledTimes(1);
 		expect(m.dagExecutor.cancel).toHaveBeenCalledWith("dag-1");
@@ -276,7 +276,7 @@ describe("acp_dag_cancel tool (task 6.3)", () => {
 		m.dagExecutor.cancel.mockRejectedValueOnce(
 			new Error('DAG "dag-1" is already completed and cannot be cancelled'),
 		);
-		const r = await exec("acp_dag_cancel", { dagId: "dag-1" });
+		const r = await exec("acp_dag", { action: "cancel", dagId: "dag-1" });
 
 		expect(r.content[0].text).toContain("already completed");
 		expect(r.details).toMatchObject({ error: "cancel_failed" });

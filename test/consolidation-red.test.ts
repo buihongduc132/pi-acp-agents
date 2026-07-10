@@ -112,10 +112,38 @@ vi.mock("../src/coordination/coordinator.js", () => ({ AgentCoordinator: vi.fn()
 vi.mock("../src/acp-widget.js", () => ({
 	createAcpWidget: () => () => ({ render: vi.fn() }),
 }));
-vi.mock("../src/dag/dag-store.js", () => ({ DagStore: vi.fn() }));
-vi.mock("../src/dag/dag-validator.js", () => ({ DagValidator: vi.fn() }));
-vi.mock("../src/dag/dag-executor.js", () => ({ DagExecutor: vi.fn() }));
-vi.mock("../src/dag/template-resolver.js", () => ({ TemplateResolver: vi.fn() }));
+// Mock hooks policy tools so they don't register extra tools in the consolidation test
+vi.mock("./src/hooks/policy-tools.js", () => ({
+	registerHooksPolicyTools: () => {},
+}));
+vi.mock("../src/hooks/policy-tools.js", () => ({
+	registerHooksPolicyTools: () => {},
+}));
+vi.mock("../src/dag/dag-store.js", () => ({
+	DagStore: class {
+		create(input: any) { return { dagId: "dag-1", ...input, status: "pending", currentWave: 0, totalWaves: 0 }; }
+		get(id: string) { return id === "dag-1" ? { dagId: "dag-1", status: "running", currentWave: 1, totalWaves: 3, tasks: [] } : undefined; }
+		listAll() { return [{ dagId: "dag-1", status: "running" }, { dagId: "dag-2", status: "completed" }]; }
+	},
+}));
+vi.mock("../src/dag/dag-validator.js", () => ({
+	DagValidator: class {
+		validate() { return { valid: true, errors: [] }; }
+	},
+}));
+vi.mock("../src/dag/dag-executor.js", () => ({
+	DagExecutor: class {
+		async execute() {}
+		async cancel() { return { completed: 1, aborted: 0, cancelled: 2 }; }
+	},
+}));
+vi.mock("../src/dag/template-resolver.js", () => ({ TemplateResolver: class {} }));
+vi.mock("../src/core/async-executor.js", () => ({
+	AsyncExecutor: class {
+		start = vi.fn();
+		stop = vi.fn();
+	},
+}));
 
 import main from "../index.js";
 import { loadConfig } from "../src/config/config.js";
@@ -289,6 +317,7 @@ describe("Second-Wave Consolidation (11 → 7 tools)", () => {
 					],
 					timestamp: new Date().toISOString(),
 				})),
+				dispose: vi.fn(),
 			},
 		};
 

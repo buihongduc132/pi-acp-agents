@@ -179,7 +179,7 @@ describe("DAG wiring — task 7.1 (existing infra singletons into DagExecutor)",
 		tools.get(name)!.execute("t", params, undefined, undefined, ctx);
 
 	it("acp_dag_submit wires DagExecutor with coordinator, asyncExecutor, and circuitBreaker", async () => {
-		await exec("acp_dag_submit", {
+		await exec("acp_dag", { action: "submit",
 			tasks: [{ id: "a", agent: "gemini", prompt: "Research X" }],
 		});
 
@@ -195,7 +195,7 @@ describe("DAG wiring — task 7.1 (existing infra singletons into DagExecutor)",
 	});
 
 	it("acp_dag_cancel wires DagExecutor with coordinator, asyncExecutor, and circuitBreaker", async () => {
-		await exec("acp_dag_cancel", { dagId: "dag-1" });
+		await exec("acp_dag", { action: "cancel", dagId: "dag-1" });
 
 		expect(dagExecutorConstructor).toHaveBeenCalledTimes(1);
 		const options = dagExecutorConstructor.mock.calls[0][0];

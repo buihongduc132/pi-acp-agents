@@ -61,6 +61,19 @@ export const ACP_TOOL_NAMES = [
 	"acp_dag_submit",
 	"acp_dag_status",
 	"acp_dag_cancel",
+	// Unified consolidated tools (second wave: 11 → 7)
+	"acp_spawn",
+	"acp_msg",
+	"acp_governance",
+	"acp_status",
+	"acp_fanout",
+	"acp_task",
+	"acp_dag",
+	"acp_task_update",
+	"acp_message",
+	// ACP Hooks policy tools
+	"acp_hooks_policy_get",
+	"acp_hooks_policy_set",
 ] as const;
 
 export type AcpToolName = (typeof ACP_TOOL_NAMES)[number];

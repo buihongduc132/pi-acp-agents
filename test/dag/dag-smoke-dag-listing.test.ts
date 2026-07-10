@@ -158,7 +158,7 @@ describe("DAG smoke — acp_dag_status listing (task 8.8)", () => {
 		}));
 
 		// 1. Submit two distinct DAGs.
-		const submit1 = await exec("acp_dag_submit", {
+		const submit1 = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "research", agent: "gemini", prompt: "Research authentication" },
 				{ id: "code", agent: "gemini", prompt: "Implement based on {research.output}", dependsOn: ["research"] },
@@ -166,7 +166,7 @@ describe("DAG smoke — acp_dag_status listing (task 8.8)", () => {
 		});
 		const dagId1 = submit1.details.dagId;
 
-		const submit2 = await exec("acp_dag_submit", {
+		const submit2 = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "research", agent: "gemini", prompt: "Research caching" },
 			],
@@ -181,7 +181,7 @@ describe("DAG smoke — acp_dag_status listing (task 8.8)", () => {
 		//    completed/failed step counts.
 		const waitForTerminal = async (dagId: string) => {
 			for (let i = 0; i < 100; i++) {
-				const status = await exec("acp_dag_status", { dagId });
+				const status = await exec("acp_dag", { action: "status", dagId });
 				if (status.details.status === "completed" || status.details.status === "failed") return;
 				await new Promise((r) => setTimeout(r, 20));
 			}
@@ -190,7 +190,7 @@ describe("DAG smoke — acp_dag_status listing (task 8.8)", () => {
 		await waitForTerminal(dagId2);
 
 		// 3. Call acp_dag_status WITHOUT a dagId → listing mode.
-		const listing = await exec("acp_dag_status", {});
+		const listing = await exec("acp_dag", { action: "status",});
 
 		// 4. Both DAGs are present in the list.
 		const dags = listing.details.dags as any[];

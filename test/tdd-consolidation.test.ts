@@ -57,14 +57,14 @@ vi.mock("../src/settings/config.js", () => ({
 				"acp_session_set_model", "acp_session_set_mode", "acp_cancel",
 				"acp_session_list", "acp_session_shutdown", "acp_session_kill",
 				"acp_prune", "acp_delegate", "acp_broadcast", "acp_compare",
-				"acp_task_create", "acp_task_list", "acp_task_get", "acp_task_assign",
+				"acp_task", "acp_task_list", "acp_task_get", "acp_task_assign",
 				"acp_task_set_status", "acp_task_dependency_add", "acp_task_dependency_remove",
 				"acp_task_clear", "acp_message_send", "acp_message_list",
 				"acp_plan_request", "acp_plan_resolve", "acp_model_policy_get",
 				"acp_model_policy_check", "acp_doctor", "acp_runtime_info",
 				"acp_env", "acp_event_log", "acp_cleanup",
 				// New consolidated tools
-				"acp_task_update", "acp_message",
+				"acp_task", "acp_msg",
 				"acp_worker_spawn",
 			].map((n) => [n, { enabled: true }])
 		),
@@ -75,13 +75,13 @@ vi.mock("../src/settings/config.js", () => ({
 		"acp_session_set_model", "acp_session_set_mode", "acp_cancel",
 		"acp_session_list", "acp_session_shutdown", "acp_session_kill",
 		"acp_prune", "acp_delegate", "acp_broadcast", "acp_compare",
-		"acp_task_create", "acp_task_list", "acp_task_get", "acp_task_assign",
+		"acp_task", "acp_task_list", "acp_task_get", "acp_task_assign",
 		"acp_task_set_status", "acp_task_dependency_add", "acp_task_dependency_remove",
 		"acp_task_clear", "acp_message_send", "acp_message_list",
 		"acp_plan_request", "acp_plan_resolve", "acp_model_policy_get",
 		"acp_model_policy_check", "acp_doctor", "acp_runtime_info",
 		"acp_env", "acp_event_log", "acp_cleanup",
-		"acp_task_update", "acp_message",
+		"acp_task", "acp_msg",
 		"acp_worker_spawn",
 	],
 }));
@@ -334,12 +334,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 			"acp_fanout",
 			"acp_governance",
 			"acp_status",
-			"acp_task_create",
-			"acp_task_update",
-			"acp_message",
-			"acp_dag_submit",
-			"acp_dag_status",
-			"acp_dag_cancel",
+			"acp_task",
+			"acp_dag",
 		];
 
 		it.each(EXPECTED_TOOLS)("registers tool: %s", (toolName) => {
@@ -366,7 +362,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 			"acp_runtime_info",
 			"acp_env",
 			"acp_event_log",
-			// Merged into consolidated tools
+			// Merged into consolidated tools (first wave)
 			"acp_delegate",
 			"acp_compare",
 			"acp_task_assign",
@@ -376,6 +372,13 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 			"acp_task_clear",
 			"acp_message_send",
 			"acp_message_list",
+			// Second-wave consolidation (11 → 7)
+			"acp_task_create",
+			"acp_task_update",
+			"acp_message",
+			"acp_dag_submit",
+			"acp_dag_status",
+			"acp_dag_cancel",
 			// Deleted
 			"acp_plan_request",
 			"acp_plan_resolve",
@@ -670,8 +673,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 	describe("4. acp_task_update Consolidation", () => {
 		// TODO: implement consolidation first — acp_task_update tool
 		it("has parameters: task_id, status, assignee, deps_add, deps_remove, result, filter", () => {
-			expect(hasTool("acp_task_update")).toBe(true);
-			const params = paramsFor("acp_task_update");
+			expect(hasTool("acp_task")).toBe(true);
+			const params = paramsFor("acp_task");
 			expect(params).toHaveProperty("task_id");
 			expect(params).toHaveProperty("status");
 			expect(params).toHaveProperty("assignee");
@@ -688,7 +691,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 				return t;
 			});
 
-			const r = await exec("acp_task_update", {
+			const r = await exec("acp_task", {
+				action: "update",
 				task_id: "1",
 				status: "in_progress",
 			});
@@ -698,7 +702,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 		});
 
 		it("handles assign changes via assignee param", async () => {
-			const r = await exec("acp_task_update", {
+			const r = await exec("acp_task", {
+				action: "update",
 				task_id: "1",
 				assignee: "gemini",
 			});
@@ -712,7 +717,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 				return t;
 			});
 
-			const r = await exec("acp_task_update", {
+			const r = await exec("acp_task", {
+				action: "update",
 				task_id: "1",
 				deps_add: ["3"],
 				deps_remove: ["2"],
@@ -730,7 +736,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 				{ id: "2", status: "deleted", subject: "done task 2" },
 			]);
 
-			const r = await exec("acp_task_update", {
+			const r = await exec("acp_task", {
+				action: "update",
 				task_id: "*",
 				status: "deleted",
 				filter: "completed",
@@ -748,7 +755,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 				return t;
 			});
 
-			await exec("acp_task_update", {
+			await exec("acp_task", {
+				action: "update",
 				task_id: "1",
 				status: "completed",
 				result: "All tests passed",
@@ -768,7 +776,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 
 	describe("4b. acp_task_create", () => {
 		it("has parameters: subject, description, assignee, deps", () => {
-			const params = paramsFor("acp_task_create");
+			const params = paramsFor("acp_task");
 			expect(params).toHaveProperty("subject");
 			expect(params).toHaveProperty("description");
 			expect(params).toHaveProperty("assignee");
@@ -778,7 +786,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 
 		// TODO: implement store change first — deps passed to store.create
 		it("creates task with optional deps", async () => {
-			const r = await exec("acp_task_create", {
+			const r = await exec("acp_task", {
+				action: "create",
 				subject: "Build feature",
 				assignee: "gemini",
 				deps: ["1", "2"],
@@ -793,7 +802,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 		});
 
 		it("creates task without deps (backward compatible)", async () => {
-			const r = await exec("acp_task_create", {
+			const r = await exec("acp_task", {
+				action: "create",
 				subject: "Simple task",
 			});
 			expect(m.ts.create).toHaveBeenCalled();
@@ -809,8 +819,8 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 	describe("5. acp_message Consolidation", () => {
 		// TODO: implement consolidation first — acp_message tool
 		it("has parameters: action, to, message, kind, from, recipient, filter", () => {
-			expect(hasTool("acp_message")).toBe(true);
-			const params = paramsFor("acp_message");
+			expect(hasTool("acp_msg")).toBe(true);
+			const params = paramsFor("acp_msg");
 			expect(params).toHaveProperty("action");
 			expect(params).toHaveProperty("to");
 			expect(params).toHaveProperty("message");
@@ -821,7 +831,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 		});
 
 		it('action:"send" with kind:"dm" sends DM', async () => {
-			await exec("acp_message", {
+			await exec("acp_msg", {
 				action: "send",
 				to: "gemini",
 				message: "Check this",
@@ -837,7 +847,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 		});
 
 		it('action:"send" with to:"*" broadcasts', async () => {
-			await exec("acp_message", {
+			await exec("acp_msg", {
 				action: "send",
 				to: "*",
 				message: "Sync up",
@@ -851,7 +861,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 		});
 
 		it('action:"send" with kind:"steer" steers', async () => {
-			await exec("acp_message", {
+			await exec("acp_msg", {
 				action: "send",
 				to: "gemini",
 				message: "Stop",
@@ -870,7 +880,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 				{ id: "1", from: "leader", to: "gemini", message: "hi", kind: "dm" },
 			]);
 
-			const r = await exec("acp_message", { action: "list" });
+			const r = await exec("acp_msg", { action: "list" });
 			expect(m.mb.listAll).toHaveBeenCalled();
 		});
 
@@ -879,7 +889,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 				{ id: "1", from: "leader", to: "gemini", message: "hi", kind: "dm" },
 			]);
 
-			const r = await exec("acp_message", {
+			const r = await exec("acp_msg", {
 				action: "list",
 				recipient: "gemini",
 			});
@@ -889,7 +899,7 @@ describe("Consolidated Tool Surface (33 → 7)", () => {
 		it('action:"list" with filter:"unread" filters', async () => {
 			m.mb.listFor.mockReturnValue([]);
 
-			const r = await exec("acp_message", {
+			const r = await exec("acp_msg", {
 				action: "list",
 				recipient: "gemini",
 				filter: "unread",

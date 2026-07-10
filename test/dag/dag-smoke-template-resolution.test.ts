@@ -133,7 +133,7 @@ const ctx = { cwd: "/project", ui: { setWidget: vi.fn(), notify: vi.fn() } };
  */
 async function waitForTerminal(tools: Map<string, any>, exec: (n: string, p: any) => any, dagId: string) {
 	for (let i = 0; i < 100; i++) {
-		const status = await exec("acp_dag_status", { dagId });
+		const status = await exec("acp_dag", { action: "status", dagId });
 		if (["completed", "failed", "cancelled"].includes(status.details.status)) {
 			return status.details;
 		}
@@ -197,7 +197,7 @@ describe("DAG smoke — template variable resolution (task 8.2)", () => {
 
 		// 1. Submit a 2-step linear DAG whose step-2 prompt carries the
 		//    literal {step1.output} placeholder.
-		const submit = await exec("acp_dag_submit", {
+		const submit = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "step1", agent: "gemini", prompt: "Research authentication approaches" },
 				{
@@ -251,7 +251,7 @@ describe("DAG smoke — template variable resolution (task 8.2)", () => {
 			return { text: `ECHO>> ${message}`, stopReason: "end_turn", sessionId: "sink-1" };
 		});
 
-		const submit = await exec("acp_dag_submit", {
+		const submit = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "backend", agent: "gemini", prompt: "List backend frameworks" },
 				{ id: "frontend", agent: "gemini", prompt: "List frontend frameworks" },

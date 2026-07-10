@@ -244,6 +244,15 @@ export default function (pi: ExtensionAPI) {
   const mailboxManager = () => getStores().mailboxManager;
   const governanceStore = () => getStores().governanceStore;
 
+  /** Defensive worker lookup — returns undefined if the store or .get() is unavailable (e.g. partial test mocks). */
+  function safeWorkerGet(name: string) {
+    try {
+      const ws = workerStore();
+      if (ws && typeof ws.get === "function") return ws.get(name);
+    } catch { /* store unavailable */ }
+    return undefined;
+  }
+
   // SessionArchiveStore is GLOBAL (catalogs all sessions) — not session-scoped
   const sessionArchiveStore = new SessionArchiveStore(runtimePaths.rootDir);
 
@@ -983,26 +992,77 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ── acp_msg ──
-  if (isToolEnabled(toolSettings, "acp_msg")) pi.registerTool({
+  // ── acp_msg (unified: session-level + mailbox-level) ──
+  // Consolidates acp_msg (session-level: prompt/steer/cancel) + acp_message (mailbox: send/list).
+  if (isToolEnabled(toolSettings, "acp_msg") || isToolEnabled(toolSettings, "acp_message")) pi.registerTool({
     name: "acp_msg",
     label: "ACP Msg",
-    description: "Send a message to an ACP session or worker (live or archived). Auto-detects state: alive->prompt, disposed->reopen, busy->queue steer. cancel:true aborts the in-flight turn.",
-    promptSnippet: "acp_msg — message/prompt/cancel/steer a session or worker",
+    description: "Unified messaging. action:'send' routes to session (session_id) or mailbox (to). action:'list' returns mailbox messages. Session-level: alive->prompt, disposed->reopen, busy->steer. cancel:true aborts. Backward-compat: acp_message config key also gates this tool.",
+    promptSnippet: "acp_msg — unified send/list: session prompt/steer/cancel + mailbox dm/steer/broadcast",
     parameters: Type.Object({
-      to: Type.String({ description: "Target: session id, session name, or worker name" }),
-      message: Type.String({ description: "Message/prompt text to send (or steer text when queued)" }),
+      action: Type.Optional(Type.String({ description: "'send' (default) or 'list'" })),
+      to: Type.Optional(Type.String({ description: "Target agent name (mailbox send), session id/name, or worker name. '*' = broadcast." })),
+      session_id: Type.Optional(Type.String({ description: "Target a session by ID (session-level send/steer/cancel). Takes precedence over 'to'." })),
+      message: Type.Optional(Type.String({ description: "Message/prompt text (required for action 'send')" })),
+      kind: Type.Optional(Type.String({ description: "Mailbox kind: 'dm', 'steer', 'broadcast' (default: dm, or broadcast when to='*')" })),
+      from: Type.Optional(Type.String({ description: "Sender name for mailbox send (default: 'user')" })),
+      recipient: Type.Optional(Type.String({ description: "Recipient agent for action 'list'" })),
+      filter: Type.Optional(Type.String({ description: "Filter for list: 'unread'" })),
       cancel: Type.Optional(Type.Boolean({ description: "If true, cancel the in-flight turn instead of prompting." })),
       queue: Type.Optional(Type.Boolean({ description: "Force queue-as-steer even if target is idle." })),
       agent: Type.Optional(Type.String({ description: "Agent override when reopening an archived session" })),
       cwd: Type.Optional(Type.String({ description: "Working directory when reopening" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const target = requireString(params.to, "to");
-      const message = requireString(params.message, "message");
+      const action = params.action ?? "send";
+
+      // ── action: "list" → mailbox list ──
+      if (action === "list") {
+        if (params.recipient) {
+          const messages = mailboxManager().listFor(params.recipient);
+          refreshWidget(ctx);
+          return { content: [textContent(`${messages.length} messages for ${params.recipient}.`)], details: { messages } };
+        }
+        const messages = mailboxManager().listAll?.() ?? [];
+        refreshWidget(ctx);
+        return { content: [textContent(`${messages.length} total messages.`)], details: { messages } };
+      }
+
+      // ── invalid action → error ──
+      if (action !== "send") {
+        return { content: [textContent(`Unknown action: ${action}. Use 'send' or 'list'.`)], details: { error: "unknown_action" } };
+      }
+
+      // ── validate message for action 'send' ──
+      const message = params.message;
+      if (!message || (typeof message === "string" && message.trim() === "")) {
+        return { content: [textContent(`Error: 'message' is required for action 'send'.`)], details: { error: "missing_message" } };
+      }
+
+      // ── MAILBOX SEND: `to` present without `session_id`, and not cancel/worker/session ──
+      if (params.to && !params.session_id && !params.cancel) {
+        const mbWorker = safeWorkerGet(params.to);
+        let mbResolved = resolveSessionTarget({ session_name: params.to, agent: params.agent });
+        if (!mbResolved.sessionId) mbResolved = resolveSessionTarget({ session_id: params.to, agent: params.agent });
+        const mbSessionId = mbResolved.sessionId;
+        const mbLiveHandle = mbSessionId ? sessionMgr.get(mbSessionId) : undefined;
+        // If no worker and no resolved session metadata (live or archived) → mailbox send
+        if (!mbWorker && !mbResolved.metadata && !(mbLiveHandle && !mbLiveHandle.disposed)) {
+          const kind: "dm" | "steer" | "broadcast" = params.to === "*" ? "broadcast" : ((params.kind as "dm" | "steer" | "broadcast" | undefined) ?? "dm");
+          const result = mailboxManager().send({ from: params.from ?? "user", to: params.to, message, kind });
+          refreshWidget(ctx);
+          return { content: [textContent(`Message sent to ${params.to} (${kind}).`)], details: { messageId: result.id } };
+        }
+      }
+
+      // ── SESSION-LEVEL: session_id takes precedence, else `to` ──
+      const target = params.session_id ?? params.to ?? "";
+      if (!target) {
+        return { content: [textContent(`Error: provide 'session_id' or 'to' for action 'send'.`)], details: { error: "missing_target" } };
+      }
 
       // (1) Worker resolution.
-      const worker = workerStore().get(target);
+      const worker = safeWorkerGet(target);
       if (worker) {
         const sessionId = worker.sessionId;
         if (params.cancel) {
@@ -1133,7 +1193,7 @@ export default function (pi: ExtensionAPI) {
           // sessions skip the futile loadSession call and fall back to fresh.
           let newSessionId: string;
           let warningPrefix = ""; // prepended to the response when we could not recover history.
-          const archived = (sessionId && resolved.metadata && !liveHandle) ? resolved.metadata : undefined;
+          const archived = (sessionId && (resolved.metadata || liveHandle?.disposed)) ? (resolved.metadata ?? liveHandle) : undefined;
           if (archived) {
             // Phase 3.4: Permanently unloadable (>=3 failed attempts) — skip loadSession.
             if (archived.loadStatus === "unloadable" && (archived.loadAttemptCount ?? 0) >= 3) {
@@ -1428,7 +1488,7 @@ export default function (pi: ExtensionAPI) {
       endWidgetActivity("broadcast", ctx);
       return { content: [textContent(`Fanout results:\n\n${lines.join("\n\n")}`)], details: { results: result.value } };
       } finally {
-        coordinator.dispose();
+        coordinator?.dispose?.();
       }
     },
   });
@@ -1437,117 +1497,88 @@ export default function (pi: ExtensionAPI) {
   // Parallel delegation tool
 
   // ── Consolidated tools (33→7 mode) ──
-  if (isToolEnabled(toolSettings, "acp_task_update")) pi.registerTool({
-      name: "acp_task_update",
-    label: "ACP Task Update",
-    description: "Update task status, assignee, dependencies, or result. Consolidates acp_task_assign, acp_task_set_status, acp_task_dep_add/rm, acp_task_clear. Supports bulk ops with task_id='*'.",
-    promptSnippet: "acp_task_update — update task properties",
+  // ── acp_task (unified: create + update) ──
+  if (isToolEnabled(toolSettings, "acp_task") || isToolEnabled(toolSettings, "acp_task_create") || isToolEnabled(toolSettings, "acp_task_update")) pi.registerTool({
+    name: "acp_task",
+    label: "ACP Task",
+    description: "Create or update persistent ACP tasks. action:'create' makes a new task; action:'update' modifies status/assignee/deps/result. Supports bulk ops with task_id='*'.",
+    promptSnippet: "acp_task — create or update ACP tasks",
     parameters: Type.Object({
-      task_id: Type.String({ description: "Task ID, or '*' for bulk operations" }),
-      status: Type.Optional(Type.String({ description: "New status: pending, in_progress, completed, deleted" })),
-      assignee: Type.Optional(Type.String({ description: "Assign to agent, or empty string to unassign" })),
-      deps_add: Type.Optional(Type.Array(Type.String(), { description: "Add these task IDs as dependencies" })),
-      deps_remove: Type.Optional(Type.Array(Type.String(), { description: "Remove these task IDs from dependencies" })),
-      result: Type.Optional(Type.String({ description: "Store result text on the task" })),
+      action: Type.String({ description: "'create' or 'update'" }),
+      subject: Type.Optional(Type.String({ description: "Task subject (required for create)" })),
+      description: Type.Optional(Type.String({ description: "Task description (for create)" })),
+      assignee: Type.Optional(Type.String({ description: "Assign to agent (for create or update)" })),
+      deps: Type.Optional(Type.Array(Type.String(), { description: "Dependencies (for create)" })),
+      task_id: Type.Optional(Type.String({ description: "Task ID for update, or '*' for bulk" })),
+      status: Type.Optional(Type.String({ description: "New status (for update): pending, in_progress, completed, deleted" })),
+      deps_add: Type.Optional(Type.Array(Type.String(), { description: "Add dependencies (for update)" })),
+      deps_remove: Type.Optional(Type.Array(Type.String(), { description: "Remove dependencies (for update)" })),
+      result: Type.Optional(Type.String({ description: "Store result text (for update)" })),
       filter: Type.Optional(Type.String({ description: "Filter for bulk ops: 'completed', 'pending', 'in_progress'" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      // Bulk operation
-      if (params.task_id === "*") {
-        const filter = params.filter ?? "";
-        const updated = taskStore().updateWhere(filter, (t: any) => {
+      if (params.action === "create") {
+        if (!params.subject) {
+          return { content: [textContent("Error: subject is required for action:'create'.")], details: { error: "missing_subject" } };
+        }
+        const task = taskStore().create({
+          subject: params.subject,
+          description: params.description,
+          assignee: params.assignee,
+          deps: params.deps,
+        });
+        eventLog.append("task_create", { taskId: task.id, assignee: task.assignee });
+        return { content: [textContent(formatJson(task))], details: task };
+      }
+
+      if (params.action === "update") {
+        if (!params.task_id) {
+          return { content: [textContent("Error: task_id is required for action:'update' (use '*' for bulk).")], details: { error: "missing_task_id" } };
+        }
+
+        // Bulk operation
+        if (params.task_id === "*") {
+          const filter = params.filter ?? "";
+          const updated = taskStore().updateWhere(filter, (t: any) => {
+            if (params.status) t.status = params.status;
+            if (params.assignee !== undefined) t.assignee = params.assignee || null;
+            if (params.result) t.result = params.result;
+            t.updatedAt = new Date().toISOString();
+          });
+          return { content: [textContent(`Bulk updated ${updated.length} tasks matching '${filter}'.`)], details: { updated: updated.length } };
+        }
+
+        // Single task
+        const updated = taskStore().update(params.task_id, (t: any) => {
           if (params.status) t.status = params.status;
           if (params.assignee !== undefined) t.assignee = params.assignee || null;
           if (params.result) t.result = params.result;
+          if (params.deps_add) {
+            for (const dep of params.deps_add) {
+              if (!t.blockedBy.includes(dep)) t.blockedBy.push(dep);
+            }
+          }
+          if (params.deps_remove) {
+            t.blockedBy = t.blockedBy.filter((d: string) => !params.deps_remove!.includes(d));
+          }
           t.updatedAt = new Date().toISOString();
         });
-        return { content: [textContent(`Bulk updated ${updated.length} tasks matching '${filter}'.`)], details: { updated: updated.length } };
+        if (!updated) {
+          return { content: [textContent(`Error: task ${params.task_id} not found.`)], details: { error: "not_found" } };
+        }
+        return { content: [textContent(`Task ${params.task_id} updated.`)], details: { task: updated } };
       }
 
-      // Single task
-      const updated = taskStore().update(params.task_id, (t: any) => {
-        if (params.status) t.status = params.status;
-        if (params.assignee !== undefined) t.assignee = params.assignee || null;
-        if (params.result) t.result = params.result;
-        if (params.deps_add) {
-          for (const dep of params.deps_add) {
-            if (!t.blockedBy.includes(dep)) t.blockedBy.push(dep);
-          }
-        }
-        if (params.deps_remove) {
-          t.blockedBy = t.blockedBy.filter((d: string) => !params.deps_remove!.includes(d));
-        }
-        t.updatedAt = new Date().toISOString();
-      });
-      if (!updated) {
-        return { content: [textContent(`Task ${params.task_id} not found.`)], details: { error: "not_found" } };
-      }
-      return { content: [textContent(`Task ${params.task_id} updated.`)], details: { task: updated } };
+      return { content: [textContent(`Error: unknown action '${params.action}'. Use 'create' or 'update'.`)], details: { error: "unknown_action" } };
     },
   });
 
-  if (isToolEnabled(toolSettings, "acp_message")) pi.registerTool({
-      name: "acp_message",
-    label: "ACP Message",
-    description: "Send or list messages. Consolidates acp_message_send and acp_message_list. Use action:'send' with kind:'dm'/'steer'/'broadcast', or action:'list'.",
-    promptSnippet: "acp_message — send or list messages",
-    parameters: Type.Object({
-      action: Type.String({ description: "'send' or 'list'" }),
-      to: Type.Optional(Type.String({ description: "Recipient agent name, or '*' for broadcast" })),
-      message: Type.Optional(Type.String({ description: "Message text (for send)" })),
-      kind: Type.Optional(Type.String({ description: "'dm', 'steer', 'broadcast'" })),
-      from: Type.Optional(Type.String({ description: "Sender name" })),
-      recipient: Type.Optional(Type.String({ description: "Recipient for list action" })),
-      filter: Type.Optional(Type.String({ description: "Filter for list: 'unread'" })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (params.action === "send") {
-        const kind: "dm" | "steer" | "broadcast" = params.to === "*" ? "broadcast" : ((params.kind as "dm" | "steer" | "broadcast" | undefined) ?? "dm");
-        const result = mailboxManager().send({
-          from: params.from ?? "user",
-          to: params.to ?? "",
-          message: params.message ?? "",
-          kind,
-        });
-        return { content: [textContent(`Message sent to ${params.to} (${kind}).`)], details: { messageId: result.id } };
-      }
-
-      if (params.action === "list") {
-        if (params.recipient) {
-          const messages = mailboxManager().listFor(params.recipient);
-          return { content: [textContent(`${messages.length} messages for ${params.recipient}.`)], details: { messages } };
-        }
-        // List all
-        const messages = mailboxManager().listAll?.() ?? [];
-        return { content: [textContent(`${messages.length} total messages.`)], details: { messages } };
-      }
-
-      return { content: [textContent(`Unknown action: ${params.action}. Use 'send' or 'list'.`)], details: { error: "unknown_action" } };
-    },
-  });
+  // (acp_message folded into unified acp_msg above — mailbox send/list now via acp_msg action)
 
   // Lifecycle / management tools
 
 
-  // Task layer tools
-  if (isToolEnabled(toolSettings, "acp_task_create")) pi.registerTool({
-      name: "acp_task_create",
-    label: "ACP Task Create",
-    description: "Create a persistent ACP task in the runtime task store.",
-    promptSnippet: "acp_task_create — create ACP task",
-    parameters: Type.Object({
-      subject: Type.String({ description: "Short task subject" }),
-      description: Type.Optional(Type.String({ description: "Longer task details" })),
-      assignee: Type.Optional(Type.String({ description: "Optional agent assignee" })),
-      deps: Type.Optional(Type.Array(Type.String(), { description: "Task IDs this task depends on" })),
-    }),
-    async execute(_toolCallId, params) {
-      const task = taskStore().create({ subject: params.subject, description: params.description, assignee: params.assignee, deps: params.deps });
-      eventLog.append("task_create", { taskId: task.id, assignee: task.assignee });
-      return { content: [textContent(formatJson(task))], details: task };
-    },
-  });
-
+  // (acp_task_create + acp_task_update consolidated into acp_task above)
 
   // Messaging + governance + diagnostics
 
@@ -1822,179 +1853,200 @@ export default function (pi: ExtensionAPI) {
     return true;
   }
 
-  // ── DAG tools ────────────────────────────────────────────────────────
-
-  if (isToolEnabled(toolSettings, "acp_dag_submit")) pi.registerTool({
-    name: "acp_dag_submit",
-    label: "ACP DAG Submit",
-    description: "Submit a complete DAG (directed acyclic graph) of ACP agent tasks in a single call. Validates statically (cycles, dangling refs, duplicate IDs, agent availability, reserved IDs), creates the DAG, starts wave-based background execution, and returns the dagId immediately.",
-    promptSnippet: "acp_dag_submit — submit a DAG of ACP agent tasks and start background execution",
+  // ── DAG tools (consolidated into unified acp_dag) ─────────────────────
+  // Consolidates acp_dag_submit + acp_dag_status + acp_dag_cancel.
+  // Backward-compat: any of the legacy config keys (acp_dag_submit, _status, _cancel)
+  // enables the unified acp_dag tool.
+  if (
+    isToolEnabled(toolSettings, "acp_dag") ||
+    isToolEnabled(toolSettings, "acp_dag_submit") ||
+    isToolEnabled(toolSettings, "acp_dag_status") ||
+    isToolEnabled(toolSettings, "acp_dag_cancel")
+  ) pi.registerTool({
+    name: "acp_dag",
+    label: "ACP DAG",
+    description: "Unified DAG operations. action:'submit' validates + creates + starts background wave execution; action:'status' returns one DAG (dag_id) or lists all; action:'cancel' aborts a running DAG.",
+    promptSnippet: "acp_dag — submit/status/cancel a DAG of ACP agent tasks",
     parameters: Type.Object({
-      tasks: Type.Array(Type.Object({
-        id: Type.String({ description: "Unique step identifier" }),
-        agent: Type.String({ description: "Agent name (must exist in agent_servers config)" }),
-        prompt: Type.String({ description: "Prompt text. May contain {<step-id>.output}, {<step-id>.status}, {dag.args.<key>} template variables." }),
-        dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Step IDs this step depends on (default: [])" })),
-        gate: Type.Optional(Type.Union([Type.Literal("needs"), Type.Literal("after")], { description: "Gate type for ALL dependencies. needs = success-gate (default), after = completion-gate" })),
-      }), { description: "DAG task definitions" }),
-      args: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Workflow-level arguments for {dag.args.*} template variables" })),
-      options: Type.Optional(Type.Object({
-        failFast: Type.Optional(Type.Boolean({ description: "On failure, skip transitive dependents. Default: true" })),
-        maxRetries: Type.Optional(Type.Number({ description: "Retry attempts per step on failure. Default: 0" })),
-      })),
-      cwd: Type.Optional(Type.String({ description: "Working directory for all DAG steps" })),
+      action: Type.String({ description: "'submit' | 'status' | 'cancel'" }),
+      dag: Type.Optional(Type.Object({
+        nodes: Type.Array(Type.Object({
+          id: Type.String({ description: "Unique step identifier" }),
+          agent: Type.String({ description: "Agent name (must exist in agent_servers config)" }),
+          prompt: Type.String({ description: "Prompt text. May contain {<step-id>.output}, {<step-id>.status}, {dag.args.<key>} template variables." }),
+          deps: Type.Optional(Type.Array(Type.String(), { description: "Step IDs this step depends on (default: [])" })),
+          dependsOn: Type.Optional(Type.Array(Type.String(), { description: "Alias for deps (legacy compat)" })),
+          gate: Type.Optional(Type.Union([Type.Literal("needs"), Type.Literal("after")], { description: "Gate type for ALL dependencies. needs = success-gate (default), after = completion-gate" })),
+        }), { description: "DAG node definitions" }),
+        args: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Workflow-level arguments for {dag.args.*} template variables" })),
+        options: Type.Optional(Type.Object({
+          failFast: Type.Optional(Type.Boolean({ description: "On failure, skip transitive dependents. Default: true" })),
+          maxRetries: Type.Optional(Type.Number({ description: "Retry attempts per step on failure. Default: 0" })),
+        })),
+        tasks: Type.Optional(Type.Array(Type.Any(), { description: "Legacy raw task array (pre-node-shape). Passed through as-is." })),
+      }, { description: "DAG definition (for action:'submit'). Shape: { nodes: [...], args: {...}, options: {...} }. Backward-compat: a raw tasks array under .tasks is passed through." })),
+      tasks: Type.Optional(Type.Array(Type.Any(), { description: "Legacy: raw DAG tasks array (alternative to dag.nodes). Used if dag omitted." })),
+      dag_id: Type.Optional(Type.String({ description: "DAG ID for action:'status' or 'cancel'. Omit for status to list all." })),
+      dagId: Type.Optional(Type.String({ description: "Alias for dag_id (legacy compat)" })),
+      cwd: Type.Optional(Type.String({ description: "Working directory for all DAG steps (action:'submit')" })),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const tasks = params.tasks;
-      if (!Array.isArray(tasks) || tasks.length === 0) {
-        return { content: [textContent("acp_dag_submit requires a non-empty \"tasks\" array.")], details: { error: "no tasks" } };
-      }
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<any>> {
+      const action = params.action;
 
-      // 1. Static validation against the configured agent set.
-      const agentNames = new Set(Object.keys(config.agent_servers));
-      const validation = dagValidator.validate(tasks, agentNames);
-      if (!validation.valid) {
-        const message = `DAG validation failed: ${validation.errors.join("; ")}`;
-        eventLog.append("dag_submit_rejected", { errors: validation.errors });
-        return { content: [textContent(message)], details: { error: "validation_failed", violations: validation.errors } };
-      }
+      // ── action: submit ──
+      if (action === "submit") {
+        // Normalize the DAG shape: accept dag.nodes, dag.tasks, or top-level tasks.
+        const dag: any = params.dag ?? {};
+        let tasks: any[] | undefined;
+        if (Array.isArray(dag.nodes) && dag.nodes.length > 0) {
+          // Map node shape → legacy task shape (id, agent, prompt, dependsOn/deps).
+          tasks = dag.nodes.map((n: any) => ({
+            id: n.id,
+            agent: n.agent,
+            prompt: n.prompt,
+            dependsOn: n.dependsOn ?? n.deps ?? [],
+            gate: n.gate,
+          }));
+        } else if (Array.isArray(dag.tasks) && dag.tasks.length > 0) {
+          tasks = dag.tasks;
+        } else if (Array.isArray(params.tasks) && params.tasks.length > 0) {
+          tasks = params.tasks;
+        }
 
-      // 2. Create the DAG record via the file-backed store.
-      const record = dagStore.create({
-        tasks,
-        args: params.args,
-        options: params.options ?? {},
-      });
+        if (!tasks || tasks.length === 0) {
+          return { content: [textContent("Error: action 'submit' requires a non-empty DAG (dag.nodes, dag.tasks, or tasks).")], details: { error: "no_dag" } };
+        }
 
-      // 3. Build a per-call coordinator + executor with the current cwd and
-      //    circuit breaker, then kick off execution in the background
-      //    (fire-and-forget). The dagId is returned immediately.
-      const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd, {
-        isHealthyFn: (name) => cb.isHealthy(name),
-        recordSuccessFn: (name) => cb.recordSuccess(name),
-        recordFailureFn: (name) => cb.recordFailure(name),
-      });
-      // Existing AsyncExecutor singleton wired into the DagExecutor (task
-      // 7.1). The wave loop is driven directly by the executor (design.md
-      // D2 / task 5.3), but the AsyncExecutor is retained on the instance
-      // for integration with the rest of the background-dispatch infra.
-      const asyncExecutor = new AsyncExecutor(coordinator, runtimePaths.rootDir);
-      const dagExecutor = new DagExecutor({
-        store: dagStore,
-        resolver: dagTemplateResolver,
-        coordinator,
-        asyncExecutor,
-        circuitBreaker: cb,
-        logger,
-        eventLog,
-      });
+        // 1. Static validation against the configured agent set.
+        const agentNames = new Set(Object.keys(config.agent_servers));
+        const validation = dagValidator.validate(tasks, agentNames);
+        if (!validation.valid) {
+          const message = `DAG validation failed: ${validation.errors.join("; ")}`;
+          eventLog.append("dag_submit_rejected", { errors: validation.errors });
+          return { content: [textContent(message)], details: { error: "validation_failed", violations: validation.errors } };
+        }
 
-      // Fire-and-forget: errors are captured per step into the DAG state file.
-      dagExecutor.execute(record.dagId).catch((err) => {
-        logger.error(`acp_dag_submit background execution failed for dagId=${record.dagId}`, { error: err instanceof Error ? err.message : String(err) });
-        eventLog.append("dag_execute_failed", { dagId: record.dagId, error: err instanceof Error ? err.message : String(err) });
-      }).finally(() => {
-        coordinator.dispose();
-      });
+        // 2. Create the DAG record via the file-backed store.
+        //    Backward-compat: also accept top-level args/options when dag object omitted.
+        const record = dagStore.create({
+          tasks,
+          args: dag.args ?? (params as any).args,
+          options: dag.options ?? (params as any).options ?? {},
+        });
 
-      eventLog.append("dag_submitted", { dagId: record.dagId, stepCount: tasks.length });
-      return {
-        content: [textContent(`Submitted DAG "${record.dagId}" with ${tasks.length} step(s). Execution started in the background.`)],
-        details: { dagId: record.dagId, stepCount: tasks.length },
-      };
-    },
-  });
+        // 3. Build a per-call coordinator + executor with the current cwd and
+        //    circuit breaker, then kick off execution in the background
+        //    (fire-and-forget). The dagId is returned immediately.
+        const coordinator = new AgentCoordinator(config, params.cwd ?? ctx.cwd, {
+          isHealthyFn: (name) => cb.isHealthy(name),
+          recordSuccessFn: (name) => cb.recordSuccess(name),
+          recordFailureFn: (name) => cb.recordFailure(name),
+        });
+        const asyncExecutor = new AsyncExecutor(coordinator, runtimePaths.rootDir);
+        const dagExecutor = new DagExecutor({
+          store: dagStore,
+          resolver: dagTemplateResolver,
+          coordinator,
+          asyncExecutor,
+          circuitBreaker: cb,
+          logger,
+          eventLog,
+        });
 
-  if (isToolEnabled(toolSettings, "acp_dag_status")) pi.registerTool({
-    name: "acp_dag_status",
-    label: "ACP DAG Status",
-    description: "Query the execution state of a DAG. With a dagId, returns the full DAG state (status, all steps with their statuses, outputs, errors, dependencies, wave progress). Without a dagId, lists all DAGs with summary status.",
-    promptSnippet: "acp_dag_status — get full DAG state or list all DAGs",
-    parameters: Type.Object({
-      dagId: Type.Optional(Type.String({ description: "DAG ID to inspect. Omit to list all DAGs." })),
-    }),
-    async execute(_toolCallId, params): Promise<AgentToolResult<{ dagId?: string; status?: string; currentWave?: number; totalWaves?: number; dags?: DagIndexEntry[]; count?: number; error?: string }>> {
-      const dagId = params.dagId?.trim();
+        // Fire-and-forget: errors are captured per step into the DAG state file.
+        dagExecutor.execute(record.dagId).catch((err) => {
+          logger.error(`acp_dag(submit) background execution failed for dagId=${record.dagId}`, { error: err instanceof Error ? err.message : String(err) });
+          eventLog.append("dag_execute_failed", { dagId: record.dagId, error: err instanceof Error ? err.message : String(err) });
+        }).finally(() => {
+          coordinator?.dispose?.();
+        });
 
-      // Listing mode: no dagId provided → return all DAGs from the index.
-      if (!dagId) {
-        const dags = dagStore.listAll();
+        eventLog.append("dag_submitted", { dagId: record.dagId, stepCount: tasks.length });
         return {
-          content: [textContent(formatJson({ dags }))],
-          details: { dags, count: dags.length },
+          content: [textContent(`Submitted DAG "${record.dagId}" with ${tasks.length} step(s). Execution started in the background.`)],
+          details: { dagId: record.dagId, stepCount: tasks.length },
         };
       }
 
-      // Detail mode: dagId provided → return the full DAG record.
-      const record = dagStore.get(dagId);
-      if (!record) {
+      // ── action: status ──
+      if (action === "status") {
+        const dagId = (params.dag_id ?? params.dagId ?? "").trim();
+
+        // Listing mode: no dagId provided → return all DAGs from the index.
+        if (!dagId) {
+          const dags = dagStore.listAll();
+          return {
+            content: [textContent(formatJson({ dags }))],
+            details: { dags, count: dags.length },
+          };
+        }
+
+        // Detail mode: dagId provided → return the full DAG record.
+        const record = dagStore.get(dagId);
+        if (!record) {
+          return {
+            content: [textContent(`DAG "${dagId}" not found`)],
+            details: { error: "not_found", dagId },
+          };
+        }
+
         return {
-          content: [textContent(`DAG "${dagId}" not found`)],
-          details: { error: "not_found", dagId },
+          content: [textContent(formatJson(record))],
+          details: { dagId, status: record.status, currentWave: record.currentWave, totalWaves: record.totalWaves },
         };
       }
 
-      return {
-        content: [textContent(formatJson(record))],
-        details: { dagId, status: record.status, currentWave: record.currentWave, totalWaves: record.totalWaves },
-      };
-    },
-  });
+      // ── action: cancel ──
+      if (action === "cancel") {
+        const dagId = (params.dag_id ?? params.dagId ?? "").toString().trim();
+        if (!dagId) {
+          return {
+            content: [textContent("Error: action 'cancel' requires a dag_id.")],
+            details: { error: "missing_dag_id" },
+          };
+        }
 
-  if (isToolEnabled(toolSettings, "acp_dag_cancel")) pi.registerTool({
-    name: "acp_dag_cancel",
-    label: "ACP DAG Cancel",
-    description: "Cancel a running DAG. Aborts in-flight agent sessions, marks all pending/running steps as cancelled, transitions the DAG to cancelled, and returns a summary of the cancellation.",
-    promptSnippet: "acp_dag_cancel — cancel a running DAG and return a cancellation summary",
-    parameters: Type.Object({
-      dagId: Type.String({ description: "DAG ID to cancel" }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx): Promise<AgentToolResult<{ dagId: string; completed?: number; aborted?: number; cancelled?: number; error?: string }>> {
-      const dagId = (params.dagId ?? "").toString().trim();
-      if (!dagId) {
-        return {
-          content: [textContent("acp_dag_cancel requires a non-empty \"dagId\".")],
-          details: { dagId, error: "no_dagId" },
-        };
+        // Build a per-call coordinator + executor (same wiring as submit).
+        // DagExecutor.cancel() reads the persisted step states from the
+        // DagStore to tally the summary and abort in-flight sessions.
+        const coordinator = new AgentCoordinator(config, ctx.cwd, {
+          isHealthyFn: (name) => cb.isHealthy(name),
+          recordSuccessFn: (name) => cb.recordSuccess(name),
+          recordFailureFn: (name) => cb.recordFailure(name),
+        });
+        const asyncExecutor = new AsyncExecutor(coordinator, runtimePaths.rootDir);
+        const dagExecutor = new DagExecutor({
+          store: dagStore,
+          resolver: dagTemplateResolver,
+          coordinator,
+          asyncExecutor,
+          circuitBreaker: cb,
+          logger,
+          eventLog,
+        });
+
+        try {
+          const summary: DagCancelSummary = await dagExecutor.cancel(dagId);
+          eventLog.append("dag_cancelled", { dagId, ...summary });
+          return {
+            content: [textContent(formatJson({ dagId, ...summary }))],
+            details: { dagId, ...summary },
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.error(`acp_dag(cancel) failed for dagId=${dagId}`, { error: message });
+          eventLog.append("dag_cancel_failed", { dagId, error: message });
+          return {
+            content: [textContent(message)],
+            details: { dagId, error: "cancel_failed" },
+          };
+        } finally {
+          coordinator?.dispose?.();
+        }
       }
 
-      // Build a per-call coordinator + executor (same wiring as
-      // acp_dag_submit). DagExecutor.cancel() reads the persisted step states
-      // from the DagStore to tally the summary and abort in-flight sessions.
-      const coordinator = new AgentCoordinator(config, ctx.cwd, {
-        isHealthyFn: (name) => cb.isHealthy(name),
-        recordSuccessFn: (name) => cb.recordSuccess(name),
-        recordFailureFn: (name) => cb.recordFailure(name),
-      });
-      const asyncExecutor = new AsyncExecutor(coordinator, runtimePaths.rootDir);
-      const dagExecutor = new DagExecutor({
-        store: dagStore,
-        resolver: dagTemplateResolver,
-        coordinator,
-        asyncExecutor,
-        circuitBreaker: cb,
-        logger,
-        eventLog,
-      });
-
-      try {
-        const summary: DagCancelSummary = await dagExecutor.cancel(dagId);
-        eventLog.append("dag_cancelled", { dagId, ...summary });
-        return {
-          content: [textContent(formatJson({ dagId, ...summary }))],
-          details: { dagId, ...summary },
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.error(`acp_dag_cancel failed for dagId=${dagId}`, { error: message });
-        eventLog.append("dag_cancel_failed", { dagId, error: message });
-        return {
-          content: [textContent(message)],
-          details: { dagId, error: "cancel_failed" },
-        };
-      } finally {
-        coordinator.dispose();
-      }
+      // ── unknown action ──
+      return { content: [textContent(`Error: unknown action '${action}'. Use 'submit', 'status', or 'cancel'.`)], details: { error: "unknown_action" } };
     },
   });
 

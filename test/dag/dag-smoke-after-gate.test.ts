@@ -171,7 +171,7 @@ describe("DAG smoke — after-gate: 'a' fails, 'b' with gate:'after' still execu
 		});
 
 		// Submit the DAG through the real tool surface with gate:"after".
-		const submit = await exec("acp_dag_submit", {
+		const submit = await exec("acp_dag", { action: "submit",
 			tasks: [
 				{ id: "a", agent: "gemini", prompt: "Research X" },
 				{
@@ -192,7 +192,7 @@ describe("DAG smoke — after-gate: 'a' fails, 'b' with gate:'after' still execu
 		let statusSummary: any;
 		let record: any;
 		for (let i = 0; i < 200; i++) {
-			const status = await exec("acp_dag_status", { dagId });
+			const status = await exec("acp_dag", { action: "status", dagId });
 			statusSummary = status.details;
 			record = JSON.parse(status.content.map((c: any) => c.text).join(""));
 			if (["completed", "failed", "cancelled"].includes(statusSummary.status)) break;

@@ -1,5 +1,6 @@
+vi.mock("../src/hooks/policy-tools.js", () => ({ registerHooksPolicyTools: vi.fn() }));
 /**
- * Tests for the unified 11-tool ACP surface registered by index.ts.
+ * Tests for the unified 7-tool ACP surface registered by index.ts.
  *
  * Old surface (acp_prompt, acp_cancel, acp_broadcast, acp_session_* , acp_worker_*,
  * acp_delegate, acp_compare, governance/doctor/runtime/env/event_log/cleanup/prune)
@@ -137,7 +138,7 @@ describe("ACP Extension Tools", () => {
 		return h;
 	}
 
-it("registers exactly the unified 13 tools (11 core + 2 hooks policy)", () => { expect(tools.size).toBe(13); });
+it("registers exactly the unified 7 tools (second-wave consolidation)", () => { expect(tools.size).toBe(7); });
 
 	it("acp_status overall", async () => { m.sm.size = 1; m.sm.list.mockReturnValue([mkSession("s1")]); const r = await exec("acp_status", {}); expect(r.content[0].text).toContain("Agent Servers: 2 configured"); });
 	it("acp_status specific", async () => { m.sm.get.mockReturnValue(mkSession("s1")); const r = await exec("acp_status", { session_id: "s1" }); expect(r.content[0].text).toContain("Session: s1"); });
@@ -198,7 +199,7 @@ it("registers exactly the unified 13 tools (11 core + 2 hooks policy)", () => { 
 	it.skip("acp_runtime_info [folded into acp_status] — historical marker", async () => { });
 	it.skip("acp_env [removed] — historical marker", async () => { });
 
-	it("acp_task_create", async () => { const r = await exec("acp_task_create", { subject: "Do it" }); expect(JSON.parse(r.content[0].text).subject).toBe("Do it"); });
+	it("acp_task create", async () => { const r = await exec("acp_task", { action: "create", subject: "Do it" }); expect(JSON.parse(r.content[0].text).subject).toBe("Do it"); });
 	it.skip("acp_task_list [REMOVED — consolidated]", async () => { m.ts.list.mockReturnValue([{ id: "1" }]); const r = await exec("acp_task_list", {}); expect(r.details.tasks).toHaveLength(1); });
 	it.skip("acp_task_list filter [REMOVED — consolidated]", async () => { await exec("acp_task_list", { status: "completed", include_deleted: true }); expect(m.ts.list).toHaveBeenCalledWith({ status: "completed", includeDeleted: true }); });
 	it.skip("acp_task_get [REMOVED — consolidated]", async () => { m.ts.get.mockReturnValue({ id: "1", subject: "x" }); const r = await exec("acp_task_get", { task_id: "1" }); expect(JSON.parse(r.content[0].text).subject).toBe("x"); });
