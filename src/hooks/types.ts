@@ -63,6 +63,9 @@ export interface HookContext {
 	team?: { id: string; leadName: string };
 	/** ISO 8601 timestamp. */
 	timestamp: string;
+	/** PID of the host process that published this event. Used by
+	 *  WakeSubscriber for self-echo suppression. */
+	publisherPid?: number;
 }
 
 /** Pre-hook result (LD13 — per-target suppress or blockAll). */
@@ -126,10 +129,14 @@ export const NEVER_DROP_EVENT_TYPES: ReadonlySet<string> = new Set([
 	"acp.spawn_completed",
 ]);
 
-/** Helper: default socket path under the ACP hooks dir. */
+/** Helper: default socket path under the ACP hooks dir.
+ *
+ *  Includes the host process PID to prevent cross-session collision: when
+ *  multiple pi host sessions run simultaneously, each gets its own socket
+ *  so events from one host's subagents are never delivered to another host. */
 function defaultSocketPath(): string {
 	const home = process.env.HOME || process.env.USERPROFILE || "/tmp";
-	return `${home}/.pi/agent/events.sock`;
+	return `${home}/.pi/agent/events-${process.pid}.sock`;
 }
 
 /** Helper: default hooks config dir. */

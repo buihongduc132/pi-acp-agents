@@ -150,14 +150,18 @@ function discoverHookScripts(dir: string): string[] {
 
 /**
  * Build a SocketEvent envelope around a HookContext payload.
+ *
+ * Stamps publisherPid onto the context so the WakeSubscriber can suppress
+ * self-echo (events published by this same process).
  */
 function buildSocketEvent(event: HookEventName, context: HookContext): SocketEvent {
+	const stamped: HookContext = { ...context, publisherPid: process.pid };
 	return {
 		"event-type": `acp.${event}`,
 		"event-id": context.correlationId,
 		timestamp: context.timestamp,
 		source: "acp",
-		payload: context,
+		payload: stamped,
 	};
 }
 
