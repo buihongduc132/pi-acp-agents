@@ -79,6 +79,25 @@ export interface AcpConfig {
 		blockedModels?: string[];
 		requireProviderPrefix?: boolean;
 	};
+	/** Spawn (acp_spawn) behavior options.
+	 *
+	 * asyncDefault controls the async-by-default behavior introduced for
+	 * spawn-with-prompt (LD2/OT4). This is a GLOBAL opt-out for callers that
+	 * need the legacy inline-response contract from `acp_spawn`. Default: true
+	 * (the new async behavior). Per-call `async` parameter still overrides. */
+	spawns?: {
+		/** When true (default), spawn-with-prompt returns immediately with
+		 *  status:'prompting' and runs the prompt in the background. Set false
+		 *  to restore the legacy blocking behavior globally. Per-call `async`
+		 *  param overrides this default. */
+		asyncDefault?: boolean;
+		/** Bounded timeout (ms) the shutdown handler waits for in-flight
+		 *  async-spawn background prompts to resolve before persisting their
+		 *  terminal state. Prevents shutdown hang while avoiding silent data
+		 *  loss. Default: 10_000 (10s). 0 = persist immediately without
+		 *  waiting. */
+		asyncShutdownDrainMs?: number;
+	};
 }
 
 /**

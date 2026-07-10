@@ -37,6 +37,11 @@ export interface PublisherOptions {
 	path: string;
 	maxMessageSize?: number;
 	ringBufferSize?: number;
+	/** High-water mark for the NEVER_DROP (critical) events buffer. When the
+	 *  count of buffered critical events exceeds this, the OLDEST are evicted
+	 *  so memory stays bounded under a sustained burst while the consumer is
+	 *  disconnected. Default: 1000. (CA-8) */
+	criticalEventsCap?: number;
 	broadcastTimeoutMs?: number;
 	/** Injected for testing SO_PEERCRED auth (LD15). */
 	peerCredentialChecker?: (socket: Socket) => PeerCreds | null;
@@ -75,6 +80,10 @@ export class SocketPublisher {
 	private readonly path: string;
 	private readonly maxMessageSize: number;
 	private readonly ringBufferSize: number;
+	/** CA-8: hard cap on the critical-events buffer (NEVER_DROP events).
+	 *  Prevents unbounded memory growth under a sustained burst while the
+	 *  consumer is disconnected. Oldest critical events are evicted first. */
+	private readonly criticalEventsCap: number;
 	private readonly broadcastTimeoutMs: number;
 	private readonly peerCredentialChecker?: (socket: Socket) => PeerCreds | null;
 
@@ -88,6 +97,7 @@ export class SocketPublisher {
 		this.path = opts.path;
 		this.maxMessageSize = opts.maxMessageSize ?? DEFAULT_HOOK_CONFIG.socket.maxMessageSize;
 		this.ringBufferSize = opts.ringBufferSize ?? 100;
+		this.criticalEventsCap = opts.criticalEventsCap ?? 1000;
 		this.broadcastTimeoutMs =
 			opts.broadcastTimeoutMs ?? DEFAULT_HOOK_CONFIG.socket.broadcastTimeoutMs;
 		this.peerCredentialChecker = opts.peerCredentialChecker ?? defaultPeerCredentialChecker();
@@ -222,6 +232,15 @@ export class SocketPublisher {
 		const isCritical = NEVER_DROP_EVENT_TYPES.has(event["event-type"]);
 		if (isCritical) {
 			this.criticalEvents.push(event);
+			// CA-8: bound the NEVER_DROP buffer. Completion events must never be
+			// dropped by DELIVERY policy (they're re-sent on the next consumer
+			// connection), but the buffer itself must stay bounded — under a
+			// sustained burst while the consumer is disconnected, an unbounded
+			// criticalEvents list would grow memory without limit. High-water
+			// mark: keep the most recent N, evict oldest first.
+			while (this.criticalEvents.length > this.criticalEventsCap) {
+				this.criticalEvents.shift();
+			}
 			return;
 		}
 		// SG3: drop-oldest ring buffer for non-critical

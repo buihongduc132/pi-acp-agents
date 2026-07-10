@@ -35,6 +35,15 @@ export const DEFAULT_CONFIG: AcpConfig = {
 		blockedModels: [],
 		requireProviderPrefix: false,
 	},
+	// CA-3: async-by-default is the new desired behavior (LD2/OT4), but it is a
+	// BREAKING change to the acp_spawn contract (callers used to get the inline
+	// response via content[0].text; now they get status:'prompting'). This
+	// global opt-out lets deployments restore the legacy blocking behavior.
+	// Per-call `async:false` still overrides regardless of this setting.
+	spawns: {
+		asyncDefault: true,
+		asyncShutdownDrainMs: 10_000,
+	},
 };
 
 /** Known agent presets with auto-detected commands */
@@ -158,6 +167,13 @@ export function validateConfig(partial: Partial<AcpConfig>): AcpConfig {
 		toolTimeouts: partial.toolTimeouts
 			? { ...partial.toolTimeouts }
 			: undefined,
+		spawns: {
+			asyncDefault:
+				partial.spawns?.asyncDefault ?? DEFAULT_CONFIG.spawns!.asyncDefault,
+			asyncShutdownDrainMs:
+				partial.spawns?.asyncShutdownDrainMs ??
+				DEFAULT_CONFIG.spawns!.asyncShutdownDrainMs,
+		},
 	};
 
 	// EC-20: Validate numeric fields are non-negative
