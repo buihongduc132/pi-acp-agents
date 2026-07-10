@@ -210,11 +210,12 @@ export function classifyConnectionError(
 	// initialize request, the already-dead child's pipe returns EPIPE or the
 	// JSON-RPC transport observes the stream close. Surface as a fast,
 	// classified, spawn-phase rejection instead of hanging to an RPC timeout.
+	const lowerMsg = msg.toLowerCase();
 	if (
 		code === "EPIPE" || code === "ECONNRESET" ||
-		msg.includes("EPIPE") || msg.includes("ECONNRESET") ||
-		msg.includes("ERR_STREAM_WRITE_AFTER_END") ||
-		msg.includes("connection closed") || msg.includes("Connection closed")
+		lowerMsg.includes("epipe") || lowerMsg.includes("econnreset") ||
+		lowerMsg.includes("err_stream_write_after_end") ||
+		lowerMsg.includes("connection closed")
 	) {
 		return new AcpProtocolError({
 			agentName,
