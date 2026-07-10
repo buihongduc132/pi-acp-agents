@@ -195,6 +195,7 @@ export default function (pi: ExtensionAPI) {
         }
         hookWake = new WakeSubscriber({
           path: hookConfig.socket.path,
+          selfPublisherPid: process.pid,
           pi: {
             sendUserMessage: (msg: string, opts?: { deliverAs?: string }) =>
               pi.sendUserMessage(msg, { deliverAs: opts?.deliverAs as "steer" | "followUp" | undefined }),

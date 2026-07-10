@@ -44,7 +44,7 @@ describe("hooks config", () => {
       expect(defaultConfig.socket.enabled).toBe(true);
       expect(defaultConfig.socket.maxMessageSize).toBe(1_048_576);
       expect(defaultConfig.socket.broadcastTimeoutMs).toBeGreaterThan(0);
-      expect(defaultConfig.socket.path).toContain("events.sock");
+      expect(defaultConfig.socket.path).toMatch(/events-\d+\.sock$/);
     });
   });
 

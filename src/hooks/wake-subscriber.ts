@@ -61,6 +61,10 @@ export interface WakeSubscriberOptions {
 	maxMessageLength?: number;
 	/** Injectable connector for testing. */
 	connector?: () => Promise<SocketLike>;
+	/** When set, events whose payload.publisherPid matches this value are
+	 *  skipped (self-echo suppression). Prevents the host from waking itself
+	 *  for events it published. */
+	selfPublisherPid?: number;
 }
 
 /**
@@ -92,6 +96,7 @@ export class WakeSubscriber extends EventEmitter {
 	private readonly ringBufferSize: number;
 	private readonly minIntervalMs: number;
 	private readonly maxMessageLength: number;
+	private readonly selfPublisherPid: number | undefined;
 	private readonly connector: () => Promise<SocketLike>;
 
 	private ring: SocketEvent[] = [];
@@ -111,6 +116,7 @@ export class WakeSubscriber extends EventEmitter {
 		this.ringBufferSize = opts.ringBufferSize ?? DEFAULT_RING_SIZE;
 		this.minIntervalMs = opts.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS;
 		this.maxMessageLength = opts.maxMessageLength ?? DEFAULT_MAX_MESSAGE_LENGTH;
+		this.selfPublisherPid = opts.selfPublisherPid;
 		this.connector =
 			opts.connector ?? (() => this.defaultConnect());
 	}
@@ -124,6 +130,17 @@ export class WakeSubscriber extends EventEmitter {
 	async handleEvent(event: SocketEvent): Promise<void> {
 		try {
 			if (!event["event-type"] || !event["event-type"].startsWith(ACP_PREFIX)) {
+				return;
+			}
+
+			// Self-echo suppression: skip events published by THIS process.
+			// The host publishes lifecycle events for its subagents and should
+			// not wake itself. Only external events (from a different host or
+			// from file hooks in a separate process) should trigger a wake.
+			if (
+				this.selfPublisherPid !== undefined &&
+				event.payload?.publisherPid === this.selfPublisherPid
+			) {
 				return;
 			}
 

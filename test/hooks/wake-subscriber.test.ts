@@ -270,4 +270,67 @@ describe("wake-subscriber", () => {
       await wake.stop();
     });
   });
+
+  // ── Self-echo suppression ─────────────────────────────────────────────
+  describe("self-echo suppression (selfPublisherPid)", () => {
+    it("skips events whose publisherPid matches selfPublisherPid", async () => {
+      const pi = createMockPi();
+      const wake = new WakeSubscriber({
+        path: sockPath,
+        pi,
+        selfPublisherPid: 99999,
+      });
+
+      const event = makeEvent("acp.session_completed", "evt-self", {
+        payload: {
+          version: 1,
+          event: "session_completed",
+          source: "acp",
+          correlationId: "corr-self",
+          session: { id: "sess-1", agent: "pi", cwd: "/tmp" },
+          agent: { name: "pi", type: "coding" },
+          timestamp: new Date().toISOString(),
+          publisherPid: 99999,
+        } as any,
+      });
+      await wake.handleEvent(event);
+
+      expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    });
+
+    it("delivers events whose publisherPid differs from selfPublisherPid", async () => {
+      const pi = createMockPi();
+      const wake = new WakeSubscriber({
+        path: sockPath,
+        pi,
+        selfPublisherPid: 99999,
+      });
+
+      const event = makeEvent("acp.session_completed", "evt-ext", {
+        payload: {
+          version: 1,
+          event: "session_completed",
+          source: "acp",
+          correlationId: "corr-ext",
+          session: { id: "sess-2", agent: "pi", cwd: "/tmp" },
+          agent: { name: "pi", type: "coding" },
+          timestamp: new Date().toISOString(),
+          publisherPid: 88888,
+        } as any,
+      });
+      await wake.handleEvent(event);
+
+      expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it("delivers all events when selfPublisherPid is not set (backward compat)", async () => {
+      const pi = createMockPi();
+      const wake = new WakeSubscriber({ path: sockPath, pi });
+
+      const event = makeEvent("acp.session_completed", "evt-nofilter");
+      await wake.handleEvent(event);
+
+      expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
+    });
+  });
 });
