@@ -162,4 +162,19 @@ describe("classifyConnectionError", () => {
 		const result = classifyConnectionError(err, "agent", "cmd", "some stderr output");
 		expect(result.message).toContain("some stderr output");
 	});
+
+	it("classifies 'ACP connection closed' as spawn-phase protocol error (GAP-2 coverage)", () => {
+		const err = new Error("ACP connection closed");
+		const result = classifyConnectionError(err, "agent", "cmd");
+		expect(result).toBeInstanceOf(AcpProtocolError);
+		expect((result as AcpProtocolError).phase).toBe("spawn");
+		expect(result.message).toContain("exited immediately");
+	});
+
+	it("classifies ECONNRESET as spawn-phase protocol error", () => {
+		const err = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+		const result = classifyConnectionError(err, "agent", "cmd");
+		expect(result).toBeInstanceOf(AcpProtocolError);
+		expect((result as AcpProtocolError).phase).toBe("spawn");
+	});
 });
