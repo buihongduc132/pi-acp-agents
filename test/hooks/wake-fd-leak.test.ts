@@ -36,7 +36,8 @@ class MockSocket extends EventEmitter implements SocketLike {
 
 function createMockPi() {
 	return {
-		sendUserMessage: vi.fn().mockResolvedValue(undefined),
+		sendMessage: vi.fn().mockResolvedValue(undefined),
+		isIdle: vi.fn().mockReturnValue(true),
 		log: vi.fn(),
 	};
 }

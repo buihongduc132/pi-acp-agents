@@ -569,7 +569,12 @@ describe("Lane B RED — WakeSubscriber NEVER_DROP burst (spawn_completed)", () 
 	const SOCK = join(tmpdir(), "acp-async-spawn-red.sock");
 
 	function createMockPi() {
-		return { sendUserMessage: vi.fn().mockResolvedValue(undefined), log: vi.fn() };
+		return {
+			sendMessage: vi.fn().mockResolvedValue(undefined),
+			isIdle: vi.fn().mockReturnValue(true),
+			sendUserMessage: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+		};
 	}
 
 	it("a burst of `acp.spawn_completed` events is delivered in full — NONE throttled/dropped", async () => {
@@ -583,7 +588,7 @@ describe("Lane B RED — WakeSubscriber NEVER_DROP burst (spawn_completed)", () 
 
 		// RED: acp.spawn_completed is not in NEVER_DROP today, so these get
 		// throttled and only ~1 is delivered. GREEN adds it → all 5 delivered.
-		expect(pi.sendUserMessage).toHaveBeenCalledTimes(5);
+		expect(pi.sendMessage).toHaveBeenCalledTimes(5);
 	});
 
 	it("`acp.session_completed` burst is delivered in full (control: already NEVER_DROP)", async () => {
@@ -594,20 +599,20 @@ describe("Lane B RED — WakeSubscriber NEVER_DROP burst (spawn_completed)", () 
 			await wake.handleEvent(makeEvent("acp.session_completed", `sc-${i}`));
 		}
 
-		expect(pi.sendUserMessage).toHaveBeenCalledTimes(5);
+		expect(pi.sendMessage).toHaveBeenCalledTimes(5);
 	});
 
-	it("non-completion events (subagent_stop) ARE still throttled under burst — proving the limiter is intact", async () => {
+	it("non-completion events (custom event) ARE still throttled under burst — proving the limiter is intact", async () => {
 		const pi = createMockPi();
 		const wake = new WakeSubscriber({ path: SOCK, pi, minIntervalMs: 1000 });
 
 		for (let i = 0; i < 5; i++) {
-			await wake.handleEvent(makeEvent("acp.subagent_stop", `ss-${i}`));
+			await wake.handleEvent(makeEvent("acp.custom_event", `ce-${i}`));
 		}
 
-		// subagent_stop stays OUT of NEVER_DROP (per OT4 decision) — only the
+		// custom_event is NOT in NEVER_DROP — only the
 		// first passes; the rest are throttled. This is intentional: relying on
-		// subagent_stop for async callbacks would flood the main session.
-		expect(pi.sendUserMessage).toHaveBeenCalledTimes(1);
+		// custom_event for async callbacks would flood the main session.
+		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 	});
 });
