@@ -98,6 +98,9 @@ export class WakeSubscriber extends EventEmitter {
 	private socket: SocketLike | null = null;
 	private alive = true;
 	private usingIntercom = false;
+	/** Reentrancy guard: true while a reconnect is in-flight. Prevents
+	 *  reconnect storms (unbounded socket creation) when the peer flaps. */
+	private reconnecting = false;
 	/** Timestamp (ms) of the last non-completion message delivery. */
 	private lastDeliveredAt = 0;
 
@@ -217,6 +220,13 @@ export class WakeSubscriber extends EventEmitter {
 			sock.once("error", (err) => {
 				if (!settled) {
 					settled = true;
+					// Destroy the failed socket so its fd is released immediately.
+					// Without this, rapid reconnect retries leak sockets → EMFILE.
+					try {
+						sock.destroy();
+					} catch {
+						/* already closed */
+					}
 					reject(err);
 				}
 			});
@@ -224,12 +234,12 @@ export class WakeSubscriber extends EventEmitter {
 			sock.on("error", (err) => {
 				this.log(`socket error: ${String(err)}`);
 			});
-			// Close handler — trigger reconnect on unexpected close
+			// Close handler — trigger reconnect on unexpected close.
+			// Dedup/serialization lives inside reconnectAfterClose() so that
+			// overlapping close events never spawn parallel reconnect loops.
 			sock.on("close", () => {
 				if (!this.alive) return;
-				this.log("socket closed unexpectedly — scheduling reconnect");
 				this.socket = null;
-				// Fire-and-forget reconnect with ring buffer replay
 				void this.reconnectAfterClose();
 			});
 		});
@@ -240,6 +250,17 @@ export class WakeSubscriber extends EventEmitter {
 	 * falls back to intercom channel (LD7 fallback).
 	 */
 	async start(): Promise<void> {
+		// Re-entrancy guard: if we already hold a live, non-intercom socket,
+		// destroy it before opening a new one to avoid orphaned fd leaks.
+		if (this.socket && !this.usingIntercom) {
+			const stale = this.socket;
+			this.socket = null;
+			try {
+				stale.destroy();
+			} catch {
+				/* ignore */
+			}
+		}
 		let attempts = 0;
 		// eslint-disable-next-line no-constant-condition
 		while (true) {
@@ -273,9 +294,19 @@ export class WakeSubscriber extends EventEmitter {
 	/**
 	 * Reconnect after an unexpected socket close. Retries connection
 	 * using the same logic as start(), then replays the ring buffer (LD18).
+	 *
+	 * Reentrancy-guarded: if a reconnect is already in-flight (or the
+	 * subscriber has been stopped), this is a no-op. This prevents
+	 * reconnect storms — unbounded socket creation → EMFILE — when the
+	 * peer flaps and multiple close events arrive while a reconnect is pending.
 	 */
 	private async reconnectAfterClose(): Promise<void> {
+		if (!this.alive || this.reconnecting) {
+			return;
+		}
+		this.reconnecting = true;
 		try {
+			this.log("socket closed unexpectedly — scheduling reconnect");
 			await this.start();
 			// After successful reconnect, replay buffered events
 			if (this.socket && this.alive) {
@@ -283,6 +314,8 @@ export class WakeSubscriber extends EventEmitter {
 			}
 		} catch (err) {
 			this.log(`reconnectAfterClose failed: ${String(err)}`);
+		} finally {
+			this.reconnecting = false;
 		}
 	}
 
@@ -296,6 +329,7 @@ export class WakeSubscriber extends EventEmitter {
 
 	async stop(): Promise<void> {
 		this.alive = false;
+		this.reconnecting = false;
 		const s = this.socket;
 		this.socket = null;
 		if (s) {
