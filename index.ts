@@ -196,6 +196,12 @@ export default function (pi: ExtensionAPI) {
         hookWake = new WakeSubscriber({
           path: hookConfig.socket.path,
           pi: {
+            sendMessage: (content: string, options: any, delivery: any) => {
+              // Map new API to old sendUserMessage for backward compatibility
+              const opts = { deliverAs: delivery.deliverAs as "steer" | "followUp" | undefined };
+              return pi.sendUserMessage(content, opts);
+            },
+            isIdle: () => true, // Default to idle for now
             sendUserMessage: (msg: string, opts?: { deliverAs?: string }) =>
               pi.sendUserMessage(msg, { deliverAs: opts?.deliverAs as "steer" | "followUp" | undefined }),
             log: (...args: unknown[]) => logger.info(String(args[0] ?? "")),
