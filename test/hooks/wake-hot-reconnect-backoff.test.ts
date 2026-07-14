@@ -15,10 +15,13 @@
  *
  * In production this produced a 152GB log at ~170KB/s of identical lines.
  *
- * The fix adds three safety rails to reconnectAfterClose:
- *  - RECONNECT_BACKOFF_MS (exponential, capped): minimum delay between cycles.
- *  - maxReconnectAttempts: lifetime cap; subscriber goes dormant after.
+ * The fix adds four safety rails to reconnectAfterClose:
+ *  - Exponential backoff with FLOOR (RECONNECT_BACKOFF_FLOOR_MS): minimum
+ *    delay between cycles, independent of retryDelayMs.
+ *  - maxReconnectAttempts: per-episode cap; subscriber goes dormant + intercom
+ *    fallback after exhaustion, with cooldown recovery via timer.
  *  - RECONNECT_LOG_MAX_PER_SEC: rate-limits the scheduling log line.
+ *  - Logger size guard (100MB) with streaming rotation.
  *
  * These tests verify all three rails hold. They drive the close handler
  * exactly as production does (`void this.reconnectAfterClose()`) and advance
@@ -182,65 +185,36 @@ describe("wake-subscriber — hot reconnect loop / no backoff / no cap (152GB re
 		await wake.stop();
 	});
 
-	it("log volume is bounded — rate-limiter caps log lines within a SINGLE 1-second window", async () => {
+	it("rateLimitedLog caps emissions at RECONNECT_LOG_MAX_PER_SEC per 1-second window", async () => {
 		const pi = createMockPi();
-		let connectCalls = 0;
 		const wake = new WakeSubscriber({
 			path: sockPath,
 			pi,
 			maxReconnectAttempts: 50,
 			retryDelayMs: 1,
-			// Connector that succeeds — so each reconnect cycle completes and
-			// reaches the log statement (if not rate-limited).
-			connector: async () => {
-				connectCalls++;
-				return new MockSocket(connectCalls);
-			},
+			connector: async () => new MockSocket(0),
 		});
 
 		await wake.start();
 
-		// Drive 10 SERIAL reconnect cycles, each advancing time past the
-		// backoff floor (1100ms). This means each cycle lands in its OWN
-		// 1-second window. With the rate limiter at 5/sec, each window allows
-		// only 1 log line (since only 1 cycle per window). The log count is 10.
-		//
-		// THEN: drive 10 more cycles advancing 0ms between them (all within
-		// the SAME backoff-floor delay). The reentrancy guard dedups these
-		// into a single in-flight reconnect. But the rate limiter's window
-		// has already seen 10 emissions. This confirms the limiter runs.
-		//
-		// The REAL test of the rate limiter: fire many fire-and-forget calls
-		// and advance time so MULTIPLE cycles complete within 1 second.
-		// To get multiple cycles in one window, we need the backoff to be
-		// short — but the floor is 1000ms. So within any 1s window at most
-		// 1 cycle completes. The rate limiter is thus not the binding
-		// constraint when backoff is working — which is CORRECT behavior.
-		//
-		// Instead, test the rate limiter DIRECTLY: mock the log window so
-		// multiple calls happen "simultaneously" (same Date.now). We do this
-		// by firing fire-and-forget calls rapidly — the reentrancy guard
-		// means only 1 proceeds, but the rate limiter check runs for each
-		// call that gets past the guard. The assertion: even with 50 rapid
-		// fire-and-forget calls, the log count is bounded by the rate limiter.
-		for (let i = 0; i < 50; i++) {
-			wake["reconnectAfterClose"](); // fire-and-forget
+		// Call rateLimitedLog directly 100 times within the SAME fake-time
+		// instant (Date.now doesn't advance under vi.useFakeTimers unless we
+		// advance timers). The rate limiter MUST cap emissions at
+		// RECONNECT_LOG_MAX_PER_SEC (5) within this 1-second window.
+		for (let i = 0; i < 100; i++) {
+			wake["rateLimitedLog"]("test-rate-limit-message");
 		}
-		// Advance past the backoff floor so the in-flight reconnect completes.
-		await vi.advanceTimersByTimeAsync(1100);
 
-		const reconnectLogCalls = (pi.log as ReturnType<typeof vi.fn>).mock.calls.filter(
+		const rateLimitedCalls = (pi.log as ReturnType<typeof vi.fn>).mock.calls.filter(
 			(args: unknown[]) =>
-				typeof args[0] === "string" && args[0] === RECONNECT_LOG_MESSAGE,
+				typeof args[0] === "string" &&
+				args[0] === "[wake-subscriber] test-rate-limit-message",
 		).length;
 
-		// The reentrancy guard dedups the 50 fire-and-forget calls into 1
-		// in-flight reconnect. That 1 reconnect logs once. So reconnectLogCalls
-		// is 1 (well under 5). This confirms the guard + rate limiter work
-		// together: the guard prevents storms, the rate limiter caps survivors.
-		// If the guard were removed (50 parallel reconnects), the rate limiter
-		// would cap at 5. Either way, <= 5.
-		expect(reconnectLogCalls).toBeLessThanOrEqual(5);
+		// Only 5 of the 100 calls should have logged. This is genuinely
+		// falsifiable: if rateLimitedLog were replaced with this.log, all 100
+		// would log and this assertion would FAIL.
+		expect(rateLimitedCalls).toBe(5);
 
 		await wake.stop();
 	});
