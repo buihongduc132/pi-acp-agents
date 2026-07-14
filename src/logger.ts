@@ -1,7 +1,7 @@
 /**
  * Logger — central logging for ACP agent interactions.
  */
-import { mkdirSync, appendFileSync, existsSync, statSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, appendFileSync, existsSync, statSync, writeFileSync, openSync, readSync, closeSync } from "node:fs";
 import { join } from "node:path";
 
 export interface Logger {
@@ -59,12 +59,20 @@ export function createFileLogger(logsDir: string, sessionId?: string): Logger {
       const st = statSync(mainLogPath);
       if (st.size > LOG_SIZE_CAP_BYTES) {
         // Rotate: keep the most recent 1MB of log lines (tail), drop the rest.
-        // This preserves recent diagnostics rather than destroying all history.
-        // If the tail read fails (e.g. file replaced mid-read), fall back to
-        // a fresh empty file — never throw from the logger.
+        // Uses a STREAMING tail read (open + read at offset) instead of
+        // readFileSync — reading a 100MB+ (or in production, 152GB) file into
+        // a single string would be a memory bomb. This reads only the last 1MB.
+        const tailBytes = 1024 * 1024; // 1 MB
+        const readLen = Math.min(tailBytes, st.size);
+        const offset = Math.max(0, st.size - tailBytes);
+        let fd: number | null = null;
         try {
-          const content = readFileSync(mainLogPath, "utf-8");
-          const tail = content.slice(-1 * 1024 * 1024); // last 1MB
+          fd = openSync(mainLogPath, "r");
+          const buf = Buffer.alloc(readLen);
+          readSync(fd, buf, 0, readLen, offset);
+          closeSync(fd);
+          fd = null;
+          const tail = buf.toString("utf-8");
           const marker = JSON.stringify({
             timestamp: new Date().toISOString(),
             level: "warn",
@@ -73,6 +81,9 @@ export function createFileLogger(logsDir: string, sessionId?: string): Logger {
           writeFileSync(mainLogPath, marker + tail, "utf-8");
         } catch {
           // Fallback: write a fresh file if the rotate read failed.
+          if (fd !== null) {
+            try { closeSync(fd); } catch { /* ignore */ }
+          }
           writeFileSync(
             mainLogPath,
             JSON.stringify({

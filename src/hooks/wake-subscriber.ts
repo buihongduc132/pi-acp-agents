@@ -297,7 +297,7 @@ export class WakeSubscriber extends EventEmitter {
 	private lastSessionFailedAt = 0;
 	/** HOTFIX: reconnect attempt counter for the current flap episode.
 	 *  Resets to 0 after RECONNECT_RESET_COOLDOWN_MS of inactivity (recovery),
-	 *  or when a connection proves stable. NOT reset by start() alone. */
+	 *  checked at the top of reconnectAfterClose when re-entry happens. */
 	private reconnectAttempts = 0;
 	/** HOTFIX: timestamp (ms) of the last reconnect attempt — used to detect
 	 *  the cooldown window for budget recovery. */
@@ -310,6 +310,8 @@ export class WakeSubscriber extends EventEmitter {
 	/** HOTFIX: once maxReconnectAttempts is exhausted, this is set true so all
 	 *  future close events short-circuit instead of re-entering the dead loop. */
 	private reconnectExhausted = false;
+	/** HOTFIX: timer for the cooldown recovery re-attempt. Cleared on stop(). */
+	private cooldownTimer: ReturnType<typeof setTimeout> | null = null;
 
 	constructor(opts: WakeSubscriberOptions) {
 		super();
@@ -758,8 +760,11 @@ export class WakeSubscriber extends EventEmitter {
 			}
 
 			// Cap: once the per-episode budget is spent, fall back to intercom
-			// and go dormant (NOT permanent — the cooldown reset above will
-			// re-enable reconnects after the socket stabilizes).
+			// and go dormant. A cooldown timer is scheduled to re-attempt
+			// connection after RECONNECT_RESET_COOLDOWN_MS, so the subscriber
+			// can recover once the socket stabilizes — the recovery is
+			// REACHABLE in production via this timer (not dependent on close
+			// events, which can't fire when there's no socket).
 			if (this.reconnectAttempts >= this.maxReconnectAttempts) {
 				if (!this.reconnectExhausted) {
 					this.reconnectExhausted = true;
@@ -777,6 +782,10 @@ export class WakeSubscriber extends EventEmitter {
 							this.log(`intercom publish failed: ${String(err)}`);
 						}
 					}
+					// Schedule a cooldown re-attempt: after the cooldown period,
+					// reset the budget and try to reconnect. This makes recovery
+					// reachable even though no close events can fire (socket=null).
+					this.scheduleCooldownRecovery();
 				}
 				return;
 			}
@@ -819,6 +828,28 @@ export class WakeSubscriber extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Schedule a cooldown recovery re-attempt. After RECONNECT_RESET_COOLDOWN_MS,
+	 * resets the reconnect budget and tries to reconnect. This makes the recovery
+	 * path reachable in production: when the socket is exhausted and null, no
+	 * close events can fire, so reconnectAfterClose would never be re-invoked
+	 * without this timer-driven re-entry.
+	 */
+	private scheduleCooldownRecovery(): void {
+		if (this.cooldownTimer) {
+			clearTimeout(this.cooldownTimer);
+		}
+		this.cooldownTimer = setTimeout(() => {
+			this.cooldownTimer = null;
+			if (!this.alive) return;
+			// Reset the budget and attempt reconnection.
+			this.reconnectAttempts = 0;
+			this.reconnectExhausted = false;
+			this.usingIntercom = false;
+			void this.reconnectAfterClose();
+		}, RECONNECT_RESET_COOLDOWN_MS);
+	}
+
 	isUsingIntercom(): boolean {
 		return this.usingIntercom;
 	}
@@ -830,6 +861,11 @@ export class WakeSubscriber extends EventEmitter {
 	async stop(): Promise<void> {
 		this.alive = false;
 		this.reconnecting = false;
+		// Clear cooldown recovery timer
+		if (this.cooldownTimer) {
+			clearTimeout(this.cooldownTimer);
+			this.cooldownTimer = null;
+		}
 		// Clear all coalesce timers
 		for (const timer of this.coalesceTimers.values()) {
 			clearTimeout(timer);
