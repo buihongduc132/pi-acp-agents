@@ -146,6 +146,17 @@ export class HookTriggerManager {
 		if (this.disposed) return Promise.resolve();
 		const failed = opts?.error === true;
 		const event: HookEventName = failed ? "session_failed" : "session_completed";
+		// Propagate error message (if any) into the task.result so downstream
+		// consumers (wake subscriber) can surface it. task is always present
+		// on the failure path so callers know the result field is meaningful.
+		const task = failed
+			? {
+					id: session.id,
+					subject: "session",
+					status: "failed",
+					result: opts?.errorMessage ?? "",
+			  }
+			: undefined;
 		return safeFire(
 			this.dispatcher,
 			event,
@@ -157,6 +168,7 @@ export class HookTriggerManager {
 					cwd: session.cwd,
 				},
 				agent: { name: session.agent, type: this.defaultAgentType },
+				...(task ? { task } : {}),
 			}),
 		);
 	}
@@ -267,6 +279,14 @@ export class HookTriggerManager {
 	/** Per-turn adapter result → dispatch `subagent_stop`. */
 	onSubagentStop(result: SubagentStopLike): Promise<void> {
 		if (this.disposed) return Promise.resolve();
+		// Forward stopReason into task.result so wake subscribers can surface
+		// why the turn ended (end_turn, max_tokens, tool_use, ...).
+		const task = {
+			id: result.sessionId,
+			subject: "subagent turn",
+			status: "completed",
+			...(result.stopReason ? { result: result.stopReason } : {}),
+		};
 		return safeFire(
 			this.dispatcher,
 			"subagent_stop",
@@ -281,6 +301,7 @@ export class HookTriggerManager {
 					name: result.agentName,
 					type: this.defaultAgentType,
 				},
+				task,
 			}),
 		);
 	}
@@ -291,6 +312,14 @@ export class HookTriggerManager {
 	 *  session. Distinct from subagent_stop (per-turn) to avoid flooding. */
 	onSpawnCompleted(result: SubagentStopLike): Promise<void> {
 		if (this.disposed) return Promise.resolve();
+		// Forward stopReason into task.result so wake subscribers surface the
+		// background-spawn outcome (e.g. "suite finished cleanly").
+		const task = {
+			id: result.sessionId,
+			subject: "spawn",
+			status: "completed",
+			...(result.stopReason ? { result: result.stopReason } : {}),
+		};
 		return safeFire(
 			this.dispatcher,
 			"spawn_completed",
@@ -305,6 +334,7 @@ export class HookTriggerManager {
 					name: result.agentName,
 					type: this.defaultAgentType,
 				},
+				task,
 			}),
 		);
 	}

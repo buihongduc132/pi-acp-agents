@@ -189,7 +189,7 @@ function formatWakeMessage(event: SocketEvent): string {
 		content += ` (${task.durationMs}ms)`;
 	}
 
-	if (task?.result && (eventType.includes("failed") || eventType.includes("error"))) {
+	if (task?.result) {
 		content += ` — ${task.result}`;
 	}
 
