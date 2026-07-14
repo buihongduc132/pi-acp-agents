@@ -71,6 +71,10 @@ describe("wake-subscriber — fd leak / EMFILE regression", () => {
 		const wake = new WakeSubscriber({
 			path: sockPath,
 			pi,
+			retryDelayMs: 0, // bypass exponential part of backoff
+			// NOTE: RECONNECT_BACKOFF_FLOOR_MS (1000ms) still applies regardless.
+			// This test isolates the reentrancy guard, so we wait past the floor.
+			maxReconnectAttempts: 100, // don't let the cap interfere with this test
 			connector: async () => {
 				connectCalls++;
 				const s = await connectPromise();
@@ -93,8 +97,10 @@ describe("wake-subscriber — fd leak / EMFILE regression", () => {
 			void wake["reconnectAfterClose"]();
 		}
 		const reconnectP = wake["reconnectAfterClose"]();
-		// At this point the connector has been awaited (synchronously up to
-		// connectPromise) at most once — the guard dedups the rest.
+		// The reconnect path now yields on the backoff floor (1000ms) before
+		// calling the connector. Wait past the floor so the in-flight reconnect
+		// reaches start()→connector() and creates the new connectPromise.
+		await new Promise((r) => setTimeout(r, 1100));
 		// Release the pending connector so the in-flight reconnect completes.
 		const second = new MockSocket(1);
 		resolveConnect(second);
@@ -145,6 +151,7 @@ describe("wake-subscriber — fd leak / EMFILE regression", () => {
 			path: sockPath,
 			pi,
 			retryDelayMs: 1,
+			maxReconnectAttempts: 100, // don't let cap interfere — testing reentrancy guard
 			// Each connect immediately succeeds; we close it stepwise to flap.
 			connector: async () => {
 				connectCalls++;
@@ -156,11 +163,13 @@ describe("wake-subscriber — fd leak / EMFILE regression", () => {
 
 		// Simulate a flap by repeatedly triggering reconnectAfterClose.
 		// The guard serializes them — no parallel socket creation.
-		for (let i = 0; i < 20; i++) {
+		// Reduced from 20 to 5 iterations: the backoff floor (1000ms) makes
+		// each cycle take ~1s with real timers, so 5 cycles ≈ 5s (test-friendly).
+		for (let i = 0; i < 5; i++) {
 			await wake["reconnectAfterClose"]();
 		}
 
-		// Connector calls bounded by legitimate reconnects (start + 20),
+		// Connector calls bounded by legitimate reconnects (start + 5),
 		// never multiplied by overlapping storms. Hard ceiling well under 100.
 		expect(connectCalls).toBeLessThan(100);
 

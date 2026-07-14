@@ -33,6 +33,41 @@ const DEFAULT_MIN_INTERVAL_MS = 1000;
 const DEFAULT_MAX_MESSAGE_LENGTH = 500;
 const DEFAULT_COALESCE_WINDOW_MS = 0; // Disabled by default, opt-in
 const DEFAULT_MUTED_EVENT_TYPES = ["acp.session_started", "acp.subagent_stop"];
+/**
+ * Reconnect safety rails (HOTFIX — 152GB log regression):
+ * A socket that connects-then-immediately-closes (flapping peer / TCP reset
+ * after SYN/ACK) previously drove a zero-backoff hot loop in
+ * reconnectAfterClose: each cycle logged one line and reconnected instantly,
+ * producing ~170KB/s of identical log spam that filled 152GB in production.
+ *
+ * - DEFAULT_MAX_RECONNECT_ATTEMPTS: lifetime cap on reconnect attempts. Once
+ *   exceeded, the subscriber stops trying (goes dormant / falls back to
+ *   intercom) instead of reconnecting forever.
+ * - RECONNECT_LOG_MAX_PER_SEC: rate-limit ceiling for the "scheduling
+ *   reconnect" log line, preventing unbounded log growth even if reconnects
+ *   somehow speed up.
+ * - Exponential backoff base uses retryDelayMs (configurable) and is capped
+ *   by RECONNECT_BACKOFF_MAX_MS. It is applied in reconnectAfterClose so it
+ *   gates EVERY reconnect cycle, not only failed connects (which start()
+ *   already delays).
+ */
+const DEFAULT_MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_LOG_MAX_PER_SEC = 5;
+/** Reconnect backoff doubles up to this cap (exponential, bounded). */
+const RECONNECT_BACKOFF_MAX_MS = 30_000;
+/**
+ * Minimum backoff floor, INDEPENDENT of retryDelayMs. Ensures exponential
+ * backoff is never defeated by retryDelayMs: 0 (which would make every delay
+ * 0*2^n = 0). This floor is the hard minimum gap between reconnect cycles.
+ */
+const RECONNECT_BACKOFF_FLOOR_MS = 1000;
+/**
+ * Cooldown (ms) after which reconnectAttempts resets to 0 if no reconnect
+ * activity occurs. This allows recovery: if the socket stabilizes, the
+ * lifetime budget is replenished so future transient flaps don't accumulate
+ * toward permanent dormancy.
+ */
+const RECONNECT_RESET_COOLDOWN_MS = 60_000;
 
 /** Shell metacharacters that must be neutralized before delivery. */
 const SHELL_METACHARS = /[;|&$`<>]/g;
@@ -126,6 +161,13 @@ export interface WakeSubscriberOptions {
 	coalesceWindowMs?: number;
 	/** Renderer mode: 'tui' or 'rpc'. Default: 'rpc' (OT15). */
 	mode?: "tui" | "rpc";
+	/**
+	 * Maximum number of reconnect attempts after an unexpected close before the
+	 * subscriber stops trying (goes dormant). Prevents infinite reconnect loops
+	 * on a persistently flapping/unavailable socket. Default: 10.
+	 * (HOTFIX — 152GB log regression.)
+	 */
+	maxReconnectAttempts?: number;
 }
 
 /**
@@ -232,6 +274,8 @@ export class WakeSubscriber extends EventEmitter {
 	private readonly mutedEventTypes: Set<string>;
 	private readonly coalesceWindowMs: number;
 	private readonly mode: "tui" | "rpc";
+	/** Lifetime cap on reconnect attempts after close (HOTFIX). */
+	private readonly maxReconnectAttempts: number;
 
 	private ring: SocketEvent[] = [];
 	private socket: SocketLike | null = null;
@@ -251,6 +295,21 @@ export class WakeSubscriber extends EventEmitter {
 	private localBuffer: SocketEvent[] = [];
 	/** OT25: Last session_failed delivery timestamp for throttling. */
 	private lastSessionFailedAt = 0;
+	/** HOTFIX: reconnect attempt counter for the current flap episode.
+	 *  Resets to 0 after RECONNECT_RESET_COOLDOWN_MS of inactivity (recovery),
+	 *  or when a connection proves stable. NOT reset by start() alone. */
+	private reconnectAttempts = 0;
+	/** HOTFIX: timestamp (ms) of the last reconnect attempt — used to detect
+	 *  the cooldown window for budget recovery. */
+	private lastReconnectAttemptAt = 0;
+	/** HOTFIX: count of "scheduling reconnect" log lines emitted in the current
+	 *  1-second window, for rate-limiting the reconnect log. */
+	private reconnectLogCount = 0;
+	/** HOTFIX: start (ms) of the current 1-second reconnect-log window. */
+	private reconnectLogWindowStart = 0;
+	/** HOTFIX: once maxReconnectAttempts is exhausted, this is set true so all
+	 *  future close events short-circuit instead of re-entering the dead loop. */
+	private reconnectExhausted = false;
 
 	constructor(opts: WakeSubscriberOptions) {
 		super();
@@ -270,6 +329,8 @@ export class WakeSubscriber extends EventEmitter {
 		);
 		this.coalesceWindowMs = opts.coalesceWindowMs ?? DEFAULT_COALESCE_WINDOW_MS;
 		this.mode = opts.mode ?? "rpc";
+		this.maxReconnectAttempts =
+			opts.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
 	}
 
 	/**
@@ -601,7 +662,7 @@ export class WakeSubscriber extends EventEmitter {
 			});
 			// Persistent error handler
 			sock.on("error", (err) => {
-				this.log(`socket error: ${String(err)}`);
+				this.rateLimitedLog(`socket error: ${String(err)}`);
 			});
 			// Close handler — trigger reconnect on unexpected close
 			sock.on("close", () => {
@@ -637,7 +698,7 @@ export class WakeSubscriber extends EventEmitter {
 				return;
 			} catch (err) {
 				attempts++;
-				this.log(`socket connect attempt ${attempts} failed: ${String(err)}`);
+				this.rateLimitedLog(`socket connect attempt ${attempts} failed: ${String(err)}`);
 				if (attempts >= this.maxSocketRetries) {
 					break;
 				}
@@ -659,6 +720,20 @@ export class WakeSubscriber extends EventEmitter {
 
 	/**
 	 * Reconnect after an unexpected socket close. Reentrancy-guarded.
+	 *
+	 * HOTFIX (152GB log regression): enforces three safety rails so a
+	 * connect→close flap cannot become a zero-backoff hot loop:
+	 *  1. Exponential backoff with a FLOOR — minimum delay between reconnect
+	 *     cycles. The floor (RECONNECT_BACKOFF_FLOOR_MS) is independent of
+	 *     retryDelayMs so that retryDelayMs:0 cannot defeat the backoff.
+	 *     Applied BEFORE start(), so it gates successful connects too.
+	 *  2. maxReconnectAttempts — per-episode cap; once exhausted, the subscriber
+	 *     falls back to intercom (if available) and goes dormant. The budget
+	 *     RESETS after RECONNECT_RESET_COOLDOWN_MS of inactivity, so a transient
+	 *     flap episode does not permanently kill wake delivery — the subscriber
+	 *     recovers when the socket stabilizes.
+	 *  3. RECONNECT_LOG_MAX_PER_SEC — rate-limits the "scheduling reconnect"
+	 *     log line so even a fast flap cannot flood the log.
 	 */
 	private async reconnectAfterClose(): Promise<void> {
 		if (!this.alive || this.reconnecting) {
@@ -666,9 +741,74 @@ export class WakeSubscriber extends EventEmitter {
 		}
 		this.reconnecting = true;
 		try {
-			this.log("socket closed unexpectedly — scheduling reconnect");
+			const now = Date.now();
+
+			// Recovery: if enough time has passed since the last reconnect
+			// attempt, reset the episode budget. This ensures a transient flap
+			// does not permanently exhaust the cap — once the socket stabilizes
+			// (no close events for RECONNECT_RESET_COOLDOWN_MS), the subscriber
+			// is fully operational again.
+			if (
+				this.reconnectAttempts > 0 &&
+				this.lastReconnectAttemptAt > 0 &&
+				now - this.lastReconnectAttemptAt > RECONNECT_RESET_COOLDOWN_MS
+			) {
+				this.reconnectAttempts = 0;
+				this.reconnectExhausted = false;
+			}
+
+			// Cap: once the per-episode budget is spent, fall back to intercom
+			// and go dormant (NOT permanent — the cooldown reset above will
+			// re-enable reconnects after the socket stabilizes).
+			if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+				if (!this.reconnectExhausted) {
+					this.reconnectExhausted = true;
+					this.log(
+						`reconnect attempts exhausted (${this.maxReconnectAttempts}) — falling back to intercom, will retry after ${RECONNECT_RESET_COOLDOWN_MS}ms cooldown`,
+					);
+					// Fall back to intercom so wake delivery is not silently lost.
+					this.usingIntercom = true;
+					if (this.intercom) {
+						try {
+							await this.intercom.publish(
+								"[ACP wake] socket exhausted reconnect budget — intercom fallback",
+							);
+						} catch (err) {
+							this.log(`intercom publish failed: ${String(err)}`);
+						}
+					}
+				}
+				return;
+			}
+
+			// Rate-limited log: at most RECONNECT_LOG_MAX_PER_SEC per rolling
+			// 1-second window. Prevents log floods.
+			if (now - this.reconnectLogWindowStart >= 1000) {
+				this.reconnectLogWindowStart = now;
+				this.reconnectLogCount = 0;
+			}
+			if (this.reconnectLogCount < RECONNECT_LOG_MAX_PER_SEC) {
+				this.reconnectLogCount++;
+				this.log("socket closed unexpectedly — scheduling reconnect");
+			}
+
+			// Exponential backoff with a floor independent of retryDelayMs.
+			// The floor ensures retryDelayMs:0 cannot recreate the hot loop.
+			// Cap at RECONNECT_BACKOFF_MAX_MS to avoid pathological waits.
+			const rawDelay = this.retryDelayMs * 2 ** Math.min(this.reconnectAttempts, 5);
+			const expDelay = Math.min(
+				Math.max(rawDelay, RECONNECT_BACKOFF_FLOOR_MS),
+				RECONNECT_BACKOFF_MAX_MS,
+			);
+			await delay(expDelay);
+			if (!this.alive) return; // stop() raced in during the delay
+
+			this.reconnectAttempts++;
+			this.lastReconnectAttemptAt = Date.now();
+			this.reconnectExhausted = false; // active attempt clears dormancy
+
 			await this.start();
-			// After successful reconnect, replay buffered events
+			// After successful reconnect, replay buffered events.
 			if (this.socket && this.alive) {
 				await this.reconnect();
 			}
@@ -716,6 +856,23 @@ export class WakeSubscriber extends EventEmitter {
 	private log(msg: string): void {
 		if (this.pi.log) {
 			this.pi.log(`[wake-subscriber] ${msg}`);
+		}
+	}
+
+	/**
+	 * Rate-limited log for hot-path messages (socket errors, connect retries).
+	 * Shares the same rolling 1-second window + cap as the reconnect log so
+	 * that a flapping socket cannot flood the log through ANY code path.
+	 */
+	private rateLimitedLog(msg: string): void {
+		const now = Date.now();
+		if (now - this.reconnectLogWindowStart >= 1000) {
+			this.reconnectLogWindowStart = now;
+			this.reconnectLogCount = 0;
+		}
+		if (this.reconnectLogCount < RECONNECT_LOG_MAX_PER_SEC) {
+			this.reconnectLogCount++;
+			this.log(msg);
 		}
 	}
 }
