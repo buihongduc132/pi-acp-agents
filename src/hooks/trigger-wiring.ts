@@ -168,7 +168,7 @@ export class HookTriggerManager {
 					cwd: session.cwd,
 				},
 				agent: { name: session.agent, type: this.defaultAgentType },
-				...(task ? { task } : {}),
+				task,
 			}),
 		);
 	}
@@ -285,7 +285,7 @@ export class HookTriggerManager {
 			id: result.sessionId,
 			subject: "subagent turn",
 			status: "completed",
-			...(result.stopReason ? { result: result.stopReason } : {}),
+			result: result.stopReason,
 		};
 		return safeFire(
 			this.dispatcher,
@@ -318,7 +318,7 @@ export class HookTriggerManager {
 			id: result.sessionId,
 			subject: "spawn",
 			status: "completed",
-			...(result.stopReason ? { result: result.stopReason } : {}),
+			result: result.stopReason,
 		};
 		return safeFire(
 			this.dispatcher,
