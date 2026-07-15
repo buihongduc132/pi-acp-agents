@@ -201,7 +201,7 @@ export default function (pi: ExtensionAPI) {
               const opts = { deliverAs: delivery.deliverAs as "steer" | "followUp" | undefined };
               return pi.sendUserMessage(content, opts);
             },
-            isIdle: () => true, // Default to idle for now
+            isIdle: () => hostIdle, // F2: driven by pi turn lifecycle
             sendUserMessage: (msg: string, opts?: { deliverAs?: string }) =>
               pi.sendUserMessage(msg, { deliverAs: opts?.deliverAs as "steer" | "followUp" | undefined }),
             log: (...args: unknown[]) => logger.info(String(args[0] ?? "")),
@@ -237,13 +237,27 @@ export default function (pi: ExtensionAPI) {
   // Session-scoped stores — lazily created per host session ID
   const storeFactory = new SessionStoreFactory(runtimePaths.rootDir);
   let hostSessionId: string | undefined;
+  // F2: host idle flag — driven by pi's turn lifecycle so WakeSubscriber
+  // computes the correct delivery strategy (triggerTurn only when truly idle,
+  // followUp when a turn is in-flight). Prevents the 'Agent is already
+  // processing a prompt' flood caused by the previous hardcoded `true`.
+  let hostIdle = true;
 
   // Capture host session ID on session start (fires before any tool call)
   pi.on("session_start", (_event, ctx) => {
     hostSessionId = ctx.sessionManager.getSessionId();
+    // F1: late-bind the host session id into the wake subscriber's ownership
+    // filter so it starts dropping foreign-session events.
+    hookWake?.setHostSessionId(hostSessionId);
     // Apply governance policy to the session-scoped governance store
     storeFactory.get(hostSessionId).governanceStore.setModelPolicy(config.modelPolicy ?? {});
   });
+
+  // F2: track host turn lifecycle for real isIdle reporting. Registered
+  // unconditionally (outside the VITEST-gated socket IIFE) so the contract is
+  // observable in tests and the flag is accurate the moment a turn begins.
+  pi.on("turn_start", () => { hostIdle = false; });
+  pi.on("turn_end", () => { hostIdle = true; });
 
   /** Get session-scoped stores for the current host session. */
   function getStores() {
