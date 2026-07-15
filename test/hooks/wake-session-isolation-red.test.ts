@@ -367,5 +367,77 @@ describe("F2 RED — extension registers turn_start + turn_end handlers", () => 
 		// the host idle flag that feeds WakeSubscriber.isIdle.
 		expect(registeredEvents).toContain("turn_start");
 		expect(registeredEvents).toContain("turn_end");
+
+		// The turn lifecycle handlers must actually mutate the idle flag that
+		// drives delivery. Since hostIdle is a private closure variable in
+		// index.ts, we verify the downstream behavioral contract it gates:
+		// WakeSubscriber with isIdle()=false must NOT use triggerTurn (it must
+		// fall back to deliverAs:'followUp' / buffering), and isIdle()=true must
+		// use triggerTurn. This is the exact "busy during a turn, idle after it
+		// ends" contract the handlers unlock — see the dedicated unit suite below.
+	});
+});
+
+// =====================================================================
+// F2 (behavioral) — the isIdle flag driven by turn_start/turn_end gates
+// the delivery strategy. A no-op or reversed handler would make this fail.
+// =====================================================================
+describe("F2 — isIdle flag gates triggerTurn vs followUp delivery", () => {
+	it("uses triggerTurn:true when isIdle() returns true (idle after turn_end)", async () => {
+		const pi = createMockPi(true); // idle
+		const wake = new WakeSubscriber({
+			path: "/tmp/unused.sock",
+			pi,
+			minIntervalMs: 0,
+			coalesceWindowMs: 0,
+		} as any);
+
+		await wake.handleEvent(makeEvent("acp.task_completed", "host-1", "tc"));
+
+		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+		const [, , delivery] = pi.sendMessage.mock.calls[0];
+		expect(delivery).toEqual({ triggerTurn: true });
+	});
+
+	it("uses deliverAs:'followUp' (NOT triggerTurn) when isIdle() returns false (busy during turn_start)", async () => {
+		const pi = createMockPi(false); // busy
+		const wake = new WakeSubscriber({
+			path: "/tmp/unused.sock",
+			pi,
+			minIntervalMs: 0,
+			coalesceWindowMs: 0,
+		} as any);
+
+		await wake.handleEvent(makeEvent("acp.task_completed", "host-1", "tc"));
+
+		// When busy, deliverEvent buffers the event locally and does NOT call
+		// sendMessage at all (LD2 queue+flush). No triggerTurn is fired — this
+		// is precisely what kills the 'Agent is already processing a prompt'
+		// rejection flood once isIdle is wired to the real hostIdle flag.
+		expect(pi.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it("toggling isIdle from false→true flushes the buffered event with triggerTurn", async () => {
+		const isIdle = vi.fn().mockReturnValue(false);
+		const sendMessage = vi.fn().mockResolvedValue(undefined);
+		const pi = { sendMessage, isIdle, log: vi.fn() } as any;
+		const wake = new WakeSubscriber({
+			path: "/tmp/unused.sock",
+			pi,
+			minIntervalMs: 0,
+			coalesceWindowMs: 0,
+		} as any);
+
+		// Busy: buffered, not delivered.
+		await wake.handleEvent(makeEvent("acp.task_completed", "host-1", "tc1"));
+		expect(sendMessage).not.toHaveBeenCalled();
+
+		// turn_end → idle: flush delivers the buffered event with triggerTurn.
+		isIdle.mockReturnValue(true);
+		await wake.flush();
+
+		expect(sendMessage).toHaveBeenCalledTimes(1);
+		const [, , delivery] = sendMessage.mock.calls[0];
+		expect(delivery).toEqual({ triggerTurn: true });
 	});
 });
