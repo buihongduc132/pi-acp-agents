@@ -248,7 +248,7 @@ describe("F3 RED — expanded mute list (subagent_start + session_completed)", (
 		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 
-	it("mutes acp.session_completed for an OWN session", async () => {
+	it("delivers acp.session_completed for an OWN session (legitimate wake — NOT muted)", async () => {
 		const pi = createMockPi();
 		const wake = new WakeSubscriber({
 			path: "/tmp/unused.sock",
@@ -260,10 +260,14 @@ describe("F3 RED — expanded mute list (subagent_start + session_completed)", (
 
 		await wake.handleEvent(makeEvent("acp.session_completed", "host-1", "sc"));
 
-		// RED: session_completed is NEVER_DROP but NOT muted today — it passes
-		// straight through. The fix adds it to DEFAULT_MUTED_EVENT_TYPES so the
-		// host is not woken by its own session wrapping up.
-		expect(pi.sendMessage).not.toHaveBeenCalled();
+		// DESIGN CORRECTION (GREEN): session_completed is intentionally NOT muted.
+		// It is a NEVER_DROP lifecycle event that legitimately wakes the host
+		// when ITS OWN delegated session finishes — that is the core purpose of
+		// the wake subscriber. Mutings it globally would strip wake-on-own-
+		// completion. Foreign session_completed flooding is handled by the F1
+		// ownership filter (see the "ownership filter runs BEFORE mute" test
+		// above), NOT by global muting.
+		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 	});
 
 	it("still delivers acp.task_completed for an OWN session (control — not muted)", async () => {

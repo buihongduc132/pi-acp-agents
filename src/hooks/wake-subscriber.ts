@@ -32,7 +32,11 @@ const DEFAULT_RETRY_DELAY_MS = 1000;
 const DEFAULT_MIN_INTERVAL_MS = 1000;
 const DEFAULT_MAX_MESSAGE_LENGTH = 500;
 const DEFAULT_COALESCE_WINDOW_MS = 0; // Disabled by default, opt-in
-const DEFAULT_MUTED_EVENT_TYPES = ["acp.session_started", "acp.subagent_stop"];
+const DEFAULT_MUTED_EVENT_TYPES = [
+	"acp.session_started",
+	"acp.subagent_stop",
+	"acp.subagent_start",
+];
 /**
  * Reconnect safety rails (HOTFIX — 152GB log regression):
  * A socket that connects-then-immediately-closes (flapping peer / TCP reset
@@ -168,6 +172,26 @@ export interface WakeSubscriberOptions {
 	 * (HOTFIX — 152GB log regression.)
 	 */
 	maxReconnectAttempts?: number;
+	/**
+	 * Host session id for the ownership filter (F1). When set, events whose
+	 * `payload.session.id` differs from this value are dropped — UNLESS the
+	 * foreign session id is in `subscribedSessionIds`. Late-bound via
+	 * `setHostSessionId()` once pi fires `session_start`.
+	 *
+	 * NOTE: session_completed is intentionally NOT muted — it is a NEVER_DROP
+	 * lifecycle event that legitimately wakes the host when ITS OWN delegated
+	 * session finishes. Foreign session_completed flooding is handled by this
+	 * ownership filter (F1), not by global muting. Global muting would strip a
+	 * core feature (wake-on-own-completion) and regress the formatting tests
+	 * that depend on session_completed delivery.
+	 */
+	hostSessionId?: string;
+	/**
+	 * Explicitly subscribed foreign session ids that bypass the ownership
+	 * filter (F1). Used when this host is intentionally observing another
+	 * session's events (e.g. a watcher / fan-out target).
+	 */
+	subscribedSessionIds?: Set<string>;
 }
 
 /**
@@ -276,6 +300,10 @@ export class WakeSubscriber extends EventEmitter {
 	private readonly mode: "tui" | "rpc";
 	/** Lifetime cap on reconnect attempts after close (HOTFIX). */
 	private readonly maxReconnectAttempts: number;
+	/** F1: host session id for the ownership filter (mutable — late-bound). */
+	private hostSessionId?: string;
+	/** F1: foreign session ids explicitly opted-in to delivery. */
+	private readonly subscribedSessionIds?: Set<string>;
 
 	private ring: SocketEvent[] = [];
 	private socket: SocketLike | null = null;
@@ -333,6 +361,8 @@ export class WakeSubscriber extends EventEmitter {
 		this.mode = opts.mode ?? "rpc";
 		this.maxReconnectAttempts =
 			opts.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
+		this.hostSessionId = opts.hostSessionId;
+		this.subscribedSessionIds = opts.subscribedSessionIds;
 	}
 
 	/**
@@ -346,10 +376,33 @@ export class WakeSubscriber extends EventEmitter {
 				return;
 			}
 
+			// F1: ownership filter — drop events from foreign sessions BEFORE the
+			// mute check, ring buffer, and coalesce logic. This prevents a
+			// host-wide events.sock bus from waking THIS session for another
+			// session's activity. Foreign sessions are only delivered if they
+			// were explicitly opted-in via subscribedSessionIds.
+			//
+			// Edge case: if hostSessionId is unset (not yet bound at construction),
+			// do NOT filter — preserve current behavior until session_start fires.
+			const evtSessionId = event.payload?.session?.id;
+			if (
+				this.hostSessionId !== undefined &&
+				evtSessionId !== undefined &&
+				evtSessionId !== this.hostSessionId &&
+				!this.subscribedSessionIds?.has(evtSessionId)
+			) {
+				return;
+			}
+
 			// LD18: ring buffer for replay
 			this.pushRing(event);
 
-			// OT27/OT28: mute configured event types
+			// OT27/OT28 + F3: mute configured event types. The expanded default
+			// list adds subagent_start (per-turn noise, symmetric with
+			// subagent_stop). NOTE: session_completed is intentionally NOT muted —
+			// it is a NEVER_DROP lifecycle event that legitimately wakes the host
+			// on own-session completion; foreign floods are dropped by the F1
+			// ownership filter above.
 			if (this.mutedEventTypes.has(event["event-type"])) {
 				return;
 			}
@@ -563,6 +616,15 @@ export class WakeSubscriber extends EventEmitter {
 			this.log(`sendMessage failed: ${String(err)}`);
 			this.turnInFlight = false;
 		}
+	}
+
+	/**
+	 * F1: late-bind the host session id once pi fires `session_start`. Allows
+	 * the ownership filter to start filtering immediately after the host id is
+	 * known, without requiring it at construction time.
+	 */
+	setHostSessionId(id: string): void {
+		this.hostSessionId = id;
 	}
 
 	private pushRing(event: SocketEvent): void {
