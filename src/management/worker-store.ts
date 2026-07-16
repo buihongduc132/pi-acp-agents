@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { ensureRuntimeDir } from "./runtime-paths.js";
 import { createNoopLogger } from "../logger.js";
+import { writeChildUsage } from "./child-usage-sink.js";
 import type { AcpWorkerRecord, AcpWorkerStatus } from "../config/types.js";
 
 const log = createNoopLogger();
@@ -49,6 +50,9 @@ export class WorkerStore {
     };
     payload.workers.push(worker);
     this.write(payload);
+    // Materialize the sink file on first register so external readers see the
+    // child immediately, even before the first heartbeat.
+    this.writeUsage(worker);
     return worker;
   }
 
@@ -69,6 +73,8 @@ export class WorkerStore {
     worker.status = status;
     worker.lastActivityAt = new Date().toISOString();
     this.write(payload);
+    // Terminal transition → record endedAt + durationMs in the shared sink.
+    if (status === "offline") this.writeTerminalUsage(worker);
     return worker;
   }
 
@@ -94,6 +100,8 @@ export class WorkerStore {
       worker.toolCallCount = (worker.toolCallCount ?? 0) + deltas.toolCallDelta;
     }
     this.write(payload);
+    // Mirror usage to shared sink (non-blocking; honors PI_ACP_CHILD_USAGE_DIR).
+    this.writeUsage(worker);
     return worker;
   }
 
@@ -108,6 +116,9 @@ export class WorkerStore {
 
   unregister(name: string): void {
     const payload = this.read();
+    const worker = payload.workers.find((w) => w.name === name);
+    // Terminal usage write BEFORE removal (we need the record + sessionId).
+    if (worker) this.writeTerminalUsage(worker);
     payload.workers = payload.workers.filter((w) => w.name !== name);
     this.write(payload);
   }
@@ -167,5 +178,33 @@ export class WorkerStore {
       // EACCES or other FS error — silently degrade. Workers are non-critical runtime state.
       log.debug("worker-store write failed", e);
     }
+  }
+
+  /** Mirror worker usage to the shared child-usage sink (non-blocking). */
+  private writeUsage(worker: AcpWorkerRecord): void {
+    writeChildUsage({
+      childSessionId: worker.sessionId,
+      parentSessionId: this.sessionId ?? null,
+      source: "acp",
+      tokensTotal: worker.tokenCountTotal ?? 0,
+      toolCalls: worker.toolCallCount ?? 0,
+      // ACP has no per-turn events; turns stays 0 (documented in sink module).
+      turns: 0,
+      startedAt: worker.spawnedAt,
+    });
+  }
+
+  /** Terminal write — adds endedAt + durationMs to the shared sink. */
+  private writeTerminalUsage(worker: AcpWorkerRecord): void {
+    writeChildUsage({
+      childSessionId: worker.sessionId,
+      parentSessionId: this.sessionId ?? null,
+      source: "acp",
+      tokensTotal: worker.tokenCountTotal ?? 0,
+      toolCalls: worker.toolCallCount ?? 0,
+      turns: 0,
+      startedAt: worker.spawnedAt,
+      endedAt: new Date().toISOString(),
+    });
   }
 }
