@@ -97,4 +97,66 @@ describe("Integration: full async lifecycle", () => {
 			rmSync(tmpDir, { recursive: true, force: true });
 		}
 	});
+
+	it("G1 fix: resume actually re-engages session (delegate called twice)", async () => {
+		const tmpDir = mkdtempSync(join(tmpdir(), "acp-g1-"));
+		try {
+			const delegateCallLog: string[] = [];
+			const coordinator = {
+				delegate: async (_a: string, msg: string) => {
+					delegateCallLog.push(msg);
+					await new Promise(r => setTimeout(r, 50));
+					return { text: "ok", stopReason: "stop", sessionId: "s" };
+				},
+			};
+			const executor = new AsyncExecutor(coordinator as any, tmpDir);
+
+			const runId = executor.start("gemini", "Initial task");
+			await new Promise(r => setTimeout(r, 200));
+
+			expect(delegateCallLog.length).toBe(1);
+			expect(delegateCallLog[0]).toContain("Initial task");
+
+			const resumeResult = executor.resume(runId, "Now do this instead");
+			expect(resumeResult.success).toBe(true);
+			await new Promise(r => setTimeout(r, 200));
+
+			// Second delegate call recorded — proves real re-engagement (G1 fixed)
+			expect(delegateCallLog.length).toBe(2);
+			expect(delegateCallLog[1]).toContain("[RESUME] Now do this instead");
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
+	it("G2 fix: steerQueue drained into delegate message on resume", async () => {
+		const tmpDir = mkdtempSync(join(tmpdir(), "acp-g2-"));
+		try {
+			const delegateCallLog: string[] = [];
+			const coordinator = {
+				delegate: async (_a: string, msg: string) => {
+					delegateCallLog.push(msg);
+					await new Promise(r => setTimeout(r, 50));
+					return { text: "ok", stopReason: "stop", sessionId: "s" };
+				},
+			};
+			const executor = new AsyncExecutor(coordinator as any, tmpDir);
+
+			const runId = executor.start("gemini", "Initial");
+			await new Promise(r => setTimeout(r, 200));
+
+			// Steer queues a message (G2 — queue must be drained on next delegate)
+			executor.steer(runId, "Focus on error handling");
+
+			// Resume should drain the steer queue into the delegate message
+			executor.resume(runId, "Continue");
+			await new Promise(r => setTimeout(r, 200));
+
+			expect(delegateCallLog.length).toBe(2);
+			expect(delegateCallLog[1]).toContain("Focus on error handling");
+			expect(delegateCallLog[1]).toContain("[RESUME] Continue");
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
 });

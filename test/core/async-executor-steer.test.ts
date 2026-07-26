@@ -130,9 +130,10 @@ describe("Interrupt", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 describe("Resume", () => {
-	it("T4.4: resume(runId, message?) re-engages session and sets state to 'running'", async () => {
+	it("T4.4: resume(runId, message?) re-engages session (delegate called 2x) and sets state to 'running'", async () => {
 		const { AsyncExecutor } = await import("../../src/core/async-executor.js");
-		const coordinator = createTrackableMockCoordinator();
+		// Long-running delegate so state stays 'running' during assertions
+		const coordinator = createLongRunningMockCoordinator(5000);
 		const executor = new AsyncExecutor(coordinator as any, tmpDir);
 
 		const runId = executor.start("gemini", "Task");
@@ -145,17 +146,18 @@ describe("Resume", () => {
 		let record = executor.getStatus(runId);
 		expect(record!.state).toBe("needs-attention");
 
-		// Resume
+		// Resume — should call delegate a SECOND time (re-engage)
 		const result = (executor as any).resume(runId, "Continue with the task");
 		expect(result).toBeDefined();
 		expect(result.success).toBe(true);
 
-		await new Promise((r) => setTimeout(r, 200));
-
+		// State should be 'running' immediately after resume (delegate is long-running)
 		record = executor.getStatus(runId);
 		expect(record!.state).toBe("running");
-	});
 
+		// Verify delegate was called twice: once on start, once on resume
+		expect(coordinator.delegate).toHaveBeenCalledTimes(2);
+	});
 	it("T4.5: resume resets silent-failure counters", async () => {
 		const { AsyncExecutor } = await import("../../src/core/async-executor.js");
 		const coordinator = createTrackableMockCoordinator();
@@ -230,6 +232,7 @@ describe("Steer", () => {
 		expect(result).toBeDefined();
 		expect(result.success).toBe(true);
 		expect(result.queued).toBe(true);
+		expect(result.delivered).toBe(true); // G3 fix: idle-steer also delivers
 	});
 
 	it("T4.9: steer returns false for non-existent run", async () => {

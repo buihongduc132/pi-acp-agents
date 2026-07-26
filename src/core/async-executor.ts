@@ -144,9 +144,17 @@ export class AsyncExecutor {
           if (telemetry) accumulateEvent(telemetry, event);
         };
 
+        // Drain any steer messages queued before start() ran.
+        const startSteerQueue = this.steerQueue.get(runId) ?? [];
+        this.steerQueue.delete(runId);
+        const startSteerSuffix = startSteerQueue.length > 0
+          ? `\n\nFollow-up guidance:\n${startSteerQueue.join("\n")}`
+          : "";
+        const startMessage = `${message}${startSteerSuffix}`;
+
         const result = await (this.coordinator as any).delegate(
           agentName,
-          message,
+          startMessage,
           effectiveCwd,
           onEvent,
         );
@@ -312,6 +320,19 @@ export class AsyncExecutor {
     return true;
   }
 
+  prune(maxAgeMs: number): { pruned: number } {
+    const runs = this.readAll().runs;
+    const now = Date.now();
+    const kept = runs.filter((run) => {
+      if (run.state === "pending" || run.state === "running") return true;
+      const completedAt = run.completedAt ? new Date(run.completedAt).getTime() : 0;
+      return now - completedAt < maxAgeMs;
+    });
+    const pruned = runs.length - kept.length;
+    this.writeAll({ runs: kept });
+    return { pruned };
+  }
+
   /** Interrupt an active run: abort in-flight turn, set state to 'needs-attention'. */
   interrupt(runId: string): { success: boolean; reason?: string } {
     const run = this.getStatus(runId);
@@ -347,7 +368,7 @@ export class AsyncExecutor {
     if (run.state === "running" || run.state === "pending") {
       return { success: false, reason: "run already running" };
     }
-    if (run.state !== "needs-attention" && run.state !== "failed") {
+    if (run.state !== "needs-attention" && run.state !== "failed" && run.state !== "completed") {
       return { success: false, reason: `run in state ${run.state}, cannot resume` };
     }
 
@@ -361,19 +382,87 @@ export class AsyncExecutor {
       lastActivityAt: new Date().toISOString(),
     });
 
-    // Queue the resume message if provided
-    if (message) {
-      const queued = this.steerQueue.get(runId) ?? [];
-      queued.push(`[RESUME] ${message}`);
-      this.steerQueue.set(runId, queued);
-    }
+    // Drain the steer queue + append resume message, then call delegate to re-engage.
+    const drainedQueue = this.steerQueue.get(runId) ?? [];
+    this.steerQueue.delete(runId);
+    if (message) drainedQueue.push(`[RESUME] ${message}`);
+    const steerSuffix = drainedQueue.length > 0
+      ? `\n\nFollow-up guidance:\n${drainedQueue.join("\n")}`
+      : "";
+    const fullMessage = `${run.message}${steerSuffix}`;
 
-    // TODO: Start a new delegate call for the resumed run.
-    // For now, just set state to 'running' and let the caller trigger the actual delegation.
-    // This is a stub implementation to pass tests; full implementation would re-engage the session.
-    //
-    // const promise = (async () => { ... })();
-    // this.activePromises.set(runId, promise);
+    const promise = (async () => {
+      try {
+        const onEvent = (event: AsyncSessionEvent) => {
+          const telemetry = this.telemetryMap.get(runId);
+          if (telemetry) accumulateEvent(telemetry, event);
+        };
+
+        const result = await (this.coordinator as any).delegate(
+          run.agentName,
+          fullMessage,
+          run.cwd,
+          onEvent,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        if (this.interruptedRuns.has(runId)) {
+          this.activePromises.delete(runId);
+          this.telemetryMap.delete(runId);
+          return;
+        }
+
+        const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
+        if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !result.text) {
+          this.updateRun(runId, {
+            state: "failed",
+            error: "silent-no-output: resumed run produced no output",
+            errorDetail: { reason: "silent-no-output" },
+            result: result.text,
+            sessionId: result.sessionId,
+            completedAt: new Date().toISOString(),
+            turns: telemetry.turns,
+            toolCalls: telemetry.toolCalls,
+            tokensUsed: telemetry.tokensUsed,
+            lastActivityAt: telemetry.lastActivityAt,
+            filesWritten: telemetry.filesWritten,
+          });
+          this.onWakeNotification?.(runId, { reason: "silent-no-output" });
+        } else {
+          this.updateRun(runId, {
+            state: "completed",
+            result: result.text,
+            sessionId: result.sessionId,
+            completedAt: new Date().toISOString(),
+            turns: telemetry.turns,
+            toolCalls: telemetry.toolCalls,
+            tokensUsed: telemetry.tokensUsed,
+            lastActivityAt: telemetry.lastActivityAt,
+            filesWritten: telemetry.filesWritten,
+          });
+        }
+      } catch (err: unknown) {
+        const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        this.updateRun(runId, {
+          state: "failed",
+          error: errorMessage,
+          errorDetail: { reason: this.classifyError(errorMessage), message: errorMessage },
+          completedAt: new Date().toISOString(),
+          turns: telemetry.turns,
+          toolCalls: telemetry.toolCalls,
+          tokensUsed: telemetry.tokensUsed,
+          lastActivityAt: telemetry.lastActivityAt,
+          filesWritten: telemetry.filesWritten,
+        });
+      } finally {
+        this.activePromises.delete(runId);
+        this.telemetryMap.delete(runId);
+      }
+    })();
+    this.activePromises.set(runId, promise);
+
     return { success: true };
   }
 
@@ -382,31 +471,19 @@ export class AsyncExecutor {
     const run = this.getStatus(runId);
     if (!run) return { success: false, reason: "run not found" };
 
-    // If run is active, mark as delivered (in real impl would interrupt and inject)
+    // Always queue the message so it is forwarded on next delegate call
+    // (start() and resume() drain the queue into the delegate message).
+    const steerQueue = this.steerQueue.get(runId) ?? [];
+    steerQueue.push(message);
+    this.steerQueue.set(runId, steerQueue);
+
+    // For active runs, message is delivered (will be injected on next turn).
+    // For idle/completed/failed runs, message is queued for next interaction.
+    // Spec: both paths return { delivered: true, queued: true }.
     if (run.state === "running" || run.state === "pending") {
-      const queued = this.steerQueue.get(runId) ?? [];
-      queued.push(message);
-      this.steerQueue.set(runId, queued);
-      return { success: true, delivered: true };
+      return { success: true, delivered: true, queued: true };
     }
-
-    // If run is completed/failed/needs-attention, queue for next interaction
-    const queued = this.steerQueue.get(runId) ?? [];
-    queued.push(message);
-    this.steerQueue.set(runId, queued);
-    return { success: true, queued: true };
-  }
-
-  prune(olderThanMs: number): { pruned: number } {
-    const payload = this.readAll();
-    const cutoff = new Date(Date.now() - olderThanMs);
-    const before = payload.runs.length;
-    payload.runs = payload.runs.filter((r) => {
-      if (r.state === "pending" || r.state === "running" || r.state === "needs-attention") return true;
-      return new Date(r.completedAt ?? r.createdAt) >= cutoff;
-    });
-    this.writeAll(payload);
-    return { pruned: before - payload.runs.length };
+    return { success: true, delivered: true, queued: true };
   }
 
   private classifyError(message: string): AsyncRunError["reason"] {
