@@ -271,6 +271,23 @@ export default function (pi: ExtensionAPI) {
   const mailboxManager = () => getStores().mailboxManager;
   const governanceStore = () => getStores().governanceStore;
 
+  // Shared AsyncExecutor instance — preserves in-memory state (activePromises,
+  // telemetryMap, steerQueue, interruptedRuns) across tool calls.
+  // Critical for interrupt/resume/steer to operate on the same executor instance.
+  let sharedAsyncExecutor: AsyncExecutor | null = null;
+  function getSharedAsyncExecutor(): AsyncExecutor {
+    if (!sharedAsyncExecutor) {
+      const coordinator = new AgentCoordinator(loadConfig(), process.cwd(), {});
+      sharedAsyncExecutor = new AsyncExecutor(coordinator, runtimePaths.rootDir, {
+        onWakeNotification: (runId, info) => {
+          // Wake notification callback — surfaces silent-failure to the parent session
+          pi.sendUserMessage(`[async-run:${runId}] silent-failure detected: ${info.reason}`, {});
+        },
+      });
+    }
+    return sharedAsyncExecutor;
+  }
+
   /** Defensive worker lookup — returns undefined if the store or .get() is unavailable (e.g. partial test mocks). */
   function safeWorkerGet(name: string) {
     try {
@@ -1434,7 +1451,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       session_id: Type.Optional(Type.String({ description: "Specific session ID to inspect" })),
       session_name: Type.Optional(Type.String({ description: "Friendly session name to inspect" })),
-      action: Type.Optional(Type.String({ description: "Maintenance action: 'prune' (mark stale workers offline), 'cleanup' (remove sessions + clear tasks/mailboxes), 'fleet' (show active async runs), 'interrupt' (abort in-flight async run → needs-attention), 'resume' (re-engage interrupted async run). Omit for status display." })),
+      action: Type.Optional(Type.String({ description: "Maintenance action: 'prune' (mark stale workers offline), 'cleanup' (remove sessions + clear tasks/mailboxes), 'fleet' (show active async runs), 'interrupt' (abort in-flight async run → needs-attention), 'resume' (re-engage interrupted async run), 'steer' (inject guidance into async run). Omit for status display." })),
       target: Type.Optional(Type.String({ description: "Cleanup target: 'all', 'sessions', 'tasks', 'mailboxes'. Default: 'all'." })),
       view: Type.Optional(Type.String({ description: "View filter: 'fleet' for compact active-runs overview with telemetry." })),
       id: Type.Optional(Type.String({ description: "Async run ID for action: 'interrupt' or 'resume'." })),
@@ -1446,9 +1463,8 @@ export default function (pi: ExtensionAPI) {
 
       // ── action: fleet / view: fleet — show active async runs with telemetry ──
       if (params.action === "fleet" || params.view === "fleet") {
-        const fleetCoordinator = new AgentCoordinator(config, process.cwd(), {});
-        const fleetExecutor = new AsyncExecutor(fleetCoordinator, runtimePaths.rootDir);
-        const fleet = fleetExecutor.getFleetView();
+        const executor = getSharedAsyncExecutor();
+        const fleet = executor.getFleetView();
         const lines = fleet.map((r: any) =>
           `  ${r.runId} [${r.state}] ${r.agentName} — turns:${r.turns ?? 0} tools:${r.toolCalls ?? 0} files:${r.filesWritten ?? 0} last:${r.lastActivityAt ?? "?"}`
         );
@@ -1464,9 +1480,8 @@ ${lines.join("\n")}` : "No active async runs")],
         if (!params.id) {
           return { content: [textContent("action: interrupt requires 'id' parameter")], details: { error: "missing_id" } };
         }
-        const intCoordinator = new AgentCoordinator(config, process.cwd(), {});
-        const intExecutor = new AsyncExecutor(intCoordinator, runtimePaths.rootDir);
-        const result = intExecutor.interrupt(params.id);
+        const executor = getSharedAsyncExecutor();
+        const result = executor.interrupt(params.id);
         return {
           content: [textContent(result.success ? `Interrupted run ${params.id}` : `Cannot interrupt: ${result.reason}`)],
           details: { runId: params.id, result },
@@ -1478,14 +1493,30 @@ ${lines.join("\n")}` : "No active async runs")],
         if (!params.id) {
           return { content: [textContent("action: resume requires 'id' parameter")], details: { error: "missing_id" } };
         }
-        const resCoordinator = new AgentCoordinator(config, process.cwd(), {});
-        const resExecutor = new AsyncExecutor(resCoordinator, runtimePaths.rootDir);
-        const result = resExecutor.resume(params.id, params.message);
+        const executor = getSharedAsyncExecutor();
+        const result = executor.resume(params.id, params.message);
         return {
           content: [textContent(result.success ? `Resumed run ${params.id}` : `Cannot resume: ${result.reason}`)],
           details: { runId: params.id, result },
         };
       }
+
+      // ── action: steer — inject guidance into async run ──
+      if (params.action === "steer") {
+        if (!params.id) {
+          return { content: [textContent("action: steer requires 'id' parameter")], details: { error: "missing_id" } };
+        }
+        if (!params.message) {
+          return { content: [textContent("action: steer requires 'message' parameter")], details: { error: "missing_message" } };
+        }
+        const executor = getSharedAsyncExecutor();
+        const result = executor.steer(params.id, params.message);
+        return {
+          content: [textContent(result.success ? `Steered run ${params.id}` : `Cannot steer: ${result.reason}`)],
+          details: { runId: params.id, result },
+        };
+      }
+
       // ── action: prune — absorb acp_worker_prune ──
       // Mark all stale (derived) workers offline and unassign their tasks.
       if (params.action === "prune") {

@@ -566,4 +566,21 @@ export class AsyncExecutor {
       this.writeAll(payload);
     }
   }
+
+  // Public getters for testing shared executor instance behavior
+  getActivePromises(): Map<string, Promise<void>> {
+    return this.activePromises;
+  }
+
+  getSteerQueue(): Map<string, string[]> {
+    return this.steerQueue;
+  }
+
+  getTelemetryMap(): Map<string, RunTelemetry> {
+    return this.telemetryMap;
+  }
+
+  getInterruptedRuns(): Set<string> {
+    return this.interruptedRuns;
+  }
 }
