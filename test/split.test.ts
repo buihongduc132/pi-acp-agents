@@ -32,7 +32,12 @@ describe("two-package split", () => {
 		it("base package depends on pi-acp-types", () => {
 			const pkgPath = join(ROOT, "package.json");
 			const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-			expect(pkg.dependencies["pi-acp-types"]).toBe("workspace:*");
+			// Must be a npm-resolvable version specifier (NOT workspace:* — npm rejects it
+			// with EUNSUPPORTEDPROTOCOL, breaking pi install + deploy install_extension_deps).
+			// See _GOAL_acp_workspace_fix.md / flow/findings.
+			const spec = pkg.dependencies["pi-acp-types"];
+			expect(spec).toBeTruthy();
+			expect(spec).not.toMatch(/^workspace:/);
 		});
 	});
 
