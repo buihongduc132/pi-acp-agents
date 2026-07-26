@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AcpAsyncRunRecord, AsyncRunError } from "../config/types.js";
 import type { AgentCoordinator } from "../coordination/coordinator.js";
+import type { AcpDelegateProgress } from "../coordination/coordinator.js";
 import { createNoopLogger } from "../logger.js";
 import { WorktreeManager } from "./worktree-manager.js";
 
@@ -22,7 +23,10 @@ interface AsyncStorePayload {
 
 const DEFAULT_PAYLOAD: AsyncStorePayload = { runs: [] };
 
-/** Session event emitted during delegation (tool calls, file writes, token usage, turn end). */
+/**
+ * Session event emitted during delegation (tool calls, file writes, token usage, turn end).
+ * @deprecated Use AcpDelegateProgress from coordinator instead. Kept for backward compat with existing tests.
+ */
 export interface AsyncSessionEvent {
   type: "tool_call" | "file_write" | "token_usage" | "turn_end";
   payload?: Record<string, unknown>;
@@ -76,6 +80,44 @@ function accumulateEvent(telemetry: RunTelemetry, event: AsyncSessionEvent): voi
     }
     case "turn_end":
       telemetry.turns++;
+      break;
+  }
+}
+
+/**
+ * Accumulate telemetry from a real AcpDelegateProgress event.
+ * Maps coordinator progress phases to telemetry fields.
+ */
+function accumulateProgress(telemetry: RunTelemetry, progress: AcpDelegateProgress): void {
+  // Use progress.lastActivityAt (epoch ms) if available, else current time
+  telemetry.lastActivityAt = progress.lastActivityAt
+    ? new Date(progress.lastActivityAt).toISOString()
+    : new Date().toISOString();
+
+  switch (progress.phase) {
+    case "prompting":
+      // Each prompting phase = one turn
+      telemetry.turns++;
+      break;
+    case "done":
+      // Estimate tool calls from text content (heuristic for telemetry display)
+      if (progress.text) {
+        // Count file path patterns as tool call indicators
+        const filePathMatches = progress.text.match(/\b\S+\.[a-zA-Z0-9]+\b/g);
+        if (filePathMatches) {
+          telemetry.toolCalls += filePathMatches.length;
+        }
+        // Count code blocks as tool call indicators
+        const codeBlockMatches = progress.text.match(/```/g);
+        if (codeBlockMatches) {
+          telemetry.toolCalls += Math.floor(codeBlockMatches.length / 2);
+        }
+      }
+      break;
+    case "spawning":
+    case "initializing":
+    case "error":
+      // No telemetry increment for these phases
       break;
   }
 }
@@ -137,11 +179,11 @@ export class AsyncExecutor {
       try {
         this.updateRun(runId, { state: "running", startedAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() });
 
-        // Pass onEvent callback to coordinator.delegate() for telemetry accumulation.
-        // The real coordinator may ignore this extra arg; mock coordinators in tests use it.
-        const onEvent = (event: AsyncSessionEvent) => {
+        // Pass onProgress callback to coordinator.delegate() for telemetry accumulation.
+        // The real coordinator emits AcpDelegateProgress events; we convert to telemetry.
+        const onProgress = (progress: AcpDelegateProgress) => {
           const telemetry = this.telemetryMap.get(runId);
-          if (telemetry) accumulateEvent(telemetry, event);
+          if (telemetry) accumulateProgress(telemetry, progress);
         };
 
         // Drain any steer messages queued before start() ran.
@@ -152,11 +194,11 @@ export class AsyncExecutor {
           : "";
         const startMessage = `${message}${startSteerSuffix}`;
 
-        const result = await (this.coordinator as any).delegate(
+        const result = await this.coordinator.delegate(
           agentName,
           startMessage,
           effectiveCwd,
-          onEvent,
+          onProgress,
         );
 
         // Yield to allow any pending interrupt() calls to be processed first.
@@ -393,16 +435,16 @@ export class AsyncExecutor {
 
     const promise = (async () => {
       try {
-        const onEvent = (event: AsyncSessionEvent) => {
+        const onProgress = (progress: AcpDelegateProgress) => {
           const telemetry = this.telemetryMap.get(runId);
-          if (telemetry) accumulateEvent(telemetry, event);
+          if (telemetry) accumulateProgress(telemetry, progress);
         };
 
-        const result = await (this.coordinator as any).delegate(
+        const result = await this.coordinator.delegate(
           run.agentName,
           fullMessage,
           run.cwd,
-          onEvent,
+          onProgress,
         );
 
         await new Promise((resolve) => setTimeout(resolve, 0));
