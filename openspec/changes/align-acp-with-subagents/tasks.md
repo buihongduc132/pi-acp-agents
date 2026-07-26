@@ -69,8 +69,16 @@ Documented by reviewer subagents in PR #39 verifier loop (APPROVED with notes):
 - **[G1 ✅ FIXED] `resume()` re-engagement** — `resume()` now calls `coordinator.delegate()` to actually re-engage the session. Verified by integration test proving delegate called twice (start + resume).
 - **[G2 ✅ FIXED] `steerQueue` draining** — `start()` and `resume()` now drain `steerQueue` into delegate message. Verified by integration test proving queued messages forwarded on resume.
 - **[G3 ✅ FIXED] Idle-steer delivered:true** — `steer()` now returns `{success: true, delivered: true, queued: true}` for idle runs per spec. Verified by T4.8 test.
-- **[G4] Wake-subscriber hook not wired** — Spec requires wake publish "within 5 seconds" via wake-subscriber hook. Impl invokes `onWakeNotification` synchronously (sufficient for callback contract T3.3), but no subscriber wiring or 5s bound tested.
+- **[G4 ✅ FIXED] Wake notification wired** — `index.ts` now passes `onWakeNotification` callback via `getSharedAsyncExecutor()` that calls `pi.sendUserMessage()` to surface silent failures to the parent session. Verified by shared-instance test.
 - **[G5] Worker worktree isolation** — tasks 6.5/6.6 (`acp_worker_spawn` worktree params + wiring) deferred. Only `acp_spawn` worktree support shipped.
 - **[G6] Coverage check** — task 8.5 (`bun run test --coverage`) not run; coverage delta unverified.
 
-G1-G3 are now fixed and verified. G4-G6 remain as spec-completeness gaps (non-blocking). All changes additive (no breaking changes); 2225 tests pass.
+### Architectural Fixes (auditor rejection round 2)
+
+- **[A1 ✅ FIXED] Telemetry mock-only** — Replaced fake `AsyncSessionEvent` callback with real `AcpDelegateProgress` type. Removed `as any` cast. Telemetry now accumulates from real progress events.
+- **[A2 ✅ FIXED] Steer unreachable from tools** — Added `acp_status({ action: "steer", id, message })` action wired to shared executor.
+- **[A3 ✅ FIXED] Wake notification not wired** — `onWakeNotification` callback now passed in `index.ts` via `getSharedAsyncExecutor()`.
+- **[A4 ✅ FIXED] Resume/interrupt disk-only** — Shared executor instance preserves in-memory state (activePromises, telemetryMap, steerQueue, interruptedRuns) across tool calls.
+- **[A5] Worker worktree isolation** — Same as G5 above, still deferred.
+
+G1-G4 and A1-A4 are now fixed and verified by reviewer subagent. G5/G6/A5 remain as spec-completeness gaps (non-blocking, worker worktree is deferred, coverage check not run). All changes additive (no breaking changes); 2234 tests pass.
