@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  pi-acp-types: workspace:*
-
 importers:
 
   .:
@@ -15,8 +12,8 @@ importers:
         specifier: ^0.21.0
         version: 0.21.1(zod@4.4.3)
       pi-acp-types:
-        specifier: workspace:*
-        version: link:packages/pi-acp-types
+        specifier: ^0.1.0
+        version: 0.1.0
     devDependencies:
       '@mariozechner/pi-coding-agent':
         specifier: ^0.73.0
@@ -42,12 +39,12 @@ importers:
 
   packages/pi-acp-advanced:
     dependencies:
-      pi-acp-agents:
-        specifier: ^0.3.0
-        version: 0.3.0(@mariozechner/pi-coding-agent@0.73.1(ws@8.21.0)(zod@4.4.3))(typebox@1.2.2)(zod@4.4.3)
+      '@buihongduc132/pi-acp-agents':
+        specifier: ^0.5.0
+        version: 0.5.0(@mariozechner/pi-coding-agent@0.73.1(ws@8.21.0)(zod@4.4.3))(typebox@1.2.2)(zod@4.4.3)
       pi-acp-types:
-        specifier: workspace:*
-        version: link:../pi-acp-types
+        specifier: ^0.1.0
+        version: 0.1.0
       typebox:
         specifier: ^1.1.37
         version: 1.2.2
@@ -214,6 +211,18 @@ packages:
 
   '@borewit/text-codec@0.2.2':
     resolution: {integrity: sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ==}
+
+  '@buihongduc132/pi-acp-agents@0.5.0':
+    resolution: {integrity: sha512-BdJiP7qboIvGQMJDd4+inrVqTLFQlT/4daYmjwA11wDK+6Df2SVh+evGoGwjt1sVtv8mU+3T+pZDNAGXkwJT0Q==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@mariozechner/pi-coding-agent': '*'
+      typebox: '*'
+    peerDependenciesMeta:
+      '@mariozechner/pi-coding-agent':
+        optional: true
+      typebox:
+        optional: true
 
   '@emnapi/core@1.10.0':
     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
@@ -1103,17 +1112,8 @@ packages:
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
 
-  pi-acp-agents@0.3.0:
-    resolution: {integrity: sha512-di6JPodyR03aYX5D/bgFsUhPSVEQuiyM5y2m9UBfVxBQXN9wguVH+hqYrmx/7BC5KDo+qGncvfwVAjbptBUQ0g==}
-    engines: {node: '>=22.0.0'}
-    peerDependencies:
-      '@mariozechner/pi-coding-agent': '*'
-      typebox: '*'
-    peerDependenciesMeta:
-      '@mariozechner/pi-coding-agent':
-        optional: true
-      typebox:
-        optional: true
+  pi-acp-types@0.1.0:
+    resolution: {integrity: sha512-NwPyXxGdtNkv7Ih9N2jg0fR2HgkFZBohUtYxUoY7XblwXlNgsgvvwzneNMmb11jCb7jCIHvRy6KEkXIJzI45dA==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -1671,6 +1671,16 @@ snapshots:
   '@bcoe/v8-coverage@1.0.2': {}
 
   '@borewit/text-codec@0.2.2': {}
+
+  '@buihongduc132/pi-acp-agents@0.5.0(@mariozechner/pi-coding-agent@0.73.1(ws@8.21.0)(zod@4.4.3))(typebox@1.2.2)(zod@4.4.3)':
+    dependencies:
+      '@agentclientprotocol/sdk': 0.21.1(zod@4.4.3)
+      pi-acp-types: 0.1.0
+    optionalDependencies:
+      '@mariozechner/pi-coding-agent': 0.73.1(ws@8.21.0)(zod@4.4.3)
+      typebox: 1.2.2
+    transitivePeerDependencies:
+      - zod
 
   '@emnapi/core@1.10.0':
     dependencies:
@@ -2530,15 +2540,7 @@ snapshots:
 
   pend@1.2.0: {}
 
-  pi-acp-agents@0.3.0(@mariozechner/pi-coding-agent@0.73.1(ws@8.21.0)(zod@4.4.3))(typebox@1.2.2)(zod@4.4.3):
-    dependencies:
-      '@agentclientprotocol/sdk': 0.21.1(zod@4.4.3)
-      pi-acp-types: link:packages/pi-acp-types
-    optionalDependencies:
-      '@mariozechner/pi-coding-agent': 0.73.1(ws@8.21.0)(zod@4.4.3)
-      typebox: 1.2.2
-    transitivePeerDependencies:
-      - zod
+  pi-acp-types@0.1.0: {}
 
   picocolors@1.1.1: {}
 
