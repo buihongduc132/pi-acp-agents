@@ -16,6 +16,7 @@ import { AgentCoordinator } from "./src/coordination/coordinator.js";
 import { WorkerDispatcher, type WorkerDispatcherDeps } from "./src/coordination/worker-dispatcher.js";
 import { AcpCircuitBreaker } from "./src/core/circuit-breaker.js";
 import { AsyncExecutor } from "./src/core/async-executor.js";
+import { WorktreeManager } from "./src/core/worktree-manager.js";
 import { HealthMonitor } from "./src/core/health-monitor.js";
 import { getSessionAutoCloseReason } from "./src/core/session-lifecycle.js";
 import { SessionManager } from "./src/core/session-manager.js";
@@ -84,6 +85,8 @@ export default function (pi: ExtensionAPI) {
 
   const activeAdapters = new Map<string, ReturnType<typeof createAdapter>>();
   const busySessions = new Map<string, boolean>();
+  // Track worktree paths per session for cleanup on close
+  const sessionWorktrees = new Map<string, { path: string; repoCwd: string; keepWorktree?: boolean }>();
   const workerSessionMap = new Map<string, string>(); // sessionId → workerName for heartbeat consumer
   // CA-6: track in-flight async-spawn background prompts so the shutdown
   // handler can persist their terminal state (event-log + session-archive)
@@ -394,6 +397,19 @@ export default function (pi: ExtensionAPI) {
     await sessionMgr.remove(handle.sessionId);
     activeAdapters.delete(handle.sessionId);
     busySessions.delete(handle.sessionId);
+
+    // Clean up worktree if one was created for this session
+    const worktreeInfo = sessionWorktrees.get(handle.sessionId);
+    if (worktreeInfo && !worktreeInfo.keepWorktree) {
+      try {
+        const wtMgr = new WorktreeManager();
+        wtMgr.remove(worktreeInfo.path, worktreeInfo.repoCwd);
+      } catch (err) {
+        logger.debug("worktree cleanup failed", err);
+      }
+    }
+    sessionWorktrees.delete(handle.sessionId);
+
     eventLog.append("session_closed", { sessionId: handle.sessionId, agentName: handle.agentName, closeReason, autoClosed });
   }
 
@@ -949,7 +965,17 @@ export default function (pi: ExtensionAPI) {
 
       const result = await safeExecute(async () => {
         const agentCfg = getAgentConfigOrThrow(agentName);
-        const effectiveCwd = params.cwd ?? ctx.cwd;
+        let effectiveCwd = params.cwd ?? ctx.cwd;
+        let worktreePath: string | undefined;
+        let worktreeManager: WorktreeManager | undefined;
+
+        // Create worktree if requested
+        if (params.worktree && effectiveCwd) {
+          worktreeManager = new WorktreeManager();
+          worktreePath = worktreeManager.create(effectiveCwd, sessionName || randomUUID().slice(0, 8));
+          effectiveCwd = worktreePath;
+        }
+
         const adapter = createAdapter(agentName, agentCfg, config, effectiveCwd, {
           onActivity: (sid) => monitor.touch(sid),
           onSessionUpdate: heartbeatConsumer,
@@ -963,6 +989,15 @@ export default function (pi: ExtensionAPI) {
           if (params.mode) await adapter.setMode(params.mode);
           handle = makeSessionHandle(sessionId, agentName, effectiveCwd, adapter, undefined, sessionName);
           activeAdapters.set(sessionId, adapter);
+
+          // Track worktree for cleanup on close
+          if (worktreePath) {
+            sessionWorktrees.set(sessionId, {
+              path: worktreePath,
+              repoCwd: params.cwd ?? ctx.cwd,
+              keepWorktree: params.keepWorktree,
+            });
+          }
 
           if (isWorker && sessionName) {
             workerStore().register({ name: sessionName, sessionId, agentName });
