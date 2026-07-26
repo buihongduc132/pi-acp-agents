@@ -66,11 +66,11 @@
 
 Documented by reviewer subagents in PR #39 verifier loop (APPROVED with notes):
 
-- **[G1] `resume()` re-engagement stub** — `src/core/async-executor.ts:353-361` TODO. State transitions work (`needs-attention` → `running`), but no actual `coordinator.delegate()` re-engagement. Stub resets telemetry + queues `[RESUME]` message. **Production impact: resume claims success without resuming work.**
-- **[G2] `steerQueue` never drained** — `steer()` + `resume()` push to queue (lines 379, 360) but no code forwards queued messages to session. Spec: "queued as a follow-up that runs after the current turn completes" — not implemented.
-- **[G3] Idle-steer response shape deviation** — `async-executor.ts:383-388` returns `{success:true, queued:true}` without `delivered:true`. Spec scenario "Steer queued when no active turn" expects `{delivered:true, queued:true}`.
+- **[G1 ✅ FIXED] `resume()` re-engagement** — `resume()` now calls `coordinator.delegate()` to actually re-engage the session. Verified by integration test proving delegate called twice (start + resume).
+- **[G2 ✅ FIXED] `steerQueue` draining** — `start()` and `resume()` now drain `steerQueue` into delegate message. Verified by integration test proving queued messages forwarded on resume.
+- **[G3 ✅ FIXED] Idle-steer delivered:true** — `steer()` now returns `{success: true, delivered: true, queued: true}` for idle runs per spec. Verified by T4.8 test.
 - **[G4] Wake-subscriber hook not wired** — Spec requires wake publish "within 5 seconds" via wake-subscriber hook. Impl invokes `onWakeNotification` synchronously (sufficient for callback contract T3.3), but no subscriber wiring or 5s bound tested.
 - **[G5] Worker worktree isolation** — tasks 6.5/6.6 (`acp_worker_spawn` worktree params + wiring) deferred. Only `acp_spawn` worktree support shipped.
 - **[G6] Coverage check** — task 8.5 (`bun run test --coverage`) not run; coverage delta unverified.
 
-G1/G2 are functional gaps (production-blocking for real resume/steer semantics). G3-G6 are spec-completeness gaps. All gaps are additive (no breaking changes); existing tests still pass (2223/2223).
+G1-G3 are now fixed and verified. G4-G6 remain as spec-completeness gaps (non-blocking). All changes additive (no breaking changes); 2225 tests pass.
