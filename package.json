@@ -64,12 +64,9 @@
       "optional": true
     }
   },
-  "workspaces": [
-    "packages/*"
-  ],
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.21.0",
-    "pi-acp-types": "workspace:*"
+    "pi-acp-types": "^0.1.0"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "^0.73.0",
@@ -99,5 +96,10 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "pi-acp-types": "workspace:*"
+    }
   }
 }

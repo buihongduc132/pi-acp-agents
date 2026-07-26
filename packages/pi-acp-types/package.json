@@ -8,6 +8,7 @@
   "files": ["dist/"],
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "test": "echo \"types package — no tests\""
   },
   "license": "MIT",

@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "pi-acp-agents": "^0.3.0",
-    "pi-acp-types": "workspace:*",
+    "pi-acp-types": "^0.1.0",
     "typebox": "^1.1.37"
   },
   "devDependencies": {
