@@ -3,11 +3,13 @@
  *
  * Runs agent delegation in a background Promise, tracking state in a file-backed store.
  * Reuses AgentCoordinator.delegate() for actual ACP calls.
+ *
+ * M2 additions: telemetry accumulation, silent-failure detection, wake notifications.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AcpAsyncRunRecord } from "../config/types.js";
+import type { AcpAsyncRunRecord, AsyncRunError } from "../config/types.js";
 import type { AgentCoordinator } from "../coordination/coordinator.js";
 import { createNoopLogger } from "../logger.js";
 
@@ -19,19 +21,77 @@ interface AsyncStorePayload {
 
 const DEFAULT_PAYLOAD: AsyncStorePayload = { runs: [] };
 
+/** Session event emitted during delegation (tool calls, file writes, token usage, turn end). */
+export interface AsyncSessionEvent {
+  type: "tool_call" | "file_write" | "token_usage" | "turn_end";
+  payload?: Record<string, unknown>;
+}
+
+/** Options for AsyncExecutor constructor. */
+export interface AsyncExecutorOptions {
+  /** Called when a run transitions to a state that needs parent attention (e.g., silent failure). */
+  onWakeNotification?: (runId: string, info: { reason: string }) => void;
+}
+
+/** Options for AsyncExecutor.start(). */
+export interface AsyncStartOptions {
+  /** Path to the output log file for this run. */
+  outputPath?: string;
+}
+
+/** Telemetry accumulator for a single run. */
+interface RunTelemetry {
+  turns: number;
+  toolCalls: number;
+  tokensUsed: number;
+  filesWritten: number;
+  lastActivityAt: string;
+}
+
+function createInitialTelemetry(): RunTelemetry {
+  const now = new Date().toISOString();
+  return { turns: 0, toolCalls: 0, tokensUsed: 0, filesWritten: 0, lastActivityAt: now };
+}
+
+function accumulateEvent(telemetry: RunTelemetry, event: AsyncSessionEvent): void {
+  const now = new Date().toISOString();
+  telemetry.lastActivityAt = now;
+  switch (event.type) {
+    case "tool_call":
+      telemetry.toolCalls++;
+      break;
+    case "file_write":
+      telemetry.filesWritten++;
+      break;
+    case "token_usage": {
+      const input = (event.payload?.input as number) ?? 0;
+      const output = (event.payload?.output as number) ?? 0;
+      telemetry.tokensUsed += input + output;
+      break;
+    }
+    case "turn_end":
+      telemetry.turns++;
+      break;
+  }
+}
+
 export class AsyncExecutor {
   private runsFile: string;
   private activePromises = new Map<string, Promise<void>>();
+  private telemetryMap = new Map<string, RunTelemetry>();
+  private onWakeNotification?: (runId: string, info: { reason: string }) => void;
 
   constructor(
     private coordinator: AgentCoordinator,
     runtimeDir: string,
+    options?: AsyncExecutorOptions,
   ) {
     mkdirSync(runtimeDir, { recursive: true });
     this.runsFile = join(runtimeDir, "async-runs.json");
+    this.onWakeNotification = options?.onWakeNotification;
   }
 
-  start(agentName: string, message: string, cwd?: string): string {
+  start(agentName: string, message: string, cwd?: string, startOptions?: AsyncStartOptions): string {
     const runId = randomUUID().slice(0, 8);
     const now = new Date().toISOString();
     const record: AcpAsyncRunRecord = {
@@ -41,27 +101,84 @@ export class AsyncExecutor {
       cwd,
       state: "pending",
       createdAt: now,
+      lastActivityAt: now,
+      outputPath: startOptions?.outputPath,
     };
     this.writeRun(record);
+    this.telemetryMap.set(runId, createInitialTelemetry());
 
     const promise = (async () => {
       try {
-        this.updateRun(runId, { state: "running", startedAt: new Date().toISOString() });
-        const result = await this.coordinator.delegate(agentName, message, cwd);
-        this.updateRun(runId, {
-          state: "completed",
-          result: result.text,
-          sessionId: result.sessionId,
-          completedAt: new Date().toISOString(),
-        });
+        this.updateRun(runId, { state: "running", startedAt: new Date().toISOString(), lastActivityAt: new Date().toISOString() });
+
+        // Pass onEvent callback to coordinator.delegate() for telemetry accumulation.
+        // The real coordinator may ignore this extra arg; mock coordinators in tests use it.
+        const onEvent = (event: AsyncSessionEvent) => {
+          const telemetry = this.telemetryMap.get(runId);
+          if (telemetry) accumulateEvent(telemetry, event);
+        };
+
+        const result = await (this.coordinator as any).delegate(
+          agentName,
+          message,
+          cwd,
+          onEvent,
+        );
+
+        const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
+
+        // Silent-failure detection: if no tool calls, no file writes, AND no text output,
+        // the run produced nothing useful. Runs that return text without tool calls are legitimate.
+        if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !result.text) {
+          const errorDetail: AsyncRunError = { reason: "silent-no-output" };
+          this.updateRun(runId, {
+            state: "failed",
+            error: "silent-no-output: run completed with zero tool calls and zero file writes",
+            errorDetail,
+            result: result.text,
+            sessionId: result.sessionId,
+            completedAt: new Date().toISOString(),
+            turns: telemetry.turns,
+            toolCalls: telemetry.toolCalls,
+            tokensUsed: telemetry.tokensUsed,
+            lastActivityAt: telemetry.lastActivityAt,
+            filesWritten: telemetry.filesWritten,
+          });
+          this.onWakeNotification?.(runId, { reason: "silent-no-output" });
+        } else {
+          this.updateRun(runId, {
+            state: "completed",
+            result: result.text,
+            sessionId: result.sessionId,
+            completedAt: new Date().toISOString(),
+            turns: telemetry.turns,
+            toolCalls: telemetry.toolCalls,
+            tokensUsed: telemetry.tokensUsed,
+            lastActivityAt: telemetry.lastActivityAt,
+            filesWritten: telemetry.filesWritten,
+          });
+        }
       } catch (err: unknown) {
+        const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const errorDetail: AsyncRunError = {
+          reason: this.classifyError(errorMessage),
+          message: errorMessage,
+        };
         this.updateRun(runId, {
           state: "failed",
-          error: err instanceof Error ? err.message : String(err),
+          error: errorMessage,
+          errorDetail,
           completedAt: new Date().toISOString(),
+          turns: telemetry.turns,
+          toolCalls: telemetry.toolCalls,
+          tokensUsed: telemetry.tokensUsed,
+          lastActivityAt: telemetry.lastActivityAt,
+          filesWritten: telemetry.filesWritten,
         });
       } finally {
         this.activePromises.delete(runId);
+        this.telemetryMap.delete(runId);
       }
     })();
     this.activePromises.set(runId, promise);
@@ -78,10 +195,21 @@ export class AsyncExecutor {
     return run.result ?? null;
   }
 
+  /** Returns all non-terminal runs sorted by lastActivityAt descending. */
   listActive(): AcpAsyncRunRecord[] {
-    return this.readAll().runs.filter(
-      (r) => r.state === "pending" || r.state === "running",
+    const active = this.readAll().runs.filter(
+      (r) =>
+        r.state === "pending" ||
+        r.state === "running" ||
+        r.state === "needs-attention",
     );
+    // Sort by lastActivityAt descending (most recent first).
+    // Runs without lastActivityAt sort to the end.
+    return active.sort((a, b) => {
+      const aTime = a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0;
+      const bTime = b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : 0;
+      return bTime - aTime;
+    });
   }
 
   listAll(): AcpAsyncRunRecord[] {
@@ -104,11 +232,17 @@ export class AsyncExecutor {
     const cutoff = new Date(Date.now() - olderThanMs);
     const before = payload.runs.length;
     payload.runs = payload.runs.filter((r) => {
-      if (r.state === "pending" || r.state === "running") return true;
+      if (r.state === "pending" || r.state === "running" || r.state === "needs-attention") return true;
       return new Date(r.completedAt ?? r.createdAt) >= cutoff;
     });
     this.writeAll(payload);
     return { pruned: before - payload.runs.length };
+  }
+
+  private classifyError(message: string): AsyncRunError["reason"] {
+    if (/rate.?limit/i.test(message)) return "rate-limit";
+    if (/crash|segfault|abort|killed/i.test(message)) return "crash";
+    return "unknown";
   }
 
   private readAll(): AsyncStorePayload {
@@ -116,7 +250,6 @@ export class AsyncExecutor {
     try {
       return JSON.parse(readFileSync(this.runsFile, "utf-8")) as AsyncStorePayload;
     } catch (e) {
-      // File read failed — return default payload
       log.debug("async-executor read failed", e);
       return structuredClone(DEFAULT_PAYLOAD);
     }
@@ -126,8 +259,6 @@ export class AsyncExecutor {
     try {
       writeFileSync(this.runsFile, JSON.stringify(payload, null, 2) + "\n", "utf-8");
     } catch (e) {
-      // File read failed — return default payload
-      // EACCES or other FS error — silently degrade.
       log.debug("async-executor write failed", e);
     }
   }
