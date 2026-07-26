@@ -273,6 +273,40 @@ Workers share the caller's filesystem (no `git worktree` isolation). For paralle
 
 ---
 
+## Async run lifecycle (telemetry, steer, interrupt, resume, worktree)
+
+Async runs (spawned with `async: true` or `acp_dag`) now support full lifecycle management, aligning ACP with subagents:
+
+### Fleet view
+
+```
+acp_status({ action: "fleet" })  // or acp_status({ view: "fleet" })
+```
+Returns compact list of active runs with telemetry (turns, toolCalls, tokensUsed, filesWritten, lastActivityAt).
+
+### Interrupt / Resume
+
+```
+acp_status({ action: "interrupt", id: "<runId>" })   // abort in-flight turn → needs-attention
+acp_status({ action: "resume", id: "<runId>", message: "Continue with X" })
+```
+
+### Silent-failure detection
+
+Runs that complete with zero tool calls, zero file writes, AND empty text are auto-flagged as `failed` with `error: "silent-no-output"`.
+
+### Worktree isolation
+
+```
+acp_spawn({ agent: "gemini", prompt: "...", worktree: true })          // isolated git worktree
+acp_spawn({ agent: "gemini", prompt: "...", worktree: true, keepWorktree: true })  // keep after run
+```
+
+Creates a git worktree at `<cwd>/.worktrees/acp-<runId>`. Cleaned up on run dispose unless `keepWorktree: true`.
+
+
+---
+
 ## Configuration
 
 Config file: `~/.pi/acp-agents/config.json`
