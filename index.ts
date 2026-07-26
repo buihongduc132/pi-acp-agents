@@ -902,6 +902,8 @@ export default function (pi: ExtensionAPI) {
       model: Type.Optional(Type.String({ description: "Model to set on the session" })),
       mode: Type.Optional(Type.String({ description: "Mode/thinking level to set on the session" })),
       async: Type.Optional(Type.Boolean({ description: "Overrides the global async default (config.spawns.asyncDefault, default true). When true, spawn-with-prompt returns immediately with status:'prompting' and the prompt runs in the background. When false, blocks and returns the response inline (legacy behavior). If omitted, uses the config default." })),
+      worktree: Type.Optional(Type.Boolean({ description: "If true, create a git worktree at <cwd>/.worktrees/acp-<runId> for isolation. Default: false." })),
+      keepWorktree: Type.Optional(Type.Boolean({ description: "If true (with worktree:true), keep the worktree after the run completes. Default: false (clean up on dispose)." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const agentName = getAgentName(params.agent);
@@ -1432,13 +1434,58 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       session_id: Type.Optional(Type.String({ description: "Specific session ID to inspect" })),
       session_name: Type.Optional(Type.String({ description: "Friendly session name to inspect" })),
-      action: Type.Optional(Type.String({ description: "Maintenance action: 'prune' (mark stale workers offline) or 'cleanup' (remove sessions + clear tasks/mailboxes). Omit for status display." })),
+      action: Type.Optional(Type.String({ description: "Maintenance action: 'prune' (mark stale workers offline), 'cleanup' (remove sessions + clear tasks/mailboxes), 'fleet' (show active async runs), 'interrupt' (abort in-flight async run → needs-attention), 'resume' (re-engage interrupted async run). Omit for status display." })),
       target: Type.Optional(Type.String({ description: "Cleanup target: 'all', 'sessions', 'tasks', 'mailboxes'. Default: 'all'." })),
+      view: Type.Optional(Type.String({ description: "View filter: 'fleet' for compact active-runs overview with telemetry." })),
+      id: Type.Optional(Type.String({ description: "Async run ID for action: 'interrupt' or 'resume'." })),
+      message: Type.Optional(Type.String({ description: "Optional message for action: 'resume'." })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       config = loadConfig();
       governanceStore().setModelPolicy(config.modelPolicy ?? {});
 
+      // ── action: fleet / view: fleet — show active async runs with telemetry ──
+      if (params.action === "fleet" || params.view === "fleet") {
+        const fleetCoordinator = new AgentCoordinator(config, process.cwd(), {});
+        const fleetExecutor = new AsyncExecutor(fleetCoordinator, runtimePaths.rootDir);
+        const fleet = fleetExecutor.getFleetView();
+        const lines = fleet.map((r: any) =>
+          `  ${r.runId} [${r.state}] ${r.agentName} — turns:${r.turns ?? 0} tools:${r.toolCalls ?? 0} files:${r.filesWritten ?? 0} last:${r.lastActivityAt ?? "?"}`
+        );
+        return {
+          content: [textContent(fleet.length > 0 ? `Active runs (${fleet.length}):
+${lines.join("\n")}` : "No active async runs")],
+          details: { fleet, count: fleet.length },
+        };
+      }
+
+      // ── action: interrupt — abort in-flight async run ──
+      if (params.action === "interrupt") {
+        if (!params.id) {
+          return { content: [textContent("action: interrupt requires 'id' parameter")], details: { error: "missing_id" } };
+        }
+        const intCoordinator = new AgentCoordinator(config, process.cwd(), {});
+        const intExecutor = new AsyncExecutor(intCoordinator, runtimePaths.rootDir);
+        const result = intExecutor.interrupt(params.id);
+        return {
+          content: [textContent(result.success ? `Interrupted run ${params.id}` : `Cannot interrupt: ${result.reason}`)],
+          details: { runId: params.id, result },
+        };
+      }
+
+      // ── action: resume — re-engage interrupted async run ──
+      if (params.action === "resume") {
+        if (!params.id) {
+          return { content: [textContent("action: resume requires 'id' parameter")], details: { error: "missing_id" } };
+        }
+        const resCoordinator = new AgentCoordinator(config, process.cwd(), {});
+        const resExecutor = new AsyncExecutor(resCoordinator, runtimePaths.rootDir);
+        const result = resExecutor.resume(params.id, params.message);
+        return {
+          content: [textContent(result.success ? `Resumed run ${params.id}` : `Cannot resume: ${result.reason}`)],
+          details: { runId: params.id, result },
+        };
+      }
       // ── action: prune — absorb acp_worker_prune ──
       // Mark all stale (derived) workers offline and unassign their tasks.
       if (params.action === "prune") {
