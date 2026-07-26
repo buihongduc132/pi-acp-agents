@@ -23,7 +23,7 @@ function createSlowMockCoordinator(delayMs = 2000): AgentCoordinator {
 				sessionId: 'mock-session',
 			};
 		},
-	} as AgentCoordinator;
+	} as unknown as AgentCoordinator;
 }
 
 describe('Shared Executor Instance', () => {
