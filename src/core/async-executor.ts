@@ -202,6 +202,44 @@ export class AsyncExecutor {
     return this.readAll().runs.find((r) => r.runId === runId);
   }
 
+  /** Returns full telemetry for a single run (alias for getStatus with telemetry fields). */
+  getRunDetail(runId: string): AcpAsyncRunRecord | undefined {
+    return this.getStatus(runId);
+  }
+
+  /** Returns a compact fleet view of all active runs with telemetry, sorted by lastActivityAt desc. */
+  getFleetView(retentionMs: number = 86_400_000): Array<{
+    runId: string;
+    state: string;
+    agentName: string;
+    message: string;
+    lastActivityAt?: string;
+    turns?: number;
+    toolCalls?: number;
+    tokensUsed?: number;
+    filesWritten?: number;
+    summary?: string;
+  }> {
+    const cutoff = Date.now() - retentionMs;
+    return this.listActive()
+      .filter((r) => {
+        const activityTime = r.lastActivityAt ? new Date(r.lastActivityAt).getTime() : new Date(r.createdAt).getTime();
+        return activityTime >= cutoff;
+      })
+      .map((r) => ({
+        runId: r.runId,
+        state: r.state,
+        agentName: r.agentName,
+        message: r.message,
+        lastActivityAt: r.lastActivityAt,
+        turns: r.turns,
+        toolCalls: r.toolCalls,
+        tokensUsed: r.tokensUsed,
+        filesWritten: r.filesWritten,
+        summary: r.result ?? r.message,
+      }));
+  }
+
   getResult(runId: string): string | null {
     const run = this.getStatus(runId);
     if (!run || run.state !== "completed") return null;
