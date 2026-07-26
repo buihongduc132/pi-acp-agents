@@ -96,10 +96,5 @@
   },
   "engines": {
     "node": ">=22.0.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "pi-acp-types": "workspace:*"
-    }
   }
 }
