@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import type { AcpAsyncRunRecord, AsyncRunError } from "../config/types.js";
 import type { AgentCoordinator } from "../coordination/coordinator.js";
 import { createNoopLogger } from "../logger.js";
+import { WorktreeManager } from "./worktree-manager.js";
 
 const log = createNoopLogger();
 
@@ -37,6 +38,10 @@ export interface AsyncExecutorOptions {
 export interface AsyncStartOptions {
   /** Path to the output log file for this run. */
   outputPath?: string;
+  /** If true, create a git worktree for isolation. */
+  worktree?: boolean;
+  /** If true (with worktree:true), keep the worktree after run completes. */
+  keepWorktree?: boolean;
 }
 
 /** Telemetry accumulator for a single run. */
@@ -81,6 +86,7 @@ export class AsyncExecutor {
   private telemetryMap = new Map<string, RunTelemetry>();
   private steerQueue = new Map<string, string[]>();
   private interruptedRuns = new Set<string>();
+  private worktreeManager = new WorktreeManager();
   private onWakeNotification?: (runId: string, info: { reason: string }) => void;
 
   constructor(
@@ -96,15 +102,33 @@ export class AsyncExecutor {
   start(agentName: string, message: string, cwd?: string, startOptions?: AsyncStartOptions): string {
     const runId = randomUUID().slice(0, 8);
     const now = new Date().toISOString();
+
+    // Create worktree if requested
+    let worktreePath: string | undefined;
+    let keepWorktree = false;
+    if (startOptions?.worktree) {
+      const worktreeCwd = cwd ?? process.cwd();
+      try {
+        worktreePath = this.worktreeManager.create(worktreeCwd, runId);
+        keepWorktree = startOptions.keepWorktree ?? false;
+      } catch (err) {
+        log.warn("async-executor: worktree creation failed", err);
+      }
+    }
+
+    const effectiveCwd = worktreePath ?? cwd;
+
     const record: AcpAsyncRunRecord = {
       runId,
       agentName,
       message,
-      cwd,
+      cwd: effectiveCwd,
       state: "pending",
       createdAt: now,
       lastActivityAt: now,
       outputPath: startOptions?.outputPath,
+      worktreePath,
+      keepWorktree,
     };
     this.writeRun(record);
     this.telemetryMap.set(runId, createInitialTelemetry());
@@ -123,7 +147,7 @@ export class AsyncExecutor {
         const result = await (this.coordinator as any).delegate(
           agentName,
           message,
-          cwd,
+          effectiveCwd,
           onEvent,
         );
 
@@ -192,6 +216,16 @@ export class AsyncExecutor {
       } finally {
         this.activePromises.delete(runId);
         this.telemetryMap.delete(runId);
+
+        // Clean up worktree unless keepWorktree is set
+        if (worktreePath && !keepWorktree) {
+          try {
+            const run = this.getStatus(runId);
+            this.worktreeManager.remove(worktreePath, run?.cwd ?? cwd);
+          } catch (err) {
+            log.warn("async-executor: worktree cleanup failed (best-effort)", err);
+          }
+        }
       }
     })();
     this.activePromises.set(runId, promise);
