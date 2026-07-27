@@ -122,6 +122,26 @@ function accumulateProgress(telemetry: RunTelemetry, progress: AcpDelegateProgre
   }
 }
 
+/**
+ * A spawn tracked by the executor but managed externally (by the acp_spawn tool).
+ * The executor records the run for fleet/steer/interrupt/resume/telemetry,
+ * and the external caller reports completion/failure.
+ */
+export interface TrackedSpawn {
+  runId: string;
+  sessionId: string;
+  agentName: string;
+  cwd: string;
+  message: string;
+  /** Cancel the in-flight prompt (for interrupt). */
+  cancel: () => void;
+  /** Re-prompt the session (for resume). */
+  reprompt: (message: string) => Promise<{ text: string } | null>;
+  /** Whether to keep the worktree after cleanup. */
+  keepWorktree?: boolean;
+  /** Worktree path if created. */
+  worktreePath?: string;
+}
 export class AsyncExecutor {
   private runsFile: string;
   private activePromises = new Map<string, Promise<void>>();
@@ -130,6 +150,9 @@ export class AsyncExecutor {
   private interruptedRuns = new Set<string>();
   private worktreeManager = new WorktreeManager();
   private onWakeNotification?: (runId: string, info: { reason: string }) => void;
+
+  /** Tracked external spawns (from acp_spawn async path). Keyed by runId. */
+  private trackedSpawns = new Map<string, TrackedSpawn>();
 
   constructor(
     private coordinator: AgentCoordinator,
@@ -286,6 +309,136 @@ export class AsyncExecutor {
     return this.readAll().runs.find((r) => r.runId === runId);
   }
 
+  /**
+   * Track an externally-managed spawn (from acp_spawn async path).
+   * The run is registered for fleet/steer/interrupt/resume/telemetry/silent-failure.
+   * The external caller must call completeTrackedSpawn() or failTrackedSpawn() when done.
+   */
+  trackExternalSpawn(params: {
+    sessionId: string;
+    agentName: string;
+    cwd: string;
+    message: string;
+    cancel: () => void;
+    reprompt: (message: string) => Promise<{ text: string } | null>;
+    worktreePath?: string;
+    keepWorktree?: boolean;
+    outputPath?: string;
+  }): string {
+    const runId = randomUUID().slice(0, 8);
+    const now = new Date().toISOString();
+    const record: AcpAsyncRunRecord = {
+      runId,
+      agentName: params.agentName,
+      message: params.message,
+      cwd: params.cwd,
+      state: "running",
+      createdAt: now,
+      lastActivityAt: now,
+      sessionId: params.sessionId,
+      outputPath: params.outputPath,
+      worktreePath: params.worktreePath,
+      keepWorktree: params.keepWorktree,
+    };
+    this.writeRun(record);
+    this.telemetryMap.set(runId, createInitialTelemetry());
+    this.trackedSpawns.set(runId, {
+      runId,
+      sessionId: params.sessionId,
+      agentName: params.agentName,
+      cwd: params.cwd,
+      message: params.message,
+      cancel: params.cancel,
+      reprompt: params.reprompt,
+      keepWorktree: params.keepWorktree,
+      worktreePath: params.worktreePath,
+    });
+    return runId;
+  }
+
+  /** Report a tracked spawn completion (with telemetry). */
+  completeTrackedSpawn(runId: string, result: { text: string }): void {
+    const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
+    // Silent-failure detection
+    if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !result.text) {
+      this.updateRun(runId, {
+        state: "failed",
+        error: "silent-no-output: run completed with zero tool calls and zero file writes",
+        errorDetail: { reason: "silent-no-output" },
+        result: result.text,
+        completedAt: new Date().toISOString(),
+        turns: telemetry.turns,
+        toolCalls: telemetry.toolCalls,
+        tokensUsed: telemetry.tokensUsed,
+        lastActivityAt: telemetry.lastActivityAt,
+        filesWritten: telemetry.filesWritten,
+      });
+      this.onWakeNotification?.(runId, { reason: "silent-no-output" });
+    } else {
+      this.updateRun(runId, {
+        state: "completed",
+        result: result.text,
+        completedAt: new Date().toISOString(),
+        turns: telemetry.turns,
+        toolCalls: telemetry.toolCalls,
+        tokensUsed: telemetry.tokensUsed,
+        lastActivityAt: telemetry.lastActivityAt,
+        filesWritten: telemetry.filesWritten,
+      });
+    }
+    this.telemetryMap.delete(runId);
+    this.cleanupTrackedWorktree(runId);
+  }
+
+  /** Report a tracked spawn failure. */
+  failTrackedSpawn(runId: string, errorMessage: string): void {
+    const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
+    this.updateRun(runId, {
+      state: "failed",
+      error: errorMessage,
+      errorDetail: { reason: this.classifyError(errorMessage), message: errorMessage },
+      completedAt: new Date().toISOString(),
+      turns: telemetry.turns,
+      toolCalls: telemetry.toolCalls,
+      tokensUsed: telemetry.tokensUsed,
+      lastActivityAt: telemetry.lastActivityAt,
+      filesWritten: telemetry.filesWritten,
+    });
+    this.telemetryMap.delete(runId);
+    this.cleanupTrackedWorktree(runId);
+  }
+
+  /** Increment telemetry for a tracked spawn (call on each progress event). */
+  reportTrackedProgress(runId: string): void {
+    const telemetry = this.telemetryMap.get(runId);
+    if (telemetry) {
+      telemetry.turns++;
+      telemetry.lastActivityAt = new Date().toISOString();
+      this.updateRun(runId, { turns: telemetry.turns, lastActivityAt: telemetry.lastActivityAt });
+    }
+  }
+
+  /** Look up a tracked spawn by sessionId (for steer/interrupt via acp_msg). */
+  findTrackedBySession(sessionId: string): TrackedSpawn | undefined {
+    for (const spawn of this.trackedSpawns.values()) {
+      if (spawn.sessionId === sessionId) return spawn;
+    }
+    return undefined;
+  }
+
+  /** Clean up worktree for a tracked spawn (best-effort). */
+  private cleanupTrackedWorktree(runId: string): void {
+    const spawn = this.trackedSpawns.get(runId);
+    if (spawn?.worktreePath && !spawn.keepWorktree) {
+      try {
+        this.worktreeManager.remove(spawn.worktreePath, spawn.cwd);
+      } catch (err) {
+        log.warn("async-executor: tracked spawn worktree cleanup failed (best-effort)", err);
+      }
+    }
+    this.trackedSpawns.delete(runId);
+  }
+
   /** Returns full telemetry for a single run (alias for getStatus with telemetry fields). */
   getRunDetail(runId: string): AcpAsyncRunRecord | undefined {
     return this.getStatus(runId);
@@ -389,6 +542,13 @@ export class AsyncExecutor {
     // Mark as interrupted and set state to needs-attention
     this.interruptedRuns.add(runId);
     const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
+
+    // For tracked external spawns, cancel the in-flight prompt via the adapter
+    const tracked = this.trackedSpawns.get(runId);
+    if (tracked) {
+      try { tracked.cancel(); } catch { /* best-effort */ }
+    }
+
     this.updateRun(runId, {
       state: "needs-attention",
       error: "interrupted by user",
@@ -435,17 +595,31 @@ export class AsyncExecutor {
 
     const promise = (async () => {
       try {
-        const onProgress = (progress: AcpDelegateProgress) => {
-          const telemetry = this.telemetryMap.get(runId);
-          if (telemetry) accumulateProgress(telemetry, progress);
-        };
+        // For tracked external spawns, use the spawn's reprompt callback
+        // instead of coordinator.delegate() (which would create a new session).
+        const tracked = this.trackedSpawns.get(runId);
+        let resultText: string;
 
-        const result = await this.coordinator.delegate(
-          run.agentName,
-          fullMessage,
-          run.cwd,
-          onProgress,
-        );
+        if (tracked) {
+          const result = await tracked.reprompt(fullMessage);
+          resultText = result?.text ?? "";
+          // Increment telemetry for each resume reprompt
+          const t = this.telemetryMap.get(runId);
+          if (t) { t.turns++; t.lastActivityAt = new Date().toISOString(); }
+        } else {
+          const onProgress = (progress: AcpDelegateProgress) => {
+            const telemetry = this.telemetryMap.get(runId);
+            if (telemetry) accumulateProgress(telemetry, progress);
+          };
+
+          const result = await this.coordinator.delegate(
+            run.agentName,
+            fullMessage,
+            run.cwd,
+            onProgress,
+          );
+          resultText = result.text;
+        }
 
         await new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -456,13 +630,12 @@ export class AsyncExecutor {
         }
 
         const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
-        if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !result.text) {
+        if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !resultText) {
           this.updateRun(runId, {
             state: "failed",
             error: "silent-no-output: resumed run produced no output",
             errorDetail: { reason: "silent-no-output" },
-            result: result.text,
-            sessionId: result.sessionId,
+            result: resultText,
             completedAt: new Date().toISOString(),
             turns: telemetry.turns,
             toolCalls: telemetry.toolCalls,
@@ -474,8 +647,7 @@ export class AsyncExecutor {
         } else {
           this.updateRun(runId, {
             state: "completed",
-            result: result.text,
-            sessionId: result.sessionId,
+            result: resultText,
             completedAt: new Date().toISOString(),
             turns: telemetry.turns,
             toolCalls: telemetry.toolCalls,
