@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { AgentToolResult, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { type AcpWidgetState, type AcpWidgetDag, dagIndexEntryToWidgetDag } from "./src/acp-widget.js";
