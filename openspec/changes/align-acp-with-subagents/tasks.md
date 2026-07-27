@@ -70,7 +70,7 @@ Documented by reviewer subagents in PR #39 verifier loop (APPROVED with notes):
 - **[G2 ✅ FIXED] `steerQueue` draining** — `start()` and `resume()` now drain `steerQueue` into delegate message. Verified by integration test proving queued messages forwarded on resume.
 - **[G3 ✅ FIXED] Idle-steer delivered:true** — `steer()` now returns `{success: true, delivered: true, queued: true}` for idle runs per spec. Verified by T4.8 test.
 - **[G4 ✅ FIXED] Wake notification wired** — `index.ts` now passes `onWakeNotification` callback via `getSharedAsyncExecutor()` that calls `pi.sendUserMessage()` to surface silent failures to the parent session. Verified by shared-instance test.
-- **[G5] Worker worktree isolation** — tasks 6.5/6.6 (`acp_worker_spawn` worktree params + wiring) deferred. Only `acp_spawn` worktree support shipped.
+- **[G5 ✅ FIXED] Worker worktree isolation** — `acp_spawn({ claim: true, worktree: true })` now creates isolated git worktrees for workers. Worktree tracked in `sessionWorktrees` map and cleaned up in `closeSession` (unless `keepWorktree: true`). Verified by 4 new tests in `test/core/worker-worktree.test.ts`.
 - **[G6] Coverage check** — task 8.5 (`bun run test --coverage`) not run; coverage delta unverified.
 
 ### Architectural Fixes (auditor rejection round 2)
@@ -79,6 +79,6 @@ Documented by reviewer subagents in PR #39 verifier loop (APPROVED with notes):
 - **[A2 ✅ FIXED] Steer unreachable from tools** — Added `acp_status({ action: "steer", id, message })` action wired to shared executor.
 - **[A3 ✅ FIXED] Wake notification not wired** — `onWakeNotification` callback now passed in `index.ts` via `getSharedAsyncExecutor()`.
 - **[A4 ✅ FIXED] Resume/interrupt disk-only** — Shared executor instance preserves in-memory state (activePromises, telemetryMap, steerQueue, interruptedRuns) across tool calls.
-- **[A5] Worker worktree isolation** — Same as G5 above, still deferred.
+- **[A5 ✅ FIXED] Worker worktree isolation** — Same as G5 above, now fixed. Workers spawned via `acp_spawn({ claim: true, worktree: true })` get isolated worktrees with cleanup on close.
 
-G1-G4 and A1-A4 are now fixed and verified by reviewer subagent. G5/G6/A5 remain as spec-completeness gaps (non-blocking, worker worktree is deferred, coverage check not run). All changes additive (no breaking changes); 2234 tests pass.
+G1-G5 and A1-A5 are now fixed and verified by reviewer subagent. G6 remains as spec-completeness gap (non-blocking, coverage check not run). All changes additive (no breaking changes); 2238 tests pass.

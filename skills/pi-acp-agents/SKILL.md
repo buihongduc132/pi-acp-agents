@@ -71,6 +71,34 @@ Config file: `~/.pi/acp-agents/config.json`
 - **Stall timeout**: Prompts that receive no activity are auto-cancelled
 - **Health polling**: Background monitor enforces separate `lastResponseAt` and `completedAt` 1-hour auto-close policies
 - **Busy mutex**: Prevents concurrent prompts on same session
+
+## Async run lifecycle
+
+Async runs support telemetry tracking, steer, interrupt/resume, and worktree isolation.
+
+### Fleet view (active runs with telemetry)
+
+```
+acp_status({ action: "fleet" })
+```
+
+### Interrupt / Resume
+
+```
+acp_status({ action: "interrupt", id: "<runId>" })
+acp_status({ action: "resume", id: "<runId>", message: "..." })
+```
+
+### Worktree isolation
+
+```
+acp_spawn({ agent: "gemini", prompt: "...", worktree: true })
+acp_spawn({ agent: "gemini", prompt: "...", worktree: true, keepWorktree: true })
+```
+
+### Silent-failure detection
+
+Runs completing with zero output (no tool calls, no file writes, empty text) are auto-flagged `failed` with `error: "silent-no-output"`.
 - **Process safeguards**: SIGTERM → SIGKILL escalation, EPIPE error handlers
 - **Non-blocking**: All tool errors return as tool error results, never throw
 

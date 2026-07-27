@@ -209,7 +209,16 @@ export type AcpTaskPriority = "urgent" | "high" | "normal" | "low";
 
 // --- Async run types (M1) ---
 
-export type AcpAsyncRunState = "pending" | "running" | "completed" | "failed";
+// --- Async run types (M1) ---
+
+export type AcpAsyncRunState =
+	"pending" | "running" | "completed" | "failed" | "needs-attention";
+
+/** Structured error carried on failed/needs-attention runs. */
+export interface AsyncRunError {
+	reason: "silent-no-output" | "rate-limit" | "crash" | "unknown";
+	message?: string;
+}
 
 export interface AcpAsyncRunRecord {
 	runId: string;
@@ -223,6 +232,17 @@ export interface AcpAsyncRunRecord {
 	createdAt: string;
 	startedAt?: string;
 	completedAt?: string;
+	// Telemetry (M2: align with subagents fleet view)
+	turns?: number;
+	toolCalls?: number;
+	tokensUsed?: number;
+	lastActivityAt?: string;
+	filesWritten?: number;
+	outputPath?: string;
+	worktreePath?: string;
+	keepWorktree?: boolean;
+	/** Structured error detail, set when reason is known (silent-no-output, rate-limit, crash). */
+	errorDetail?: AsyncRunError;
 }
 
 /** Logger interface */

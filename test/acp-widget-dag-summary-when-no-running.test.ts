@@ -26,6 +26,9 @@ function minutesAgo(min: number): Date {
 	return new Date(Date.now() - min * 60_000);
 }
 
+// Shared timestamp for tests that compare ordering — avoids Date.now() drift
+// between two makeDag() calls that produces flaky sort results in CI.
+const SHARED_UPDATED = new Date(Date.now() - 60_000);
 function makeDag(overrides: Partial<AcpWidgetDag> = {}): AcpWidgetDag {
 	return {
 		dagId: "dag1",
@@ -70,12 +73,13 @@ function renderWidget(state: AcpWidgetState): string[] {
 describe("task 4.4 — completed/failed only (no running) → collapsed summary", () => {
 	it("renderDagSection returns the collapsed `<id>:<icon>` summary", () => {
 		const dags: AcpWidgetDag[] = [
-			makeDag({ dagId: "a1b2c3", status: "completed" }),
+			makeDag({ dagId: "a1b2c3", status: "completed", updatedAt: SHARED_UPDATED }),
 			makeDag({
 				dagId: "d4e5f6",
 				status: "failed",
 				completed: 1,
 				failed: 2,
+				updatedAt: SHARED_UPDATED,
 			}),
 		];
 		const state = makeState({ dags });
@@ -85,12 +89,13 @@ describe("task 4.4 — completed/failed only (no running) → collapsed summary"
 
 	it("full widget render surfaces the summary line + DAGs header, no progress rows", () => {
 		const dags: AcpWidgetDag[] = [
-			makeDag({ dagId: "a1b2c3", status: "completed" }),
+			makeDag({ dagId: "a1b2c3", status: "completed", updatedAt: SHARED_UPDATED }),
 			makeDag({
 				dagId: "d4e5f6",
 				status: "failed",
 				completed: 1,
 				failed: 2,
+				updatedAt: SHARED_UPDATED,
 			}),
 		];
 		const state = makeState({ dags });
