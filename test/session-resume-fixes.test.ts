@@ -75,7 +75,7 @@ describe("Phase 2: Auto-cleanup defaults", () => {
 
 describe("Phase 3: Name collision + loadability", () => {
   it("3.1 — randomBytes imported from node:crypto", () => {
-    expect(source).toContain('import { randomBytes } from "node:crypto"');
+    expect(source).toContain('import { randomBytes, randomUUID } from "node:crypto"');
   });
 
   it("3.1 — session names get random hex suffix (4 chars)", () => {
