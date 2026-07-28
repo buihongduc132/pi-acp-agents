@@ -194,6 +194,10 @@ export class AsyncExecutor {
       outputPath: startOptions?.outputPath,
       worktreePath,
       keepWorktree,
+      turns: 0,
+      toolCalls: 0,
+      tokensUsed: 0,
+      filesWritten: 0,
     };
     this.writeRun(record);
     this.telemetryMap.set(runId, createInitialTelemetry());
@@ -239,7 +243,7 @@ export class AsyncExecutor {
 
         // Silent-failure detection: if no tool calls, no file writes, AND no text output,
         // the run produced nothing useful. Runs that return text without tool calls are legitimate.
-        if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !result.text) {
+        if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !result.text?.trim()) {
           const errorDetail: AsyncRunError = { reason: "silent-no-output" };
           this.updateRun(runId, {
             state: "failed",
@@ -339,6 +343,10 @@ export class AsyncExecutor {
       outputPath: params.outputPath,
       worktreePath: params.worktreePath,
       keepWorktree: params.keepWorktree,
+      turns: 0,
+      toolCalls: 0,
+      tokensUsed: 0,
+      filesWritten: 0,
     };
     this.writeRun(record);
     this.telemetryMap.set(runId, createInitialTelemetry());
@@ -359,8 +367,24 @@ export class AsyncExecutor {
   /** Report a tracked spawn completion (with telemetry). */
   completeTrackedSpawn(runId: string, result: { text: string }): void {
     const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
+    // Preserve interrupted state: if the run was interrupted (needs-attention),
+    // don't terminalize it. The run can still be resumed later.
+    const current = this.getStatus(runId);
+    if (current?.state === "needs-attention") {
+      // Just update telemetry without changing state
+      this.updateRun(runId, {
+        turns: telemetry.turns,
+        toolCalls: telemetry.toolCalls,
+        tokensUsed: telemetry.tokensUsed,
+        lastActivityAt: telemetry.lastActivityAt,
+        filesWritten: telemetry.filesWritten,
+      });
+      this.telemetryMap.delete(runId);
+      // Don't clean up worktree — run may be resumed
+      return;
+    }
     // Silent-failure detection
-    if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !result.text) {
+    if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !result.text?.trim()) {
       this.updateRun(runId, {
         state: "failed",
         error: "silent-no-output: run completed with zero tool calls and zero file writes",
@@ -393,6 +417,22 @@ export class AsyncExecutor {
   /** Report a tracked spawn failure. */
   failTrackedSpawn(runId: string, errorMessage: string): void {
     const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
+    // Preserve interrupted state: if the run was interrupted (needs-attention),
+    // don't terminalize it. The run can still be resumed later.
+    const current = this.getStatus(runId);
+    if (current?.state === "needs-attention") {
+      // Just update telemetry without changing state
+      this.updateRun(runId, {
+        turns: telemetry.turns,
+        toolCalls: telemetry.toolCalls,
+        tokensUsed: telemetry.tokensUsed,
+        lastActivityAt: telemetry.lastActivityAt,
+        filesWritten: telemetry.filesWritten,
+      });
+      this.telemetryMap.delete(runId);
+      // Don't clean up worktree — run may be resumed
+      return;
+    }
     this.updateRun(runId, {
       state: "failed",
       error: errorMessage,
@@ -428,14 +468,8 @@ export class AsyncExecutor {
 
   /** Clean up worktree for a tracked spawn (best-effort). */
   private cleanupTrackedWorktree(runId: string): void {
-    const spawn = this.trackedSpawns.get(runId);
-    if (spawn?.worktreePath && !spawn.keepWorktree) {
-      try {
-        this.worktreeManager.remove(spawn.worktreePath, spawn.cwd);
-      } catch (err) {
-        log.warn("async-executor: tracked spawn worktree cleanup failed (best-effort)", err);
-      }
-    }
+    // Worktree lifecycle is managed by the session (closeSession/sessionWorktrees).
+    // The executor only removes the in-memory tracking to avoid leaks.
     this.trackedSpawns.delete(runId);
   }
 
@@ -619,6 +653,11 @@ export class AsyncExecutor {
             onProgress,
           );
           resultText = result.text;
+          // Persist sessionId from delegate result (for runs that were interrupted
+          // before their initial start() completed, or when the adapter recreated the session).
+          if (result.sessionId) {
+            this.updateRun(runId, { sessionId: result.sessionId });
+          }
         }
 
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -630,7 +669,7 @@ export class AsyncExecutor {
         }
 
         const telemetry = this.telemetryMap.get(runId) ?? createInitialTelemetry();
-        if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !resultText) {
+        if (telemetry.toolCalls === 0 && telemetry.filesWritten === 0 && !resultText?.trim()) {
           this.updateRun(runId, {
             state: "failed",
             error: "silent-no-output: resumed run produced no output",

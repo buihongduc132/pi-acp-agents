@@ -976,8 +976,18 @@ export default function (pi: ExtensionAPI) {
           effectiveCwd = worktreePath;
         }
 
+        // Declare before adapter so onActivity closure can capture them.
+        // Populated later when the async spawn path runs (trackExternalSpawn).
+        let asyncRunId: string | undefined;
+        let asyncExecutor: AsyncExecutor | null = null;
         const adapter = createAdapter(agentName, agentCfg, config, effectiveCwd, {
-          onActivity: (sid) => monitor.touch(sid),
+          onActivity: (sid) => {
+            monitor.touch(sid);
+            // Wire activity into tracked-run telemetry so fleet view shows live turns.
+            if (asyncRunId && asyncExecutor) {
+              try { asyncExecutor.reportTrackedProgress(asyncRunId); } catch { /* best-effort */ }
+            }
+          },
           onSessionUpdate: heartbeatConsumer,
         });
         let handle: AcpSessionHandle | undefined;
@@ -1058,17 +1068,11 @@ export default function (pi: ExtensionAPI) {
               }
               const bgHandle = handle;
 
-              // Track this spawn with the shared AsyncExecutor so it appears in
-              // fleet view, supports steer/interrupt/resume, accumulates
-              // Track this spawn with the shared AsyncExecutor so it appears in
-              // fleet view, supports steer/interrupt/resume, accumulates
-              // Track this spawn with the shared AsyncExecutor so it appears in
-              // fleet view, supports steer/interrupt/resume, accumulates
-              // telemetry, and gets silent-failure detection.
+              // Track this spawn with the shared AsyncExecutor (declared above)
+              // so it appears in fleet view, supports steer/interrupt/resume,
+              // accumulates telemetry, and gets silent-failure detection.
               // Defensive: if the executor throws (e.g. bad runtime dir in tests),
               // the spawn path still works — tracking is best-effort.
-              let asyncRunId: string | undefined;
-              let asyncExecutor: AsyncExecutor | null = null;
               try {
                 asyncExecutor = getSharedAsyncExecutor();
                 asyncRunId = asyncExecutor.trackExternalSpawn({
@@ -1084,7 +1088,7 @@ export default function (pi: ExtensionAPI) {
                     try {
                       const pr = (await withTimeoutMs(adapter.prompt(msg), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_spawn(resume:${sessionId})`)) as AcpPromptResult;
                       return { text: pr.text };
-                    } catch { return { text: "" }; }
+                    } catch (resumeErr) { const errMsg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr); throw new Error(errMsg); }
                   },
                 });
               } catch (trackErr) {
@@ -1174,7 +1178,7 @@ export default function (pi: ExtensionAPI) {
           const body = `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""} — prompting in background`;
           return {
             content: [textContent(warningLines ? `${body}\n\n${warningLines}` : body)],
-            details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, status: "prompting", warnings: v.warnings },
+            details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, status: "prompting", asyncRunId: (v as any).asyncRunId, warnings: v.warnings },
           } as AgentToolResult<{ sessionId: string; agent: string; oneShot: boolean; worker: boolean; status: string }>;
         }
         const body = v.text != null ? v.text : `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""}`;
