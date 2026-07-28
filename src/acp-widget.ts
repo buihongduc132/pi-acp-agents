@@ -278,9 +278,15 @@ export function renderDagSection(state: AcpWidgetState): string {
 	const visible = dags.filter((d) => d.status !== "pending");
 	if (visible.length === 0) return "";
 
-	// Cap the render list at 5 entries, ordered by `updatedAt` descending
+	// Cap the render list at 5 entries, ordered by `updatedAt` descending.
+	// Secondary sort by dagId ensures deterministic order when timestamps are equal
+	// (prevents flaky CI failures from unstable sort).
 	const recent = [...visible]
-		.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+		.sort((a, b) => {
+			const timeDiff = b.updatedAt.getTime() - a.updatedAt.getTime();
+			if (timeDiff !== 0) return timeDiff;
+			return a.dagId.localeCompare(b.dagId);
+		})
 		.slice(0, 5);
 
 	if (recent.some((d) => d.status === "running")) {

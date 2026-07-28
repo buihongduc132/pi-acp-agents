@@ -976,8 +976,18 @@ export default function (pi: ExtensionAPI) {
           effectiveCwd = worktreePath;
         }
 
+        // Declare before adapter so onActivity closure can capture them.
+        // Populated later when the async spawn path runs (trackExternalSpawn).
+        let asyncRunId: string | undefined;
+        let asyncExecutor: AsyncExecutor | null = null;
         const adapter = createAdapter(agentName, agentCfg, config, effectiveCwd, {
-          onActivity: (sid) => monitor.touch(sid),
+          onActivity: (sid) => {
+            monitor.touch(sid);
+            // Wire activity into tracked-run telemetry so fleet view shows live turns.
+            if (asyncRunId && asyncExecutor) {
+              try { asyncExecutor.reportTrackedProgress(asyncRunId); } catch { /* best-effort */ }
+            }
+          },
           onSessionUpdate: heartbeatConsumer,
         });
         let handle: AcpSessionHandle | undefined;
@@ -1057,6 +1067,34 @@ export default function (pi: ExtensionAPI) {
                 throw new Error(`internal: async spawn handle missing for ${sessionId}`);
               }
               const bgHandle = handle;
+
+              // Track this spawn with the shared AsyncExecutor (declared above)
+              // so it appears in fleet view, supports steer/interrupt/resume,
+              // accumulates telemetry, and gets silent-failure detection.
+              // Defensive: if the executor throws (e.g. bad runtime dir in tests),
+              // the spawn path still works — tracking is best-effort.
+              try {
+                asyncExecutor = getSharedAsyncExecutor();
+                asyncRunId = asyncExecutor.trackExternalSpawn({
+                  sessionId,
+                  agentName,
+                  cwd: effectiveCwd,
+                  message: effectivePrompt,
+                  outputPath: undefined,
+                  worktreePath,
+                  keepWorktree: params.keepWorktree,
+                  cancel: () => { try { adapter.cancel?.(); } catch { /* best-effort */ } },
+                  reprompt: async (msg: string) => {
+                    try {
+                      const pr = (await withTimeoutMs(adapter.prompt(msg), config.toolTimeouts?.prompt ?? config.stallTimeoutMs, `acp_spawn(resume:${sessionId})`)) as AcpPromptResult;
+                      return { text: pr.text };
+                    } catch (resumeErr) { const errMsg = resumeErr instanceof Error ? resumeErr.message : String(resumeErr); throw new Error(errMsg); }
+                  },
+                });
+              } catch (trackErr) {
+                logger.debug(`async spawn tracking failed (best-effort): ${trackErr instanceof Error ? trackErr.message : String(trackErr)}`);
+              }
+
               // CA-6: track this in-flight async spawn so the shutdown handler
               // can persist its terminal state (event-log + session-archive)
               // instead of losing it silently when the main session exits
@@ -1068,6 +1106,7 @@ export default function (pi: ExtensionAPI) {
                 try {
                   const pr = (await withTimeoutMs(adapter.prompt(effectivePrompt), promptTimeoutMs, `acp_spawn(prompt:${sessionId})`)) as AcpPromptResult;
                   markPromptLifecycle(bgHandle, pr);
+                  if (asyncRunId && asyncExecutor) { try { asyncExecutor.completeTrackedSpawn(asyncRunId, { text: pr.text }); } catch { /* best-effort */ } }
                   if (oneShot) {
                     await closeSession(bgHandle, "completed-oneshot", false);
                   } else {
@@ -1078,6 +1117,7 @@ export default function (pi: ExtensionAPI) {
                   const errMsg = bgErr instanceof Error ? bgErr.message : String(bgErr);
                   logger.error(`background prompt failed for ${sessionId}: ${errMsg}`);
                   eventLog.append("operation_error", { label: `acp_spawn(prompt:${sessionId}):error`, error: errMsg });
+                  if (asyncRunId && asyncExecutor) { try { asyncExecutor.failTrackedSpawn(asyncRunId, errMsg); } catch { /* best-effort */ } }
                   if (oneShot) {
                     await closeSession(bgHandle, "error").catch(() => {});
                   } else {
@@ -1095,7 +1135,7 @@ export default function (pi: ExtensionAPI) {
               })();
               pendingAsyncSpawns.set(sessionId, { sessionId, agentName, handle: bgHandle, promise: bgPromise });
 
-              return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, async: true, status: "prompting", warnings: personaWarnings.length > 0 ? personaWarnings : undefined };
+              return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, async: true, status: "prompting", asyncRunId, warnings: personaWarnings.length > 0 ? personaWarnings : undefined };
             }
 
             // ── Sync (legacy) path: async:false → block on prompt ──
@@ -1138,7 +1178,7 @@ export default function (pi: ExtensionAPI) {
           const body = `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""} — prompting in background`;
           return {
             content: [textContent(warningLines ? `${body}\n\n${warningLines}` : body)],
-            details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, status: "prompting", warnings: v.warnings },
+            details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, status: "prompting", asyncRunId: (v as any).asyncRunId, warnings: v.warnings },
           } as AgentToolResult<{ sessionId: string; agent: string; oneShot: boolean; worker: boolean; status: string }>;
         }
         const body = v.text != null ? v.text : `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""}`;
