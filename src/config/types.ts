@@ -203,6 +203,43 @@ export interface AcpWorkerRecord {
 	metadata: Record<string, unknown>;
 }
 
+// --- Child usage sink (P2 — cross-plugin shared schema) ---
+// Canonical contract:
+//   flow/findings/2026-07-17-unify-child-usage/solutions/child-usage-schema-contract.md
+// Both pi-acp-agents and pi-agent-teams MUST write to the SAME path/shape.
+export type ChildUsageSource = "acp" | "teams";
+
+/**
+ * Single JSON object written to ~/.pi/agent/child-usage/<childSessionId>.json
+ * so external apps can read child-agent token/duration data from ONE place.
+ */
+export interface ChildUsageRecord {
+	/** Schema bump on breaking change. Currently 1. */
+	schemaVersion: 1;
+	/** Stable per-spawn session id (matches filename). REQUIRED. */
+	childSessionId: string;
+	/** Leader/pi session that owns this child. null if unknown. */
+	parentSessionId: string | null;
+	/** Which plugin wrote this record. */
+	source: ChildUsageSource;
+	/** Cumulative in+out tokens (ABSOLUTE total, not delta). */
+	tokensTotal: number;
+	/** Count of tool_execution_end observed. */
+	toolCalls: number;
+	/** Count of agent_end / turn boundaries. ACP has no per-turn events → 0. */
+	turns: number;
+	/** endedAt - startedAt (wall clock), ms. 0 while running. */
+	durationMs: number;
+	/** Hedge field — currently always "wallclock". */
+	durationScope: "wallclock";
+	/** ISO 8601 UTC — first spawn/heartbeat time. */
+	startedAt: string;
+	/** ISO 8601 UTC — touched on every write. */
+	updatedAt: string;
+	/** Set on terminal exit/cleanup. null while running. */
+	endedAt: string | null;
+}
+
 // --- Task priority (M3, M5) ---
 
 export type AcpTaskPriority = "urgent" | "high" | "normal" | "low";
