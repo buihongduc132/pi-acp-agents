@@ -32,8 +32,8 @@ vi.mock("../../src/management/session-name-store.js", () => ({
 	SessionNameStore: class {
 		getSessionId = vi.fn();
 		getName = vi.fn();
-		register = vi.fn((n: string, id: string) => ({ sessionName: n, sessionId: id })),
-		release = vi.fn(),
+		register = vi.fn((n: string, id: string) => ({ sessionName: n, sessionId: id }));
+		release = vi.fn();
 	},
 }));
 vi.mock("../../src/management/runtime-paths.js", () => ({
