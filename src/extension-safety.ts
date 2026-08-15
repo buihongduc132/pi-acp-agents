@@ -10,6 +10,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveAcpBaseDir } from "./config/config.js";
 
 // ── R-SP1: Base detection ──────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ export interface BaseDetectionResult {
  * Returns a result object with ok=true/false and context.
  */
 export function detectBaseLoaded(runtimeDirOverride?: string): BaseDetectionResult {
-	const runtimeDir = runtimeDirOverride ?? join(homedir(), ".pi", "acp-agents");
+	const runtimeDir = runtimeDirOverride ?? resolveAcpBaseDir();
 	const configFile = join(runtimeDir, "config.json");
 
 	if (!existsSync(runtimeDir)) {

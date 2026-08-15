@@ -15,6 +15,7 @@ vi.mock("../src/config/config.js", () => ({
     circuitBreakerResetMs: undefined,
   })),
   validateConfig: vi.fn((c: any) => c),
+  resolveAcpBaseDir: vi.fn(() => "/tmp/acp-test-base"),
 }));
 
 vi.mock("../src/core/session-manager.js", () => ({

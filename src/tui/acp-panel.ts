@@ -11,6 +11,8 @@
  * the mock theme used in tests) without depending on the pi-tui runtime.
  */
 
+import { truncateToWidth } from "@mariozechner/pi-tui";
+
 // ── Types ──────────────────────────────────────────────────────────
 
 /** The 5 interactive modes the panel can be in. */
@@ -323,11 +325,11 @@ export function createAcpPanel(deps: AcpPanelDeps): AcpPanel {
 		const gatePart =
 			failedGates > 0 ? t.fg("red", ` gates-failed:${failedGates}`) : "";
 		lines.push(
-			t.bold("ACP") +
+			truncateToWidth(t.bold("ACP") +
 				"  " +
 				cbPart +
 				gatePart +
-				`  entities:${list.length}`,
+				`  entities:${list.length}`, w),
 		);
 
 		// Per-entity rows.
@@ -340,31 +342,30 @@ export function createAcpPanel(deps: AcpPanelDeps): AcpPanel {
 			const tok = formatTokens(e.tokens);
 			const tokPart = tok !== undefined ? ` ${tok}` : "";
 			lines.push(
-				`${marker} ${e.name}${claim}  ${e.status}${tool}${tokPart}`,
+				truncateToWidth(`${marker} ${e.name}${claim}  ${e.status}${tool}${tokPart}`, w),
 			);
 		}
 
 		// Aggregate total row.
 		lines.push(
-			t.dim(
+			truncateToWidth(t.dim(
 				`Total: entities=${list.length} tokens=${totalTokens} pending=${totalPending} complete=${totalComplete}`,
-			),
+			), w),
 		);
 
 		// Hints.
 		lines.push(
-			t.dim("Keys: Enter=session  d=dm  t=tasks  ↑/↓=select  Esc=back"),
+			truncateToWidth(t.dim("Keys: Enter=session  d=dm  t=tasks  ↑/↓=select  Esc=back"), w),
 		);
 		// Guarantee the single-char hints "d" and "t" appear as standalone
 		// tokens even after theme wrapping, so substring checks stay robust.
-		void w;
 		return lines;
 	}
 
-	function renderSession(t: AcpPanelTheme, _w: number): string[] {
+	function renderSession(t: AcpPanelTheme, w: number): string[] {
 		const ent = currentEntity();
 		const lines: string[] = [];
-		lines.push(t.bold("ACP") + "  " + t.dim("session") + "  " + (ent?.name ?? "—"));
+		lines.push(truncateToWidth(t.bold("ACP") + "  " + t.dim("session") + "  " + (ent?.name ?? "—"), w));
 
 		if (!ent) return lines;
 
@@ -374,27 +375,27 @@ export function createAcpPanel(deps: AcpPanelDeps): AcpPanel {
 			const prefix = t.dim(time);
 			switch (entry.kind) {
 				case "tool_start":
-					lines.push(`${prefix} ${t.fg("yellow", "▶")} ${entry.toolName ?? "tool"}`);
+					lines.push(truncateToWidth(`${prefix} ${t.fg("yellow", "▶")} ${entry.toolName ?? "tool"}`, w));
 					break;
 				case "tool_end": {
 					const dur = formatDuration(entry.durationMs);
 					lines.push(
-						`${prefix} ${t.fg("green", "✔")} ${entry.toolName ?? "tool"}` +
-							(dur ? t.dim(` (${dur})`) : ""),
+						truncateToWidth(`${prefix} ${t.fg("green", "✔")} ${entry.toolName ?? "tool"}` +
+							(dur ? t.dim(` (${dur})`) : ""), w),
 					);
 					break;
 				}
 				case "turn": {
 					const tok = formatTokens(entry.tokens);
 					lines.push(
-						`${prefix} ${t.italic("turn")}` +
-							(tok !== undefined ? t.dim(` tokens:${tok}`) : ""),
+						truncateToWidth(`${prefix} ${t.italic("turn")}` +
+							(tok !== undefined ? t.dim(` tokens:${tok}`) : ""), w),
 					);
 					break;
 				}
 				case "text":
 				default:
-					lines.push(`${prefix} ${entry.text ?? ""}`);
+					lines.push(truncateToWidth(`${prefix} ${entry.text ?? ""}`, w));
 					break;
 			}
 		}
@@ -402,26 +403,26 @@ export function createAcpPanel(deps: AcpPanelDeps): AcpPanel {
 		return lines;
 	}
 
-	function renderDm(t: AcpPanelTheme, _w: number): string[] {
+	function renderDm(t: AcpPanelTheme, w: number): string[] {
 		const list = entities();
 		const lines: string[] = [];
-		lines.push(t.bold("ACP") + "  " + t.dim("dm"));
+		lines.push(truncateToWidth(t.bold("ACP") + "  " + t.dim("dm"), w));
 
 		for (let i = 0; i < list.length; i++) {
 			const e = list[i];
 			const marker = i === selectedIndex ? "▶" : " ";
-			lines.push(`${marker} ${e.name}  ${e.id}`);
+			lines.push(truncateToWidth(`${marker} ${e.name}  ${e.id}`, w));
 		}
 
 		// Compose buffer.
-		lines.push(t.dim("compose:") + " " + composeBuffer);
+		lines.push(truncateToWidth(t.dim("compose:") + " " + composeBuffer, w));
 		return lines;
 	}
 
-	function renderTasks(t: AcpPanelTheme, _w: number): string[] {
+	function renderTasks(t: AcpPanelTheme, w: number): string[] {
 		const list = tasks();
 		const lines: string[] = [];
-		lines.push(t.bold("ACP") + "  " + t.dim("tasks"));
+		lines.push(truncateToWidth(t.bold("ACP") + "  " + t.dim("tasks"), w));
 
 		for (const task of list) {
 			const sel = task.id === selectedTaskId ? "▶" : " ";
@@ -437,19 +438,19 @@ export function createAcpPanel(deps: AcpPanelDeps): AcpPanel {
 					? ` ${t.dim(task.qualityGateSummary)}`
 					: "";
 			lines.push(
-				`${sel} ${task.id}  status=${task.status}  owner=${task.ownerId ?? "—"}  blockedBy=[${depsList}]  gate=${gate}${summary}`,
+				truncateToWidth(`${sel} ${task.id}  status=${task.status}  owner=${task.ownerId ?? "—"}  blockedBy=[${depsList}]  gate=${gate}${summary}`, w),
 			);
 		}
 
-		if (list.length === 0) lines.push(t.dim("(no tasks)"));
-		lines.push(t.dim("Keys: r=reassign  u=unassign  Esc=back"));
+		if (list.length === 0) lines.push(truncateToWidth(t.dim("(no tasks)"), w));
+		lines.push(truncateToWidth(t.dim("Keys: r=reassign  u=unassign  Esc=back"), w));
 		return lines;
 	}
 
-	function renderReassign(t: AcpPanelTheme, _w: number): string[] {
+	function renderReassign(t: AcpPanelTheme, w: number): string[] {
 		return [
-			t.bold("ACP") + "  " + t.dim("reassign") + "  task=" + (selectedTaskId ?? "—"),
-			...entities().map((e, i) => `${i === selectedIndex ? "▶" : " "} ${e.name}  ${e.id}`),
+			truncateToWidth(t.bold("ACP") + "  " + t.dim("reassign") + "  task=" + (selectedTaskId ?? "—"), w),
+			...entities().map((e, i) => truncateToWidth(`${i === selectedIndex ? "▶" : " "} ${e.name}  ${e.id}`, w)),
 		];
 	}
 
