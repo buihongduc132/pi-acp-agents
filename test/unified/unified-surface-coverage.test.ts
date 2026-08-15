@@ -20,10 +20,12 @@ vi.mock("../../src/management/governance-store.js", () => ({ GovernanceStore: vi
 vi.mock("../../src/management/worker-store.js", () => ({ WorkerStore: vi.fn() }));
 vi.mock("../../src/management/event-log.js", () => ({ AcpEventLog: vi.fn() }));
 vi.mock("../../src/coordination/worker-dispatcher.js", () => ({ WorkerDispatcher: vi.fn() }));
+const archiveMock = vi.hoisted(() => ({ instance: undefined as any }));
 vi.mock("../../src/management/session-archive-store.js", () => ({
 	SessionArchiveStore: class {
 		get = vi.fn();
 		upsert = vi.fn((s: AcpSessionHandle) => s);
+		constructor() { archiveMock.instance = this; }
 	},
 }));
 vi.mock("../../src/management/session-name-store.js", () => ({
@@ -31,6 +33,7 @@ vi.mock("../../src/management/session-name-store.js", () => ({
 		getSessionId = vi.fn();
 		getName = vi.fn();
 		register = vi.fn((n: string, id: string) => ({ sessionName: n, sessionId: id }));
+		release = vi.fn();
 	},
 }));
 vi.mock("../../src/management/runtime-paths.js", () => ({
@@ -300,6 +303,7 @@ describe("Unified ACP surface — branch coverage", () => {
 		it("reopens archived session when not live", async () => {
 			// Target resolves to archived metadata (not in sessionMgr).
 			m.sm.get.mockReturnValue(undefined);
+			archiveMock.instance.get.mockReturnValue(mkSession("arch-1", "gemini"));
 			m.ad.loadSession.mockResolvedValueOnce(undefined);
 			const r = await exec("acp_msg", { session_id: "arch-1", message: "hi" });
 			expect(m.ad.spawn).toHaveBeenCalled();
@@ -308,6 +312,7 @@ describe("Unified ACP surface — branch coverage", () => {
 		});
 		it("reopen falls back to newSession when loadSession fails", async () => {
 			m.sm.get.mockReturnValue(undefined);
+			archiveMock.instance.get.mockReturnValue(mkSession("arch-1", "gemini"));
 			m.ad.loadSession.mockRejectedValueOnce(new Error("unloadable"));
 			const r = await exec("acp_msg", { session_id: "arch-1", message: "hi" });
 			expect(m.ad.newSession).toHaveBeenCalled();
@@ -315,9 +320,17 @@ describe("Unified ACP surface — branch coverage", () => {
 		});
 		it("reopen spawn failure returns error", async () => {
 			m.sm.get.mockReturnValue(undefined);
+			archiveMock.instance.get.mockReturnValue(mkSession("ghost", "gemini"));
 			m.ad.spawn.mockRejectedValueOnce(new Error("reopen-fail"));
 			const r = await exec("acp_msg", { session_id: "ghost", message: "hi" });
 			expect(r.details.error).toContain("reopen-fail");
+		});
+		it("send to unknown session_id refuses instead of fabricating", async () => {
+			m.sm.get.mockReturnValue(undefined);
+			archiveMock.instance.get.mockReturnValue(undefined);
+			const r = await exec("acp_msg", { session_id: "nonexistent-session-id", message: "hi" });
+			expect(r.details.error).toBe("session_not_found");
+			expect(m.ad.spawn).not.toHaveBeenCalled();
 		});
 	});
 

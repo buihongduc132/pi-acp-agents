@@ -1158,7 +1158,7 @@ export default function (pi: ExtensionAPI) {
             await closeSession(handle, "completed-oneshot", false);
           }
 
-          return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, text: promptText, warnings: personaWarnings.length > 0 ? personaWarnings : undefined };
+          return { sessionId, sessionName: handle.sessionName, agent: agentName, oneShot, worker: isWorker, text: promptText, worktreePath, keepWorktree: params.keepWorktree ?? false, warnings: personaWarnings.length > 0 ? personaWarnings : undefined };
         } catch (err) {
           if (handle) {
             await closeSession(handle, "error");
@@ -1178,13 +1178,13 @@ export default function (pi: ExtensionAPI) {
           const body = `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""} — prompting in background`;
           return {
             content: [textContent(warningLines ? `${body}\n\n${warningLines}` : body)],
-            details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, status: "prompting", asyncRunId: (v as any).asyncRunId, warnings: v.warnings },
+            details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, status: "prompting", asyncRunId: (v as any).asyncRunId, worktreePath: (v as any).worktreePath, keepWorktree: (v as any).keepWorktree, warnings: v.warnings },
           } as AgentToolResult<{ sessionId: string; agent: string; oneShot: boolean; worker: boolean; status: string }>;
         }
         const body = v.text != null ? v.text : `Spawned ${v.agent} session ${v.sessionId}${v.worker ? ` (worker: ${v.sessionName})` : ""}${v.oneShot ? " (one-shot)" : ""}`;
         return {
           content: [textContent(warningLines ? `${body}\n\n${warningLines}` : body)],
-          details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, warnings: v.warnings },
+          details: { sessionId: v.sessionId, sessionName: v.sessionName, agent: v.agent, oneShot: v.oneShot, worker: v.worker, worktreePath: (v as any).worktreePath, keepWorktree: (v as any).keepWorktree, warnings: v.warnings },
         } as AgentToolResult<{ sessionId: string; agent: string; oneShot: boolean; worker: boolean }>;
       }
       const prefix = result.circuitOpen ? "Circuit breaker open — too many failures. Retry later.\n" : "";
@@ -1376,6 +1376,16 @@ export default function (pi: ExtensionAPI) {
         return { content: [textContent(`${p}ACP error: ${reused.error}`)], details: { sessionId, error: reused.error, circuitOpen: reused.circuitOpen } };
       }
 
+      // Explicit-but-unknown session_id: refuse rather than fabricate a session
+      // under a caller-invented id (silent fresh-create here masked typos as success).
+      if (params.session_id && !resolved.metadata && !liveHandle) {
+        refreshWidget(ctx);
+        return {
+          content: [textContent(`Session "${params.session_id}" not found. Omit session_id to start a fresh session.`)],
+          details: { sessionId: params.session_id, error: "session_not_found" },
+        };
+      }
+
       // Archived / disposed / fresh — reopen or create, then prompt.
       const reopened = await safeExecute(async () => {
         const agentName = params.agent ?? resolved.metadata?.agentName ?? liveHandle?.agentName ?? getAgentName(params.agent);
@@ -1559,7 +1569,7 @@ ${lines.join("\n")}` : "No active async runs")],
         const result = executor.interrupt(params.id);
         return {
           content: [textContent(result.success ? `Interrupted run ${params.id}` : `Cannot interrupt: ${result.reason}`)],
-          details: { runId: params.id, result },
+          details: { runId: params.id, result, ...(result.success ? {} : { error: "interrupt_failed" }) },
         };
       }
 
@@ -1572,7 +1582,7 @@ ${lines.join("\n")}` : "No active async runs")],
         const result = executor.resume(params.id, params.message);
         return {
           content: [textContent(result.success ? `Resumed run ${params.id}` : `Cannot resume: ${result.reason}`)],
-          details: { runId: params.id, result },
+          details: { runId: params.id, result, ...(result.success ? {} : { error: "resume_failed" }) },
         };
       }
 
@@ -1629,6 +1639,7 @@ ${lines.join("\n")}` : "No active async runs")],
             await sessionMgr.remove(s.sessionId);
             const adapter = activeAdapters.get(s.sessionId);
             if (adapter) { adapter.dispose(); activeAdapters.delete(s.sessionId); }
+            sessionNameStore.release(s.sessionId);
             removedSessions.push(s.sessionId);
           }
         }
@@ -1811,7 +1822,9 @@ ${lines.join("\n")}` : "No active async runs")],
         }
 
         // Single task
-        const updated = taskStore().update(params.task_id, (t: any) => {
+        let updated: ReturnType<AcpTaskStore["update"]> | undefined;
+        try {
+          updated = taskStore().update(params.task_id, (t: any) => {
           if (params.status) t.status = params.status;
           if (params.assignee !== undefined) t.assignee = params.assignee || null;
           if (params.result) t.result = params.result;
@@ -1825,6 +1838,11 @@ ${lines.join("\n")}` : "No active async runs")],
           }
           t.updatedAt = new Date().toISOString();
         });
+        } catch {
+          // TaskStore.update throws on unknown id — surface as not_found
+          // instead of leaking the throw to the tool wrapper (r10 finding).
+          return { content: [textContent(`Error: task ${params.task_id} not found.`)], details: { error: "not_found" } };
+        }
         if (!updated) {
           return { content: [textContent(`Error: task ${params.task_id} not found.`)], details: { error: "not_found" } };
         }
