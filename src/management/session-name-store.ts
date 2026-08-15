@@ -57,6 +57,15 @@ export class SessionNameStore {
     return record;
   }
 
+  release(sessionId: string): void {
+    const payload = this.read();
+    const before = payload.mappings.length;
+    payload.mappings = payload.mappings.filter((entry) => entry.sessionId !== sessionId);
+    if (payload.mappings.length !== before) {
+      this.write(payload);
+    }
+  }
+
   private get filePath(): string {
     if (this.options?.treatAsRuntimeDir && this.rootDir) {
       return `${this.rootDir}/session-name-registry.json`;

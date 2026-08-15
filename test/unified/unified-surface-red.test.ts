@@ -53,6 +53,9 @@ vi.mock("../../src/management/session-name-store.js", () => ({
 			sessionNameMappings.set(sessionName, sessionId);
 			return { sessionName, sessionId };
 		});
+		release = vi.fn((sessionId: string) => {
+			for (const [k, v] of sessionNameMappings.entries()) if (v === sessionId) sessionNameMappings.delete(k);
+		});
 	},
 }));
 vi.mock("../../src/management/runtime-paths.js", () => ({
