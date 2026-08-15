@@ -14,7 +14,15 @@ import { createNoopLogger } from "../logger.js";
 
 const log = createNoopLogger();
 
-const CONFIG_PATH = join(homedir(), ".pi", "acp-agents", "config.json");
+/**
+ * Resolve the base pi agent directory. Honors PI_CODING_AGENT_DIR when set
+ * (same override pi core uses), so stage-isolated deployments read/write their
+ * own acp config instead of fighting over the shared ~/.pi copy.
+ */
+function piAgentDir(): string {
+	return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi");
+}
+
 
 export const DEFAULT_CONFIG: AcpConfig = {
 	agent_servers: {},
@@ -72,7 +80,7 @@ export const AGENT_PRESETS: Record<string, () => AcpAgentConfig | null> = {
 };
 
 export function resolveConfigPath(): string {
-	return CONFIG_PATH;
+	return join(piAgentDir(), "acp-agents", "config.json");
 }
 
 /**
@@ -262,7 +270,7 @@ function validateAgentAliases(
 
 /** Load config from disk, falling back to defaults. Auto-migrates old `agents` key. */
 export function loadConfig(configPath?: string): AcpConfig {
-	const path = configPath ?? CONFIG_PATH;
+	const path = configPath ?? resolveConfigPath();
 	if (!existsSync(path)) {
 		return structuredClone(DEFAULT_CONFIG);
 	}
@@ -288,7 +296,7 @@ export function loadConfig(configPath?: string): AcpConfig {
 
 /** Save config to disk at the given path (or default path) */
 export function saveConfig(config: AcpConfig, configPath?: string): void {
-	const path = configPath ?? CONFIG_PATH;
+	const path = configPath ?? resolveConfigPath();
 	const dir = dirname(path);
 	try {
 		if (!existsSync(dir)) {

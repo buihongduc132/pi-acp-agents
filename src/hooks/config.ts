@@ -8,6 +8,7 @@
  * warn-and-fallback behavior (TDD: tests are source of truth in GREEN).
  */
 import { readFileSync, existsSync } from "node:fs";
+import { createNoopLogger } from "../logger.js";
 
 import {
 	DEFAULT_HOOK_CONFIG,
@@ -70,9 +71,18 @@ function cloneConfig(cfg: HookConfig): HookConfig {
 	};
 }
 
+const log = createNoopLogger();
+
 function warn(msg: string): void {
 	// eslint-disable-next-line no-console
 	console.warn(`[acp-hooks/config] ${msg}`);
+}
+
+function debug(msg: string): void {
+	// Missing config files are an expected, healthy state — not worth warning
+	// about on every startup. Route to debug (silent unless debug logging is
+	// wired up).
+	log.debug?.(msg);
 }
 
 /**
@@ -268,7 +278,7 @@ export function loadHookConfig(configPath?: string): HookConfig {
 	const path = configPath ?? defaultConfigPath();
 
 	if (!existsSync(path)) {
-		warn(`config file not found at ${path} — using defaults`);
+		debug(`config file not found at ${path} — using defaults`);
 		return getDefaultConfig();
 	}
 
