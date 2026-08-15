@@ -1,6 +1,7 @@
 import { safeMkdir } from "./safe-mkdir.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveAcpBaseDir } from "../config/config.js";
 
 export interface AcpRuntimePaths {
   rootDir: string;
@@ -18,7 +19,7 @@ export interface AcpRuntimePaths {
 }
 
 export function getRuntimePaths(rootDir?: string, sessionId?: string): AcpRuntimePaths {
-  const base = rootDir ?? join(homedir(), ".pi", "acp-agents", "runtime");
+  const base = rootDir ?? join(resolveAcpBaseDir(), "runtime");
   const sessionBase = sessionId ? join(base, sessionId) : base;
   return {
     rootDir: base,

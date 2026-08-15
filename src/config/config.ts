@@ -20,7 +20,15 @@ const log = createNoopLogger();
  * own acp config instead of fighting over the shared ~/.pi copy.
  */
 function piAgentDir(): string {
-	return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi");
+	const override = process.env.PI_CODING_AGENT_DIR;
+	if (override && override.trim() !== "") {
+		// Mirror pi core semantics: expand a leading ~ to the real home dir.
+		if (override === "~" || override.startsWith("~/")) {
+			return join(homedir(), override.slice(1));
+		}
+		return override;
+	}
+	return join(homedir(), ".pi");
 }
 
 
@@ -81,6 +89,13 @@ export const AGENT_PRESETS: Record<string, () => AcpAgentConfig | null> = {
 
 export function resolveConfigPath(): string {
 	return join(piAgentDir(), "acp-agents", "config.json");
+}
+
+/** Shared base dir for ALL acp-agents state (config + runtime). Honors
+ * PI_CODING_AGENT_DIR exactly like resolveConfigPath so override mode keeps
+ * config, runtime data, and detection consistent. */
+export function resolveAcpBaseDir(): string {
+	return join(piAgentDir(), "acp-agents");
 }
 
 /**

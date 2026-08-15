@@ -31,6 +31,7 @@ vi.mock("../src/config/config.js", () => ({
   })),
   validateConfig: vi.fn((c: any) => c),
   resolveConfigPath: vi.fn(() => "/tmp/test-config.json"),
+  resolveAcpBaseDir: vi.fn(() => "/tmp/acp-test-base"),
 }));
 
 vi.mock("../src/core/session-manager.js", () => ({
