@@ -1822,7 +1822,9 @@ ${lines.join("\n")}` : "No active async runs")],
         }
 
         // Single task
-        const updated = taskStore().update(params.task_id, (t: any) => {
+        let updated: ReturnType<AcpTaskStore["update"]> | undefined;
+        try {
+          updated = taskStore().update(params.task_id, (t: any) => {
           if (params.status) t.status = params.status;
           if (params.assignee !== undefined) t.assignee = params.assignee || null;
           if (params.result) t.result = params.result;
@@ -1836,6 +1838,11 @@ ${lines.join("\n")}` : "No active async runs")],
           }
           t.updatedAt = new Date().toISOString();
         });
+        } catch {
+          // TaskStore.update throws on unknown id — surface as not_found
+          // instead of leaking the throw to the tool wrapper (r10 finding).
+          return { content: [textContent(`Error: task ${params.task_id} not found.`)], details: { error: "not_found" } };
+        }
         if (!updated) {
           return { content: [textContent(`Error: task ${params.task_id} not found.`)], details: { error: "not_found" } };
         }
