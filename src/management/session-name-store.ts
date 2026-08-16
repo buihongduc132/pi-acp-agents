@@ -46,11 +46,14 @@ export class SessionNameStore {
       throw new Error(`Session name "${normalizedName}" is already assigned to session "${existingByName.sessionId}".`);
     }
     const existingBySession = payload.mappings.find((entry) => entry.sessionId === sessionId);
-    if (existingBySession && existingBySession.sessionName !== normalizedName) {
-      throw new Error(`Session "${sessionId}" is already assigned friendly name "${existingBySession.sessionName}".`);
+    // gh#50: If sessionId already has a mapping, prefer it (idempotent reopen).
+    // The reopen path may call register() with a suffixed name from archive
+    // metadata while the registry holds the plain name — don't throw, keep existing.
+    if (existingBySession) {
+      return existingBySession;
     }
-    const record = existingByName ?? existingBySession ?? { sessionName: normalizedName, sessionId };
-    if (!existingByName && !existingBySession) {
+    const record = existingByName ?? { sessionName: normalizedName, sessionId };
+    if (!existingByName) {
       payload.mappings.push(record);
       this.write(payload);
     }
