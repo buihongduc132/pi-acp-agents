@@ -17,7 +17,7 @@ importers:
     devDependencies:
       '@mariozechner/pi-coding-agent':
         specifier: ^0.73.0
-        version: 0.73.1(ws@8.21.0)(zod@4.4.3)
+        version: 0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3)
       '@mariozechner/pi-tui':
         specifier: ^0.73.0
         version: 0.73.1
@@ -41,7 +41,7 @@ importers:
     dependencies:
       '@buihongduc132/pi-acp-agents':
         specifier: ^0.5.0
-        version: 0.5.0(@mariozechner/pi-coding-agent@0.73.1(ws@8.21.0)(zod@4.4.3))(typebox@1.2.2)(zod@4.4.3)
+        version: 0.5.0(@mariozechner/pi-coding-agent@0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3))(typebox@1.2.2)(zod@4.4.3)
       pi-acp-types:
         specifier: ^0.1.0
         version: 0.1.0
@@ -51,7 +51,7 @@ importers:
     devDependencies:
       '@mariozechner/pi-coding-agent':
         specifier: ^0.73.0
-        version: 0.73.1(ws@8.21.0)(zod@4.4.3)
+        version: 0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3)
       '@mariozechner/pi-tui':
         specifier: ^0.73.0
         version: 0.73.1
@@ -868,8 +868,8 @@ packages:
     resolution: {integrity: sha512-Hs59xBNfUIunMFgWAbGX5cq6893IbWg4KnrjbYwX3tx0ztorVgTDA6B2sxf8ejHJ4wz8BqGUMYlnzNBer5NvGg==}
     engines: {node: '>= 4'}
 
-  ip-address@10.2.0:
-    resolution: {integrity: sha512-/+S6j4E9AHvW9SWMSEY9Xfy66O5PWvVEJ08O0y5JGyEKQpojb0K0GKpz/v5HJ/G0vi3D2sjGK78119oXZeE0qA==}
+  ip-address@10.7.2:
+    resolution: {integrity: sha512-7H/2gFSIitxc0hG3nOI1glS8QLo/EHBFFLk8vEUjXY/xu0AdL8jZ9U1IzO2PUm0d2D/ofQcAifb0g6OBkt8U7w==}
     engines: {node: '>= 12'}
 
   is-fullwidth-code-point@3.0.0:
@@ -1672,12 +1672,12 @@ snapshots:
 
   '@borewit/text-codec@0.2.2': {}
 
-  '@buihongduc132/pi-acp-agents@0.5.0(@mariozechner/pi-coding-agent@0.73.1(ws@8.21.0)(zod@4.4.3))(typebox@1.2.2)(zod@4.4.3)':
+  '@buihongduc132/pi-acp-agents@0.5.0(@mariozechner/pi-coding-agent@0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3))(typebox@1.2.2)(zod@4.4.3)':
     dependencies:
       '@agentclientprotocol/sdk': 0.21.1(zod@4.4.3)
       pi-acp-types: 0.1.0
     optionalDependencies:
-      '@mariozechner/pi-coding-agent': 0.73.1(ws@8.21.0)(zod@4.4.3)
+      '@mariozechner/pi-coding-agent': 0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3)
       typebox: 1.2.2
     transitivePeerDependencies:
       - zod
@@ -1698,9 +1698,9 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@google/genai@1.52.0':
+  '@google/genai@1.52.0(supports-color@7.2.0)':
     dependencies:
-      google-auth-library: 10.7.0
+      google-auth-library: 10.7.0(supports-color@7.2.0)
       p-retry: 4.6.2
       protobufjs: 7.6.2
       ws: 8.21.0
@@ -1762,9 +1762,9 @@ snapshots:
       '@mariozechner/clipboard-win32-x64-msvc': 0.3.9
     optional: true
 
-  '@mariozechner/pi-agent-core@0.73.1(ws@8.21.0)(zod@4.4.3)':
+  '@mariozechner/pi-agent-core@0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3)':
     dependencies:
-      '@mariozechner/pi-ai': 0.73.1(ws@8.21.0)(zod@4.4.3)
+      '@mariozechner/pi-ai': 0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3)
       typebox: 1.2.2
     transitivePeerDependencies:
       - '@modelcontextprotocol/sdk'
@@ -1774,16 +1774,16 @@ snapshots:
       - ws
       - zod
 
-  '@mariozechner/pi-ai@0.73.1(ws@8.21.0)(zod@4.4.3)':
+  '@mariozechner/pi-ai@0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3)':
     dependencies:
       '@anthropic-ai/sdk': 0.91.1(zod@4.4.3)
       '@aws-sdk/client-bedrock-runtime': 3.1063.0
-      '@google/genai': 1.52.0
+      '@google/genai': 1.52.0(supports-color@7.2.0)
       '@mistralai/mistralai': 2.2.5
       chalk: 5.6.2
       openai: 6.26.0(ws@8.21.0)(zod@4.4.3)
       partial-json: 0.1.7
-      proxy-agent: 6.5.0
+      proxy-agent: 6.5.0(supports-color@7.2.0)
       typebox: 1.2.2
       undici: 7.27.2
       zod-to-json-schema: 3.25.2(zod@4.4.3)
@@ -1795,17 +1795,17 @@ snapshots:
       - ws
       - zod
 
-  '@mariozechner/pi-coding-agent@0.73.1(ws@8.21.0)(zod@4.4.3)':
+  '@mariozechner/pi-coding-agent@0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3)':
     dependencies:
-      '@mariozechner/pi-agent-core': 0.73.1(ws@8.21.0)(zod@4.4.3)
-      '@mariozechner/pi-ai': 0.73.1(ws@8.21.0)(zod@4.4.3)
+      '@mariozechner/pi-agent-core': 0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3)
+      '@mariozechner/pi-ai': 0.73.1(supports-color@7.2.0)(ws@8.21.0)(zod@4.4.3)
       '@mariozechner/pi-tui': 0.73.1
       '@silvia-odwyer/photon-node': 0.3.4
       chalk: 5.6.2
       cli-highlight: 2.1.11
       diff: 8.0.4
-      extract-zip: 2.0.1
-      file-type: 21.3.4
+      extract-zip: 2.0.1(supports-color@7.2.0)
+      file-type: 21.3.4(supports-color@7.2.0)
       glob: 13.0.6
       hosted-git-info: 9.0.3
       ignore: 7.0.5
@@ -1983,9 +1983,9 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@tokenizer/inflate@0.4.1':
+  '@tokenizer/inflate@0.4.1(supports-color@7.2.0)':
     dependencies:
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       token-types: 6.1.2
     transitivePeerDependencies:
       - supports-color
@@ -2154,9 +2154,11 @@ snapshots:
 
   data-uri-to-buffer@6.0.2: {}
 
-  debug@4.4.3:
+  debug@4.4.3(supports-color@7.2.0):
     dependencies:
       ms: 2.1.3
+    optionalDependencies:
+      supports-color: 7.2.0
 
   degenerator@5.0.1:
     dependencies:
@@ -2204,9 +2206,9 @@ snapshots:
 
   extend@3.0.2: {}
 
-  extract-zip@2.0.1:
+  extract-zip@2.0.1(supports-color@7.2.0):
     dependencies:
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       get-stream: 5.2.0
       yauzl: 2.10.0
     optionalDependencies:
@@ -2239,9 +2241,9 @@ snapshots:
       node-domexception: 1.0.0
       web-streams-polyfill: 3.3.3
 
-  file-type@21.3.4:
+  file-type@21.3.4(supports-color@7.2.0):
     dependencies:
-      '@tokenizer/inflate': 0.4.1
+      '@tokenizer/inflate': 0.4.1(supports-color@7.2.0)
       strtok3: 10.3.5
       token-types: 6.1.2
       uint8array-extras: 1.5.0
@@ -2255,17 +2257,17 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  gaxios@7.1.5:
+  gaxios@7.1.5(supports-color@7.2.0):
     dependencies:
       extend: 3.0.2
-      https-proxy-agent: 7.0.6
+      https-proxy-agent: 7.0.6(supports-color@7.2.0)
       node-fetch: 3.3.2
     transitivePeerDependencies:
       - supports-color
 
-  gcp-metadata@8.1.2:
+  gcp-metadata@8.1.2(supports-color@7.2.0):
     dependencies:
-      gaxios: 7.1.5
+      gaxios: 7.1.5(supports-color@7.2.0)
       google-logging-utils: 1.1.3
       json-bigint: 1.0.0
     transitivePeerDependencies:
@@ -2279,11 +2281,11 @@ snapshots:
     dependencies:
       pump: 3.0.4
 
-  get-uri@6.0.5:
+  get-uri@6.0.5(supports-color@7.2.0):
     dependencies:
       basic-ftp: 5.3.1
       data-uri-to-buffer: 6.0.2
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -2293,12 +2295,12 @@ snapshots:
       minipass: 7.1.3
       path-scurry: 2.0.2
 
-  google-auth-library@10.7.0:
+  google-auth-library@10.7.0(supports-color@7.2.0):
     dependencies:
       base64-js: 1.5.1
       ecdsa-sig-formatter: 1.0.11
-      gaxios: 7.1.5
-      gcp-metadata: 8.1.2
+      gaxios: 7.1.5(supports-color@7.2.0)
+      gcp-metadata: 8.1.2(supports-color@7.2.0)
       google-logging-utils: 1.1.3
       jws: 4.0.1
     transitivePeerDependencies:
@@ -2318,17 +2320,17 @@ snapshots:
 
   html-escaper@2.0.2: {}
 
-  http-proxy-agent@7.0.2:
+  http-proxy-agent@7.0.2(supports-color@7.2.0):
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
-  https-proxy-agent@7.0.6:
+  https-proxy-agent@7.0.6(supports-color@7.2.0):
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -2336,7 +2338,7 @@ snapshots:
 
   ignore@7.0.5: {}
 
-  ip-address@10.2.0: {}
+  ip-address@10.7.2: {}
 
   is-fullwidth-code-point@3.0.0: {}
 
@@ -2501,16 +2503,16 @@ snapshots:
       '@types/retry': 0.12.0
       retry: 0.13.1
 
-  pac-proxy-agent@7.2.0:
+  pac-proxy-agent@7.2.0(supports-color@7.2.0):
     dependencies:
       '@tootallnate/quickjs-emscripten': 0.23.0
       agent-base: 7.1.4
-      debug: 4.4.3
-      get-uri: 6.0.5
-      http-proxy-agent: 7.0.2
-      https-proxy-agent: 7.0.6
+      debug: 4.4.3(supports-color@7.2.0)
+      get-uri: 6.0.5(supports-color@7.2.0)
+      http-proxy-agent: 7.0.2(supports-color@7.2.0)
+      https-proxy-agent: 7.0.6(supports-color@7.2.0)
       pac-resolver: 7.0.1
-      socks-proxy-agent: 8.0.5
+      socks-proxy-agent: 8.0.5(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -2573,16 +2575,16 @@ snapshots:
       '@types/node': 22.19.20
       long: 5.3.2
 
-  proxy-agent@6.5.0:
+  proxy-agent@6.5.0(supports-color@7.2.0):
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
-      http-proxy-agent: 7.0.2
-      https-proxy-agent: 7.0.6
+      debug: 4.4.3(supports-color@7.2.0)
+      http-proxy-agent: 7.0.2(supports-color@7.2.0)
+      https-proxy-agent: 7.0.6(supports-color@7.2.0)
       lru-cache: 7.18.3
-      pac-proxy-agent: 7.2.0
+      pac-proxy-agent: 7.2.0(supports-color@7.2.0)
       proxy-from-env: 1.1.0
-      socks-proxy-agent: 8.0.5
+      socks-proxy-agent: 8.0.5(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -2630,17 +2632,17 @@ snapshots:
 
   smart-buffer@4.2.0: {}
 
-  socks-proxy-agent@8.0.5:
+  socks-proxy-agent@8.0.5(supports-color@7.2.0):
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@7.2.0)
       socks: 2.8.9
     transitivePeerDependencies:
       - supports-color
 
   socks@2.8.9:
     dependencies:
-      ip-address: 10.2.0
+      ip-address: 10.7.2
       smart-buffer: 4.2.0
 
   source-map-js@1.2.1: {}
